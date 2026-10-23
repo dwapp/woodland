@@ -6,7 +6,10 @@
 #include <wlr/backend.h>
 #include <wlr/render/allocator.h>
 #include <wlr/render/wlr_renderer.h>
+#include <wlr/types/wlr_cursor.h>
+#include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_scene.h>
+#include <wlr/types/wlr_xcursor_manager.h>
 
 struct woodland_server {
     struct wl_display *display;
@@ -17,6 +20,11 @@ struct woodland_server {
     struct wlr_renderer *renderer;
     struct wlr_allocator *allocator;
     struct wlr_scene *scene;
+    struct wl_list outputs;               // struct woodland_output.link 链表头
+    struct wlr_output_layout *output_layout;
+    struct wlr_scene_output_layout *scene_layout;
+    struct wlr_cursor *cursor;
+    struct wlr_xcursor_manager *xcursor_manager;
 };
 
 #endif
