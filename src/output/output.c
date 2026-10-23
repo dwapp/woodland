@@ -16,6 +16,8 @@ bool woodland_output_init(struct woodland_server *server) {
     server->scene_layout =
         wlr_scene_attach_output_layout(server->scene, server->output_layout);
     if (!server->scene_layout) {
+        wlr_output_layout_destroy(server->output_layout);
+        server->output_layout = NULL;
         return false;
     }
 
