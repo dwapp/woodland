@@ -4,7 +4,7 @@ set -eu
 BIN="${1:-./build/src/woodland}"
 [ -x "$BIN" ] || { echo "binary not found: $BIN" >&2; exit 125; }
 
-WLR_BACKENDS=headless WLR_RENDERER=pixman "$BIN" &
+WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_HEADLESS_OUTPUTS=1 "$BIN" &
 pid=$!
 
 # 等待事件循环就绪

@@ -238,9 +238,12 @@ extern const struct woodland_layout tiling_layout;
 - **验证**：`meson setup build && meson compile -C build` 通过；`woodland` 在 headless 下启动/退出无崩溃
 
 ### M1：输出与渲染循环
-- 输出热插拔、`wlr_output_layout`、渲染循环（`wlr_scene_output_layout`）
-- 光标（`wlr_cursor` + `cursor-shape`）
-- **验证**：DRM/headless 下输出出现，光标显示，空 scene 稳定渲染
+- [x] 输出热插拔（`wlr_output_layout` + new_output 去重 + init_render + add_auto + scene_output）
+- [x] 渲染循环（`wlr_scene_output_layout` + frame 事件 + commit + send_frame_done）
+- [x] 光标（`wlr_cursor` + `xcursor_manager`（XCURSOR_THEME/SIZE，默认 24）+ cursor-shape 协议）
+- **验证**：`meson test -C build` 4/4 PASS（log/output/cursor/smoke-headless）；ASan 单测无泄漏（smoke 在 ASan 下受 wlroots/ASan 信号处理 flaky 影响，M0 已裁决不纳入 CI）
+
+实现说明：`src/output/output.c`（输出热插拔 + frame 渲染循环）、`src/cursor/cursor.c`（光标加载与设置）、`src/server/server.c`（生命周期接线 + cursor-shape manager）。结构体扩展见 `include/woodland.h`。
 
 ### M2：基础窗口管理（xdg-shell + xwayland）
 - `shell/` + `view`：xdg-toplevel/popup 视图封装、xwayland 视图

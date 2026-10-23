@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: MIT
 #include <signal.h>
 
+#include <wlr/types/wlr_cursor_shape_v1.h>
 #include <wlr/util/log.h>
 
+#include "cursor.h"
+#include "output.h"
 #include "server.h"
 #include "woodland.h"
 
@@ -11,6 +14,14 @@ static int handle_terminate(int signal, void *data) {
     wlr_log(WLR_INFO, "received signal %d, terminating", signal);
     wl_display_terminate(display);
     return 0;
+}
+
+static void handle_request_set_shape(struct wl_listener *listener, void *data) {
+    struct woodland_server *server =
+        wl_container_of(listener, server, request_set_shape);
+    struct wlr_cursor_shape_manager_v1_request_set_shape_event *event = data;
+    const char *name = wlr_cursor_shape_v1_name(event->shape);
+    woodland_cursor_set(server, name);
 }
 
 bool woodland_server_init(struct woodland_server *server) {
@@ -62,6 +73,27 @@ bool woodland_server_init(struct woodland_server *server) {
         return false;
     }
 
+    if (!woodland_output_init(server)) {
+        wlr_log(WLR_ERROR, "failed to init output");
+        return false;
+    }
+
+    if (!woodland_cursor_init(server)) {
+        wlr_log(WLR_ERROR, "failed to init cursor");
+        return false;
+    }
+
+    server->cursor_shape_manager =
+        wlr_cursor_shape_manager_v1_create(server->display, 1);
+    if (!server->cursor_shape_manager) {
+        wlr_log(WLR_ERROR, "failed to create cursor-shape manager");
+        return false;
+    }
+
+    server->request_set_shape.notify = handle_request_set_shape;
+    wl_signal_add(&server->cursor_shape_manager->events.request_set_shape,
+                  &server->request_set_shape);
+
     return true;
 }
 
@@ -92,6 +124,11 @@ void woodland_server_finish(struct woodland_server *server) {
         wl_event_source_remove(server->sigterm_source);
         server->sigterm_source = NULL;
     }
+    if (server->request_set_shape.link.prev) {
+        wl_list_remove(&server->request_set_shape.link);
+    }
+    woodland_cursor_finish(server);
+    woodland_output_finish(server);
     if (server->scene) {
         wlr_scene_node_destroy(&server->scene->tree.node);
         server->scene = NULL;
