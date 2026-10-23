@@ -32,5 +32,19 @@ int main(void) {
     woodland_cursor_set(&server, "nonexistent-shape-xyz");
 
     woodland_cursor_finish(&server);
+
+    /* 逆序释放 wlr 资源（ASan 下验证无泄漏） */
+    wlr_scene_node_destroy(&server.scene->tree.node);
+    server.scene = NULL;
+    wlr_output_layout_destroy(server.output_layout);
+    server.output_layout = NULL;
+    wlr_allocator_destroy(server.allocator);
+    server.allocator = NULL;
+    wlr_renderer_destroy(server.renderer);
+    server.renderer = NULL;
+    wlr_backend_destroy(server.backend);
+    server.backend = NULL;
+    wl_display_destroy(server.display);
+    server.display = NULL;
     return 0;
 }
