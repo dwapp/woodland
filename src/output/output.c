@@ -21,11 +21,19 @@ static void handle_frame(struct wl_listener *listener, void *data) {
     (void)data;
 }
 
+static void handle_request_state(struct wl_listener *listener, void *data) {
+    struct woodland_output *output =
+        wl_container_of(listener, output, request_state);
+    const struct wlr_output_event_request_state *event = data;
+    wlr_output_commit_state(output->wlr_output, event->state);
+}
+
 static void handle_destroy(struct wl_listener *listener, void *data) {
     struct woodland_output *output = wl_container_of(listener, output, destroy);
     wlr_scene_output_destroy(output->scene_output);
     wl_list_remove(&output->destroy.link);
     wl_list_remove(&output->frame.link);
+    wl_list_remove(&output->request_state.link);
     wl_list_remove(&output->link);
     free(output);
     (void)data;
@@ -61,6 +69,8 @@ static void handle_new_output(struct wl_listener *listener, void *data) {
 
     output->frame.notify = handle_frame;
     wl_signal_add(&wlr_output->events.frame, &output->frame);
+    output->request_state.notify = handle_request_state;
+    wl_signal_add(&wlr_output->events.request_state, &output->request_state);
     output->destroy.notify = handle_destroy;
     wl_signal_add(&wlr_output->events.destroy, &output->destroy);
 
@@ -69,6 +79,7 @@ static void handle_new_output(struct wl_listener *listener, void *data) {
     if (!layout_output) {
         wlr_log(WLR_ERROR, "failed to add output to layout");
         wl_list_remove(&output->frame.link);
+        wl_list_remove(&output->request_state.link);
         wl_list_remove(&output->destroy.link);
         free(output);
         return;
@@ -79,6 +90,7 @@ static void handle_new_output(struct wl_listener *listener, void *data) {
     if (!scene_output) {
         wlr_log(WLR_ERROR, "failed to create scene output");
         wl_list_remove(&output->frame.link);
+        wl_list_remove(&output->request_state.link);
         wl_list_remove(&output->destroy.link);
         wlr_output_layout_remove(server->output_layout, wlr_output);
         free(output);
@@ -140,6 +152,7 @@ void woodland_output_finish(struct woodland_server *server) {
     struct woodland_output *output, *tmp;
     wl_list_for_each_safe(output, tmp, &server->outputs, link) {
         wl_list_remove(&output->frame.link);
+        wl_list_remove(&output->request_state.link);
         wl_list_remove(&output->destroy.link);
         wl_list_remove(&output->link);
         free(output);

@@ -1,12 +1,19 @@
 // SPDX-License-Identifier: MIT
 #include <signal.h>
+#include <stdlib.h>
+#include <unistd.h>
 
+#include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_cursor_shape_v1.h>
+#include <wlr/types/wlr_data_device.h>
+#include <wlr/types/wlr_subcompositor.h>
 #include <wlr/util/log.h>
 
 #include "cursor.h"
 #include "output.h"
+#include "seat.h"
 #include "server.h"
+#include "view.h"
 #include "woodland.h"
 
 static int handle_terminate(int signal, void *data) {
@@ -61,11 +68,20 @@ bool woodland_server_init(struct woodland_server *server) {
         return false;
     }
 
+    wlr_renderer_init_wl_display(server->renderer, server->display);
+
     server->allocator = wlr_allocator_autocreate(server->backend, server->renderer);
     if (!server->allocator) {
         wlr_log(WLR_ERROR, "failed to create allocator");
         return false;
     }
+
+    /* 基础协议：compositor 是客户端分配 surface 的必需接口；
+     * subcompositor 处理 subsurface；data-device-manager 处理剪贴板。
+     * 三者均挂在 display 上，随 display 销毁自动释放。 */
+    wlr_compositor_create(server->display, 5, server->renderer);
+    wlr_subcompositor_create(server->display);
+    wlr_data_device_manager_create(server->display);
 
     server->scene = wlr_scene_create();
     if (!server->scene) {
@@ -83,6 +99,18 @@ bool woodland_server_init(struct woodland_server *server) {
         return false;
     }
 
+    if (!woodland_seat_init(server)) {
+        wlr_log(WLR_ERROR, "failed to init seat");
+        return false;
+    }
+
+    if (!woodland_shell_init(server)) {
+        wlr_log(WLR_ERROR, "failed to init shell");
+        return false;
+    }
+
+    woodland_cursor_init_events(server);
+
     server->cursor_shape_manager =
         wlr_cursor_shape_manager_v1_create(server->display, 1);
     if (!server->cursor_shape_manager) {
@@ -98,7 +126,8 @@ bool woodland_server_init(struct woodland_server *server) {
 }
 
 bool woodland_server_start(struct woodland_server *server) {
-    if (wl_display_add_socket_auto(server->display) == NULL) {
+    const char *socket = wl_display_add_socket_auto(server->display);
+    if (!socket) {
         wlr_log(WLR_ERROR, "failed to add wayland socket");
         return false;
     }
@@ -108,11 +137,23 @@ bool woodland_server_start(struct woodland_server *server) {
         return false;
     }
 
+    setenv("WAYLAND_DISPLAY", socket, true);
+    if (server->startup_cmd) {
+        pid_t pid = fork();
+        if (pid < 0) {
+            wlr_log(WLR_ERROR, "failed to fork for startup command");
+            return false;
+        } else if (pid == 0) {
+            execl("/bin/sh", "/bin/sh", "-c", server->startup_cmd, (void *)NULL);
+        }
+    }
+
     return true;
 }
 
 void woodland_server_run(struct woodland_server *server) {
     wl_display_run(server->display);
+    wl_display_destroy_clients(server->display);
 }
 
 void woodland_server_finish(struct woodland_server *server) {
@@ -127,6 +168,9 @@ void woodland_server_finish(struct woodland_server *server) {
     if (server->request_set_shape.link.prev) {
         wl_list_remove(&server->request_set_shape.link);
     }
+    woodland_cursor_finish_events(server);
+    woodland_shell_finish(server);
+    woodland_seat_finish(server);
     woodland_cursor_finish(server);
     woodland_output_finish(server);
     if (server->scene) {

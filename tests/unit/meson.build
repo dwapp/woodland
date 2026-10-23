@@ -15,3 +15,9 @@ test_cursor = executable('test_cursor', 'test_cursor.c',
   include_directories: woodland_inc,
   link_with: cursor_lib)
 test('cursor', test_cursor)
+
+test_seat = executable('test_seat', 'test_seat.c',
+  dependencies: [wlroots, wayland_server],
+  include_directories: woodland_inc,
+  link_with: [cursor_lib, output_lib, shell_lib, seat_lib])
+test('seat', test_seat)
