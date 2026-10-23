@@ -7,6 +7,7 @@
 #include <wlr/render/allocator.h>
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/types/wlr_cursor.h>
+#include <wlr/types/wlr_cursor_shape_v1.h>
 #include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_scene.h>
 #include <wlr/types/wlr_xcursor_manager.h>
@@ -26,6 +27,8 @@ struct woodland_server {
     struct wlr_scene_output_layout *scene_layout;
     struct wlr_cursor *cursor;
     struct wlr_xcursor_manager *xcursor_manager;
+    struct wlr_cursor_shape_manager_v1 *cursor_shape_manager;
+    struct wl_listener request_set_shape;
 };
 
 #endif

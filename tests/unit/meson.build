@@ -9,3 +9,9 @@ test_output = executable('test_output', 'test_output.c',
   include_directories: woodland_inc,
   link_with: output_lib)
 test('output', test_output)
+
+test_cursor = executable('test_cursor', 'test_cursor.c',
+  dependencies: [wlroots, wayland_server],
+  include_directories: woodland_inc,
+  link_with: cursor_lib)
+test('cursor', test_cursor)
