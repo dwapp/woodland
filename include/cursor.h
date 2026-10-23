@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: MIT
+#ifndef WOODLAND_CURSOR_H
+#define WOODLAND_CURSOR_H
+
+#include <stdbool.h>
+
+struct woodland_server;
+
+bool woodland_cursor_init(struct woodland_server *server);
+void woodland_cursor_finish(struct woodland_server *server);
+void woodland_cursor_set(struct woodland_server *server, const char *name);
+
+#endif

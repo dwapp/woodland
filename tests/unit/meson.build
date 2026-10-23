@@ -3,3 +3,15 @@ test_log = executable('test_log', 'test_log.c',
   include_directories: woodland_inc,
   link_with: util_lib)
 test('log', test_log)
+
+test_output = executable('test_output', 'test_output.c',
+  dependencies: [wlroots, wayland_server],
+  include_directories: woodland_inc,
+  link_with: output_lib)
+test('output', test_output)
+
+test_cursor = executable('test_cursor', 'test_cursor.c',
+  dependencies: [wlroots, wayland_server],
+  include_directories: woodland_inc,
+  link_with: cursor_lib)
+test('cursor', test_cursor)
