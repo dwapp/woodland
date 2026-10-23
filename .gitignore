@@ -1,0 +1,7 @@
+/build/
+/build-asan/
+/.worktrees/
+/subprojects/packagecache/
+/subprojects/wlroots/
+/subprojects/scenefx/
+/.cache/
