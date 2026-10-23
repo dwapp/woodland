@@ -3,6 +3,8 @@
 
 #include <wlr/util/log.h>
 
+#include "cursor.h"
+#include "output.h"
 #include "server.h"
 #include "woodland.h"
 
@@ -62,6 +64,16 @@ bool woodland_server_init(struct woodland_server *server) {
         return false;
     }
 
+    if (!woodland_output_init(server)) {
+        wlr_log(WLR_ERROR, "failed to init output");
+        return false;
+    }
+
+    if (!woodland_cursor_init(server)) {
+        wlr_log(WLR_ERROR, "failed to init cursor");
+        return false;
+    }
+
     return true;
 }
 
@@ -92,6 +104,8 @@ void woodland_server_finish(struct woodland_server *server) {
         wl_event_source_remove(server->sigterm_source);
         server->sigterm_source = NULL;
     }
+    woodland_cursor_finish(server);
+    woodland_output_finish(server);
     if (server->scene) {
         wlr_scene_node_destroy(&server->scene->tree.node);
         server->scene = NULL;

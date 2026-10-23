@@ -21,6 +21,7 @@ struct woodland_server {
     struct wlr_allocator *allocator;
     struct wlr_scene *scene;
     struct wl_list outputs;               // struct woodland_output.link 链表头
+    struct wl_listener new_output;        // backend->events.new_output 监听器
     struct wlr_output_layout *output_layout;
     struct wlr_scene_output_layout *scene_layout;
     struct wlr_cursor *cursor;
