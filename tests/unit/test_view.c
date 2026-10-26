@@ -47,6 +47,7 @@ int main(void) {
     struct woodland_output *wo =
         wl_container_of(server.outputs.next, wo, link);
     wo->usable_area = (struct wlr_box){ .x = 10, .y = 10, .width = 780, .height = 580 };
+    wo->usable_area_valid = true;
     struct wlr_box max_geo2 = woodland_view_maximized_geometry(&server);
     assert(max_geo2.x == 10 && max_geo2.y == 10);
     assert(max_geo2.width == 780 && max_geo2.height == 580);

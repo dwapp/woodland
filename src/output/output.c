@@ -2,11 +2,13 @@
 #include <stdlib.h>
 #include <time.h>
 
+#include <wlr/types/wlr_layer_shell_v1.h>
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_scene.h>
 #include <wlr/util/log.h>
 
+#include "layer.h"
 #include "output.h"
 #include "woodland.h"
 
@@ -30,6 +32,19 @@ static void handle_request_state(struct wl_listener *listener, void *data) {
 
 static void handle_destroy(struct wl_listener *listener, void *data) {
     struct woodland_output *output = wl_container_of(listener, output, destroy);
+    /* 先销毁各 layer surface（触发 node_destroy 链清理），再销毁 layer tree */
+    for (int i = 0; i < 4; i++) {
+        if (output->layer_tree[i]) {
+            struct wlr_scene_node *node, *tmp;
+            wl_list_for_each_safe(node, tmp,
+                &output->layer_tree[i]->children, link) {
+                struct woodland_layer_surface *surface = node->data;
+                if (surface) {
+                    wlr_layer_surface_v1_destroy(surface->layer_surface);
+                }
+            }
+        }
+    }
     wlr_scene_output_destroy(output->scene_output);
     for (int i = 0; i < 4; i++) {
         if (output->layer_tree[i]) {
@@ -37,6 +52,7 @@ static void handle_destroy(struct wl_listener *listener, void *data) {
             output->layer_tree[i] = NULL;
         }
     }
+    output->wlr_output->data = NULL;
     wl_list_remove(&output->destroy.link);
     wl_list_remove(&output->frame.link);
     wl_list_remove(&output->request_state.link);
@@ -65,6 +81,7 @@ static void handle_new_output(struct wl_listener *listener, void *data) {
     }
     output->server = server;
     output->wlr_output = wlr_output;
+    wlr_output->data = output;
 
     if (!wlr_output_init_render(wlr_output, server->allocator,
                                 server->renderer)) {

@@ -50,6 +50,7 @@ void woodland_layer_arrange(struct woodland_server *server,
     }
 
     output->usable_area = usable_area;
+    output->usable_area_valid = true;
 
     /* 同步 layer tree 节点位置到输出在 layout 中的坐标 */
     for (int i = 0; i < 4; i++) {

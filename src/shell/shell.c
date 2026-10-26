@@ -19,11 +19,14 @@ struct wlr_box woodland_view_maximized_geometry(struct woodland_server *server) 
     /* 取输出 layout 中的第一个输出作为最大化目标（单输出场景与多输出首个一致） */
     struct woodland_output *wo;
     wl_list_for_each(wo, &server->outputs, link) {
-        /* 有 usable_area（已扣除 exclusive zone）则用它，否则用完整 box */
-        if (wo->usable_area.width != 0 || wo->usable_area.height != 0) {
-            return wo->usable_area;
-        }
+        /* usable_area 是输出局部坐标，须加 layout 偏移转成布局坐标 */
         wlr_output_layout_get_box(server->output_layout, wo->wlr_output, &box);
+        if (wo->usable_area_valid) {
+            box.x += wo->usable_area.x;
+            box.y += wo->usable_area.y;
+            box.width = wo->usable_area.width;
+            box.height = wo->usable_area.height;
+        }
         return box;
     }
     return box;
@@ -59,6 +62,8 @@ void woodland_view_focus(struct woodland_view *view) {
     if (prev_surface == surface) {
         return;
     }
+    /* view 得焦点即 layer surface 失焦点 */
+    server->focused_layer = NULL;
     if (prev_surface) {
         struct wlr_xdg_toplevel *prev_toplevel =
             wlr_xdg_toplevel_try_from_wlr_surface(prev_surface);
