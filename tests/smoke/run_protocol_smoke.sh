@@ -57,5 +57,10 @@ echo "$output" | grep -q 'xdg_wm_base' || {
     echo "$output" >&2
     exit 1
 }
+echo "$output" | grep -q 'ext_workspace_manager_v1' || {
+    echo "ext_workspace_manager_v1 global missing from output:" >&2
+    echo "$output" >&2
+    exit 1
+}
 
-echo "protocol smoke OK: wl_compositor + xdg_wm_base present"
+echo "protocol smoke OK: wl_compositor + xdg_wm_base + ext_workspace_manager_v1 present"

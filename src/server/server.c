@@ -14,6 +14,7 @@
 #include "seat.h"
 #include "server.h"
 #include "view.h"
+#include "workspace.h"
 #include "woodland.h"
 
 static int handle_terminate(int signal, void *data) {
@@ -109,6 +110,11 @@ bool woodland_server_init(struct woodland_server *server) {
         return false;
     }
 
+    if (!woodland_workspace_init(server)) {
+        wlr_log(WLR_ERROR, "failed to init workspace");
+        return false;
+    }
+
     woodland_cursor_init_events(server);
 
     server->cursor_shape_manager =
@@ -170,6 +176,7 @@ void woodland_server_finish(struct woodland_server *server) {
     }
     woodland_cursor_finish_events(server);
     woodland_shell_finish(server);
+    woodland_workspace_finish(server);
     woodland_seat_finish(server);
     woodland_cursor_finish(server);
     woodland_output_finish(server);
