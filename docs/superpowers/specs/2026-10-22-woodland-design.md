@@ -46,7 +46,7 @@ Woodland 的目标是**兼容 treeland 生态（主要是协议）**：一个基
 | wlroots | meson wrap 下载，**锁定最新 tag 0.20.2**（不跟随 master） |
 | 渲染 | wlr_scene + scenefx + wlr_renderer（gles2 / vulkan / pixman 后端） |
 | 构建 | meson + meson wrap（scenefx、wlroots 均经 wrap 下载） |
-| 许可证 | MIT |
+| 许可证 | GPL-2.0-only |
 | 配置 | 配置文件 + key-value Wayland 协议 |
 | 会话/登录/锁屏 | 无内置登录；session 走 seatd/logind；锁屏走 ext-session-lock-v1（外部屏保） |
 | XWayland | 完整支持（wlr_xwayland） |
@@ -126,7 +126,7 @@ struct woodland_layout {
 
 ## 7. 协议兼容清单（两级分级）
 
-> 基线版本：treeland-protocols 0.8.0。所有 XML 按 MIT 许可证提取至 `protocols/`。
+> 基线版本：treeland-protocols 0.8.0。所有 XML 提取至 `protocols/`。
 
 ### 7.1 语义完整级
 
@@ -262,7 +262,7 @@ struct woodland_layout {
 ## 14. 测试策略
 
 - 单元测试：配置解析、布局几何计算、uuid 管理、协议 XML 解析。
-- 集成测试：headless backend 下启动合成器，连接测试客户端（复用 treeland 的 `tests/protocols` 测试客户端思路，按 MIT 重新实现）。
+- 集成测试：headless backend 下启动合成器，连接测试客户端（复用 treeland 的 `tests/protocols` 测试客户端思路，重新实现）。
 - 协议测试：为每个语义完整级私有协议编写最小客户端测试握手 + 行为。
 - 冒烟测试：XWayland 客户端启动、IME 候选面板出现、锁屏协议握手、session D-Bus 屏保接口调用。
 
@@ -281,4 +281,4 @@ struct woodland_layout {
 5. 中文输入法（fcitx5 或等价实现）候选面板正常显示。
 6. 配置文件与 key-value 协议运行时改配置即时生效。
 7. 特效默认关闭时，`effects.enable=false` 下渲染路径无特效开销（可测量帧时间无显著差异）。
-8. 许可证检查通过（MIT，无 GPL 代码混入）。
+8. 许可证检查通过（GPL-2.0-only，无不兼容代码混入）。

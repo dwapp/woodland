@@ -5,7 +5,7 @@
 - `woodland` 是**纯 C + wlroots** 的通用轻量 Wayland 合成器，目标是**兼容 treeland 生态（主要是协议）**，但**不复刻 treeland 的全部逻辑**。单体结构（sway/labwc 风格），单用户、运行在用户 session 内。
 - 无 Qt/QML 依赖。渲染默认走 `wlr_scene` 直出；特效经 scenefx 实现且**默认关闭**。
 - wlroots 经 meson wrap 下载，**锁定 tag 0.20.2**（不跟随 master）；scenefx 锁定 0.5（随 `effects` 选项启用）。两者都**不 vendored**。
-- 许可证：MIT。
+- 许可证：GPL-2.0-only。
 
 ## 代码在哪里
 
@@ -45,7 +45,7 @@ woodland 是 Wayland 合成器：主循环会**正常阻塞在 `ep_poll`** 等�
 ## 项目规则
 
 - 只用 C（C11 起步）。不引入 C++/Qt/QML。
-- 每个新源文件顶部 `// SPDX-License-Identifier: MIT`（版权行省略，仅 SPDX 行）。非源码文件（meson、配置）不需要。
+- 每个新源文件顶部 `// SPDX-License-Identifier: GPL-2.0-only`（版权行省略，仅 SPDX 行）。非源码文件（meson、配置）不需要。
 - 资源释放纪律：`finish` 逆序释放，每步判空 + 置空（幂等），不能 double-free、不能 use-after-free。
 - 单实例全局 `struct woodland_server`，模块间通过指针传递，不做依赖注入框架。
 - 保持 diff 最小：只碰与任务相关的文件和符号，不做任务外的大范围重构/重命名/格式化。

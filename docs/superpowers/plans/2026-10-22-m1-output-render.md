@@ -15,7 +15,7 @@
 
 ## 全局约束
 
-- 每个新文件顶部包含 `// SPDX-License-Identifier: MIT`（版权行省略，仅 SPDX 行）。
+- 每个新文件顶部包含 `// SPDX-License-Identifier: GPL-2.0-only`（版权行省略，仅 SPDX 行）。
 - 语言标准 `c_std=c11`；编译参数 `-DWLR_USE_UNSTABLE -D_POSIX_C_SOURCE=200809L`（cursor-shape 与 headless 均为 unstable API）。
 - `warning_level=2` + `werror=true`：警告即错误。
 - 依赖只经 wrap 下载（wlroots 0.20.2 已锁定），不引入新依赖。

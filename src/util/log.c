@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPL-2.0-only
 #include "util/log.h"
 
 static enum wlr_log_importance verbosity = WLR_SILENT;

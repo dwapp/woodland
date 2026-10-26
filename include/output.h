@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPL-2.0-only
 #ifndef WOODLAND_OUTPUT_H
 #define WOODLAND_OUTPUT_H
 

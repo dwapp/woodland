@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPL-2.0-only
 #include <assert.h>
 #include <wayland-server-core.h>
 #include <wlr/backend.h>
