@@ -609,6 +609,14 @@ static void server_new_xdg_popup(struct wl_listener *listener, void *data) {
     (void)listener;
     struct wlr_xdg_popup *xdg_popup = data;
 
+    /* layer-shell 的 popup 分两步：先经 xdg_wm_base.get_popup 创建
+     * （此时 parent 尚未关联，为 NULL），再经 zwlr_layer_surface_v1.get_popup
+     * 关联到 layer surface。父为 NULL 的 popup 交给 layer.c 的
+     * layer_surface->events.new_popup 处理，这里跳过。 */
+    if (xdg_popup->parent == NULL) {
+        return;
+    }
+
     struct woodland_popup *popup = calloc(1, sizeof(*popup));
     if (!popup) {
         wlr_log(WLR_ERROR, "failed to allocate woodland_popup");
