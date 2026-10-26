@@ -67,5 +67,10 @@ echo "$output" | grep -q 'zwlr_foreign_toplevel_manager_v1' || {
     echo "$output" >&2
     exit 1
 }
+echo "$output" | grep -q 'zwlr_layer_shell_v1' || {
+    echo "zwlr_layer_shell_v1 global missing from output:" >&2
+    echo "$output" >&2
+    exit 1
+}
 
-echo "protocol smoke OK: wl_compositor + xdg_wm_base + ext_workspace_manager_v1 + zwlr_foreign_toplevel_manager_v1 present"
+echo "protocol smoke OK: wl_compositor + xdg_wm_base + ext_workspace_manager_v1 + zwlr_foreign_toplevel_manager_v1 + zwlr_layer_shell_v1 present"

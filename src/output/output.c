@@ -31,6 +31,12 @@ static void handle_request_state(struct wl_listener *listener, void *data) {
 static void handle_destroy(struct wl_listener *listener, void *data) {
     struct woodland_output *output = wl_container_of(listener, output, destroy);
     wlr_scene_output_destroy(output->scene_output);
+    for (int i = 0; i < 4; i++) {
+        if (output->layer_tree[i]) {
+            wlr_scene_node_destroy(&output->layer_tree[i]->node);
+            output->layer_tree[i] = NULL;
+        }
+    }
     wl_list_remove(&output->destroy.link);
     wl_list_remove(&output->frame.link);
     wl_list_remove(&output->request_state.link);
@@ -100,6 +106,18 @@ static void handle_new_output(struct wl_listener *listener, void *data) {
 
     wlr_scene_output_layout_add_output(server->scene_layout, layout_output,
                                        scene_output);
+
+    /* 创建 4 棵 layer tree，z-order 从下到上：
+     * background → bottom → [工作区] → top → overlay。
+     * lower_to_bottom 先 [1] 后 [0]，保证 background 在 bottom 之下；
+     * raise_to_top 先 [2] 后 [3]，保证 overlay 在 top 之上。 */
+    for (int i = 0; i < 4; i++) {
+        output->layer_tree[i] = wlr_scene_tree_create(&server->scene->tree);
+    }
+    wlr_scene_node_lower_to_bottom(&output->layer_tree[1]->node);
+    wlr_scene_node_lower_to_bottom(&output->layer_tree[0]->node);
+    wlr_scene_node_raise_to_top(&output->layer_tree[2]->node);
+    wlr_scene_node_raise_to_top(&output->layer_tree[3]->node);
 
     wl_list_insert(&server->outputs, &output->link);
 
