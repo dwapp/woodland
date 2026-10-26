@@ -249,9 +249,11 @@ extern const struct woodland_layout tiling_layout;
 - `shell/` + `view`：xdg-toplevel/popup 视图封装、xwayland 视图
 - `seat/`：libinput 输入、焦点、指针约束、拖拽
 - `scene/`：图层树（背景/窗口/顶层/overlay）
-- `workspace/`：12 工作区、切换
+- `workspace/`：10 工作区、切换
 - `layout/`：堆叠布局（默认）
 - **验证**：能启动并操作多个 Wayland/X11 窗口，工作区切换，窗口状态（最大化/最小化/全屏）
+
+> **进展（2026-10-26）**：M2 部分完成。tinywl 能力补齐已合入（PR #1）；xdg-shell 完整状态处理（maximize/fullscreen/minimize/set_title/set_app_id/set_parent）+ 10 工作区（Alt+1~9/0 切换）+ ext-workspace-v1 + foreign-toplevel-v1 已在 `feature/m3-xdg-workspaces` 实现。剩余：xwayland、SSD、贴边（snap）等后续里程碑。
 
 ### M3：SSD 装饰 + 特效（可选）
 - `decorations/`：SSD 标题栏/边框/阴影（参考 labwc `src/ssd/`）
