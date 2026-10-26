@@ -5,10 +5,12 @@
 #include <stdbool.h>
 #include <wayland-server-core.h>
 #include <wlr/types/wlr_foreign_toplevel_management_v1.h>
+#include <wlr/types/wlr_xdg_decoration_v1.h>
 #include <wlr/types/wlr_xdg_shell.h>
 
 struct woodland_server;
 struct woodland_workspace;
+struct woodland_ssd;
 struct wlr_surface;
 struct wlr_output;
 
@@ -25,6 +27,12 @@ struct woodland_view {
     bool fullscreen;
     char *title;
     char *app_id;
+    struct woodland_ssd *ssd;          // 服务端装饰（默认 SSD，见设计）
+    bool deco_csd;                     // 客户端请求 CSD（map 后不建 SSD）
+    bool deco_registered;              // 是否已注册 zxdg_decoration listener
+    struct wlr_xdg_toplevel_decoration_v1 *deco; // zxdg decoration 对象
+    struct wl_listener deco_destroy;   // zxdg_decoration 销毁监听器
+    struct wl_listener deco_request_mode; // zxdg_decoration 模式请求监听器
     struct wlr_box saved_geometry;     // 退出 max/fullscreen 时恢复
     struct wlr_foreign_toplevel_handle_v1 *toplevel_handle;
     struct wl_listener map;

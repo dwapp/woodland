@@ -15,6 +15,7 @@
 #include <wlr/types/wlr_scene.h>
 #include <wlr/types/wlr_seat.h>
 #include <wlr/types/wlr_xcursor_manager.h>
+#include <wlr/types/wlr_xdg_decoration_v1.h>
 #include <wlr/types/wlr_xdg_shell.h>
 
 /** 交互式光标模式（tinywl 语义：移动/缩放/穿越）。 */
@@ -67,6 +68,10 @@ struct woodland_server {
     struct wl_list views;                 // struct woodland_view.link 链表头
     struct wl_listener new_xdg_toplevel;
     struct wl_listener new_xdg_popup;
+
+    /* zxdg 装饰 */
+    struct wlr_xdg_decoration_manager_v1 *xdg_decoration_manager;
+    struct wl_listener new_toplevel_decoration;
 
     /* 工作区 */
     struct wl_list workspaces;            // struct woodland_workspace.link
