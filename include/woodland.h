@@ -8,6 +8,7 @@
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_cursor_shape_v1.h>
+#include <wlr/types/wlr_ext_workspace_v1.h>
 #include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_scene.h>
 #include <wlr/types/wlr_seat.h>
@@ -68,6 +69,9 @@ struct woodland_server {
     /* 工作区 */
     struct wl_list workspaces;            // struct woodland_workspace.link
     struct woodland_workspace *active_workspace;
+    struct wlr_ext_workspace_manager_v1 *ext_workspace_manager;
+    struct wlr_ext_workspace_group_handle_v1 *ext_workspace_group;
+    struct wl_listener ext_workspace_commit;
 
     const char *startup_cmd;              // -s 启动命令
 };
