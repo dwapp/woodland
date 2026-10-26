@@ -10,6 +10,7 @@
 
 #include "seat.h"
 #include "view.h"
+#include "workspace.h"
 #include "woodland.h"
 
 /* ==================== 键盘 ==================== */
@@ -36,6 +37,33 @@ static bool handle_keybinding(struct woodland_server *server, xkb_keysym_t sym) 
             wl_container_of(server->views.prev, next_view, link);
         woodland_view_focus(next_view);
         break;
+    case XKB_KEY_1:
+    case XKB_KEY_2:
+    case XKB_KEY_3:
+    case XKB_KEY_4:
+    case XKB_KEY_5:
+    case XKB_KEY_6:
+    case XKB_KEY_7:
+    case XKB_KEY_8:
+    case XKB_KEY_9: {
+        char name[2];
+        name[0] = (char)('1' + (sym - XKB_KEY_1));
+        name[1] = '\0';
+        struct woodland_workspace *ws =
+            woodland_workspace_by_name(server, name);
+        if (ws) {
+            woodland_workspace_switch(server, ws);
+        }
+        break;
+    }
+    case XKB_KEY_0: {
+        struct woodland_workspace *ws =
+            woodland_workspace_by_name(server, "10");
+        if (ws) {
+            woodland_workspace_switch(server, ws);
+        }
+        break;
+    }
     default:
         return false;
     }

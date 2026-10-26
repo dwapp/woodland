@@ -7,6 +7,7 @@
 
 #include "output.h"
 #include "view.h"
+#include "workspace.h"
 #include "woodland.h"
 
 /* ==================== 几何纯函数 ==================== */
@@ -48,6 +49,10 @@ void woodland_view_focus(struct woodland_view *view) {
         return;
     }
     struct woodland_server *server = view->server;
+    /* 只聚焦当前工作区的 mapped 视图 */
+    if (!view->mapped || view->workspace != server->active_workspace) {
+        return;
+    }
     struct wlr_seat *seat = server->seat;
     struct wlr_surface *prev_surface = seat->keyboard_state.focused_surface;
     struct wlr_surface *surface = view->xdg_toplevel->base->surface;
@@ -99,7 +104,12 @@ struct woodland_view *woodland_view_at(struct woodland_server *server,
 
 static void xdg_toplevel_map(struct wl_listener *listener, void *data) {
     struct woodland_view *view = wl_container_of(listener, view, map);
-    wl_list_insert(&view->server->views, &view->link);
+    struct woodland_server *server = view->server;
+    view->mapped = true;
+    view->workspace = server->active_workspace;
+    wlr_scene_node_reparent(&view->scene_tree->node,
+                            view->workspace->tree);
+    wl_list_insert(&server->views, &view->link);
     woodland_view_focus(view);
     (void)data;
 }
@@ -109,6 +119,7 @@ static void xdg_toplevel_unmap(struct wl_listener *listener, void *data) {
     if (view == view->server->grabbed_view) {
         woodland_cursor_reset_mode(view->server);
     }
+    view->mapped = false;
     wl_list_remove(&view->link);
     (void)data;
 }

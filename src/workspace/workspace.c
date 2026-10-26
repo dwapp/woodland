@@ -58,6 +58,16 @@ struct woodland_workspace *woodland_workspace_by_name(
     return NULL;
 }
 
+void woodland_workspace_switch(struct woodland_server *server,
+                               struct woodland_workspace *target) {
+    if (target == NULL || target == server->active_workspace) {
+        return;
+    }
+    wlr_scene_node_set_enabled(&server->active_workspace->tree->node, false);
+    wlr_scene_node_set_enabled(&target->tree->node, true);
+    server->active_workspace = target;
+}
+
 void woodland_workspace_finish(struct woodland_server *server) {
     struct woodland_workspace *ws, *tmp;
     wl_list_for_each_safe(ws, tmp, &server->workspaces, link) {

@@ -7,6 +7,7 @@
 #include <wlr/types/wlr_xdg_shell.h>
 
 struct woodland_server;
+struct woodland_workspace;
 struct wlr_surface;
 struct wlr_output;
 
@@ -15,6 +16,8 @@ struct woodland_view {
     struct woodland_server *server;
     struct wlr_xdg_toplevel *xdg_toplevel;
     struct wlr_scene_tree *scene_tree;
+    struct woodland_workspace *workspace;   // 归属工作区
+    bool mapped;
     struct wl_listener map;
     struct wl_listener unmap;
     struct wl_listener commit;
