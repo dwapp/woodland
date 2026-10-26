@@ -23,6 +23,8 @@ int main(void) {
     assert(server.allocator);
     server.scene = wlr_scene_create();
     assert(server.scene);
+    server.seat = wlr_seat_create(server.display, "test-seat");
+    assert(server.seat);
 
     assert(woodland_workspace_init(&server));
 
@@ -54,13 +56,14 @@ int main(void) {
     assert(strcmp(ws10->name, "10") == 0);
     assert(woodland_workspace_by_name(&server, "11") == NULL);
 
-    /* 切换工作区 */
+    /* 切换工作区后清键盘焦点 */
     struct woodland_workspace *ws3 =
         woodland_workspace_by_name(&server, "3");
     assert(ws3 != NULL);
     woodland_workspace_switch(&server, ws3);
     assert(server.active_workspace == ws3);
     assert(ws3->tree->node.enabled == true);
+    assert(server.seat->keyboard_state.focused_surface == NULL);
     struct woodland_workspace *ws1 =
         woodland_workspace_by_name(&server, "1");
     assert(ws1->tree->node.enabled == false);
@@ -69,6 +72,8 @@ int main(void) {
     assert(server.active_workspace == NULL);
 
     /* 逆序释放 wlr 资源 */
+    wlr_seat_destroy(server.seat);
+    server.seat = NULL;
     wlr_scene_node_destroy(&server.scene->tree.node);
     server.scene = NULL;
     wlr_allocator_destroy(server.allocator);
