@@ -21,5 +21,7 @@ bool woodland_workspace_init(struct woodland_server *server);
 void woodland_workspace_finish(struct woodland_server *server);
 struct woodland_workspace *woodland_workspace_by_name(
     struct woodland_server *server, const char *name);
+void woodland_workspace_switch(struct woodland_server *server,
+                               struct woodland_workspace *target);
 
 #endif

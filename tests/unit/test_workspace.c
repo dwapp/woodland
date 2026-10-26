@@ -54,6 +54,17 @@ int main(void) {
     assert(strcmp(ws10->name, "10") == 0);
     assert(woodland_workspace_by_name(&server, "11") == NULL);
 
+    /* 切换工作区 */
+    struct woodland_workspace *ws3 =
+        woodland_workspace_by_name(&server, "3");
+    assert(ws3 != NULL);
+    woodland_workspace_switch(&server, ws3);
+    assert(server.active_workspace == ws3);
+    assert(ws3->tree->node.enabled == true);
+    struct woodland_workspace *ws1 =
+        woodland_workspace_by_name(&server, "1");
+    assert(ws1->tree->node.enabled == false);
+
     woodland_workspace_finish(&server);
     assert(server.active_workspace == NULL);
 
