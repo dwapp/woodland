@@ -8,6 +8,7 @@
 
 struct woodland_server;
 struct wlr_surface;
+struct wlr_output;
 
 struct woodland_view {
     struct wl_list link;               // woodland_server.views
@@ -45,5 +46,12 @@ void woodland_cursor_reset_mode(struct woodland_server *server);
 /** 接线 cursor 事件监听器（motion/button/axis/frame）。 */
 void woodland_cursor_init_events(struct woodland_server *server);
 void woodland_cursor_finish_events(struct woodland_server *server);
+
+/** 最大化几何（布局坐标，取输出 layout 的活动 box）。 */
+struct wlr_box woodland_view_maximized_geometry(struct woodland_server *server);
+
+/** 全屏几何（指定输出的完整 box，布局坐标）。 */
+struct wlr_box woodland_view_fullscreen_geometry(struct woodland_server *server,
+                                                 struct wlr_output *output);
 
 #endif

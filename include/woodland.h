@@ -65,6 +65,10 @@ struct woodland_server {
     struct wl_listener new_xdg_toplevel;
     struct wl_listener new_xdg_popup;
 
+    /* 工作区 */
+    struct wl_list workspaces;            // struct woodland_workspace.link
+    struct woodland_workspace *active_workspace;
+
     const char *startup_cmd;              // -s 启动命令
 };
 
