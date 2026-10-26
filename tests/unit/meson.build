@@ -37,5 +37,5 @@ test('view', test_view)
 test_layer = executable('test_layer', 'test_layer.c',
   dependencies: [wlroots, wayland_server],
   include_directories: woodland_inc,
-  link_with: [output_lib, layer_lib])
+  link_with: [output_lib, layer_lib, shell_lib, seat_lib, workspace_lib])
 test('layer', test_layer)
