@@ -26,6 +26,7 @@ wlroots = dependency('wlroots-0.20', version: wlroots_version,
                      fallback: 'wlroots')
 
 wayland_server = dependency('wayland-server')
+xkbcommon = dependency('xkbcommon')
 
 # 特性开关 → config.h
 conf_data = configuration_data()
