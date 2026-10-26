@@ -16,6 +16,7 @@ struct woodland_output {
     struct wlr_scene_output *scene_output;
     struct wlr_scene_tree *layer_tree[4]; // 下标 = zwlr_layer_shell_v1_layer 枚举
     struct wlr_box usable_area;        // 扣除 exclusive zone 后的可用区域
+    bool usable_area_valid;            // usable_area 是否已被 arrange 初始化
     struct wl_listener frame;
     struct wl_listener request_state;
     struct wl_listener destroy;
