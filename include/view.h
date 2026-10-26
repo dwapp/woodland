@@ -18,6 +18,7 @@ struct woodland_view {
     struct wlr_xdg_toplevel *xdg_toplevel;
     struct wlr_scene_tree *scene_tree;
     struct woodland_workspace *workspace;   // 归属工作区
+    struct woodland_view *parent;           // 父视图（transient 对话框）
     bool mapped;
     bool minimized;
     bool maximized;

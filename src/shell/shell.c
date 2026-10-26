@@ -49,8 +49,9 @@ void woodland_view_focus(struct woodland_view *view) {
         return;
     }
     struct woodland_server *server = view->server;
-    /* 只聚焦当前工作区的 mapped 视图 */
-    if (!view->mapped || view->workspace != server->active_workspace) {
+    /* 只聚焦当前工作区、已 mapped 且未最小化的视图 */
+    if (!view->mapped || view->minimized ||
+        view->workspace != server->active_workspace) {
         return;
     }
     struct wlr_seat *seat = server->seat;
@@ -117,7 +118,12 @@ static void xdg_toplevel_map(struct wl_listener *listener, void *data) {
     struct woodland_view *view = wl_container_of(listener, view, map);
     struct woodland_server *server = view->server;
     view->mapped = true;
-    view->workspace = server->active_workspace;
+    /* 有已映射父视图则 inherit 其工作区，否则进当前活动工作区 */
+    if (view->parent && view->parent->mapped) {
+        view->workspace = view->parent->workspace;
+    } else {
+        view->workspace = server->active_workspace;
+    }
     wlr_scene_node_reparent(&view->scene_tree->node,
                             view->workspace->tree);
     wl_list_insert(&server->views, &view->link);
@@ -230,9 +236,14 @@ static void view_set_maximized(struct woodland_view *view, bool maximized) {
     }
     struct woodland_server *server = view->server;
     if (maximized) {
+        /* 先退出 fullscreen（恢复其前的几何并落标志），再保存非 max/fullscreen 几何 */
+        if (view->fullscreen) {
+            view->fullscreen = false;
+            view_apply_geometry(view, &view->saved_geometry);
+            wlr_xdg_toplevel_set_fullscreen(view->xdg_toplevel, false);
+        }
         view_save_geometry(view);
         view->maximized = true;
-        view->fullscreen = false;
         struct wlr_box box = woodland_view_maximized_geometry(server);
         view_apply_geometry(view, &box);
         wlr_xdg_toplevel_set_maximized(view->xdg_toplevel, true);
@@ -246,6 +257,8 @@ static void view_set_maximized(struct woodland_view *view, bool maximized) {
     if (view->toplevel_handle) {
         wlr_foreign_toplevel_handle_v1_set_maximized(
             view->toplevel_handle, view->maximized);
+        wlr_foreign_toplevel_handle_v1_set_fullscreen(
+            view->toplevel_handle, view->fullscreen);
     }
 }
 
@@ -256,9 +269,14 @@ static void view_set_fullscreen(struct woodland_view *view, bool fullscreen,
     }
     struct woodland_server *server = view->server;
     if (fullscreen) {
+        /* 先退出 maximize（恢复其前的几何并落标志），再保存非 max/fullscreen 几何 */
+        if (view->maximized) {
+            view->maximized = false;
+            view_apply_geometry(view, &view->saved_geometry);
+            wlr_xdg_toplevel_set_maximized(view->xdg_toplevel, false);
+        }
         view_save_geometry(view);
         view->fullscreen = true;
-        view->maximized = false;
         if (!output) {
             /* 无指定输出时取第一个输出 */
             struct woodland_output *wo;
@@ -280,6 +298,8 @@ static void view_set_fullscreen(struct woodland_view *view, bool fullscreen,
     if (view->toplevel_handle) {
         wlr_foreign_toplevel_handle_v1_set_fullscreen(
             view->toplevel_handle, view->fullscreen);
+        wlr_foreign_toplevel_handle_v1_set_maximized(
+            view->toplevel_handle, view->maximized);
     }
 }
 
@@ -290,12 +310,16 @@ static void view_set_minimized(struct woodland_view *view, bool minimized) {
     view->minimized = minimized;
     wlr_scene_node_set_enabled(&view->scene_tree->node, !minimized);
     if (minimized) {
-        /* 最小化后若它是焦点视图则清键盘焦点 */
+        /* 最小化后若它是焦点视图则清键盘焦点并同步 deactivated */
         struct wlr_surface *focused =
             view->server->seat->keyboard_state.focused_surface;
         if (focused == view->xdg_toplevel->base->surface) {
-            wlr_seat_keyboard_notify_enter(view->server->seat, NULL,
-                NULL, 0, NULL);
+            wlr_seat_keyboard_notify_clear_focus(view->server->seat);
+            wlr_xdg_toplevel_set_activated(view->xdg_toplevel, false);
+            if (view->toplevel_handle) {
+                wlr_foreign_toplevel_handle_v1_set_activated(
+                    view->toplevel_handle, false);
+            }
         }
     }
     if (view->toplevel_handle) {
@@ -347,9 +371,23 @@ static void xdg_toplevel_set_app_id(struct wl_listener *listener, void *data) {
 }
 
 static void xdg_toplevel_set_parent(struct wl_listener *listener, void *data) {
-    (void)listener;
+    struct woodland_view *view = wl_container_of(listener, view, set_parent);
+    struct wlr_xdg_toplevel *parent = view->xdg_toplevel->parent;
+    if (parent && parent->base->data) {
+        struct wlr_scene_tree *parent_tree = parent->base->data;
+        view->parent = parent_tree->node.data;
+    } else {
+        view->parent = NULL;
+    }
+    /* 同步 foreign-toplevel parent */
+    if (view->toplevel_handle) {
+        struct wlr_foreign_toplevel_handle_v1 *parent_handle =
+            (view->parent && view->parent->toplevel_handle)
+                ? view->parent->toplevel_handle : NULL;
+        wlr_foreign_toplevel_handle_v1_set_parent(
+            view->toplevel_handle, parent_handle);
+    }
     (void)data;
-    /* 简化：仅记录父关系，map 时 inherit 工作区由 map handler 处理 */
 }
 
 /* ==================== foreign-toplevel 请求 ==================== */

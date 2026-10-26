@@ -120,6 +120,11 @@ void woodland_workspace_switch(struct woodland_server *server,
     wlr_scene_node_set_enabled(&target->tree->node, true);
     wlr_ext_workspace_handle_v1_set_active(target->ext_workspace, true);
     server->active_workspace = target;
+
+    /* 切换后清除键盘焦点，避免按键继续发给旧工作区的隐藏窗口 */
+    if (server->seat) {
+        wlr_seat_keyboard_notify_clear_focus(server->seat);
+    }
 }
 
 void woodland_workspace_finish(struct woodland_server *server) {
