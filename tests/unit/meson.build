@@ -21,3 +21,9 @@ test_seat = executable('test_seat', 'test_seat.c',
   include_directories: woodland_inc,
   link_with: [cursor_lib, output_lib, shell_lib, seat_lib])
 test('seat', test_seat)
+
+test_workspace = executable('test_workspace', 'test_workspace.c',
+  dependencies: [wlroots, wayland_server],
+  include_directories: woodland_inc,
+  link_with: [workspace_lib])
+test('workspace', test_workspace)

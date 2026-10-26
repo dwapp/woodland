@@ -5,8 +5,41 @@
 #include <wlr/types/wlr_scene.h>
 #include <wlr/util/log.h>
 
+#include "output.h"
 #include "view.h"
 #include "woodland.h"
+
+/* ==================== 几何纯函数 ==================== */
+
+struct wlr_box woodland_view_maximized_geometry(struct woodland_server *server) {
+    struct wlr_box box = {0};
+    struct wlr_output *output = NULL;
+
+    /* 取输出 layout 中的第一个输出作为最大化目标（单输出场景与多输出首个一致） */
+    struct woodland_output *wo;
+    wl_list_for_each(wo, &server->outputs, link) {
+        output = wo->wlr_output;
+        break;
+    }
+    if (!output) {
+        return box;
+    }
+
+    wlr_output_layout_get_box(server->output_layout, output, &box);
+    return box;
+}
+
+struct wlr_box woodland_view_fullscreen_geometry(struct woodland_server *server,
+                                                 struct wlr_output *output) {
+    (void)server;
+    struct wlr_box box = {0};
+    if (!output) {
+        return box;
+    }
+    /* 全屏取输出完整 box，布局坐标 */
+    wlr_output_layout_get_box(server->output_layout, output, &box);
+    return box;
+}
 
 /* ==================== view 聚焦与命中 ==================== */
 
