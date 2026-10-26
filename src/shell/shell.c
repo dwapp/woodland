@@ -3,10 +3,12 @@
 
 #include <wlr/types/wlr_pointer.h>
 #include <wlr/types/wlr_scene.h>
+#include <wlr/types/wlr_xdg_decoration_v1.h>
 #include <wlr/util/log.h>
 
 #include "layer.h"
 #include "output.h"
+#include "ssd.h"
 #include "view.h"
 #include "workspace.h"
 #include "woodland.h"
@@ -59,6 +61,7 @@ void woodland_view_focus(struct woodland_view *view) {
     struct wlr_seat *seat = server->seat;
     struct wlr_surface *prev_surface = seat->keyboard_state.focused_surface;
     struct wlr_surface *surface = view->xdg_toplevel->base->surface;
+    struct woodland_view *prev_view = NULL;
     if (prev_surface == surface) {
         return;
     }
@@ -71,7 +74,7 @@ void woodland_view_focus(struct woodland_view *view) {
             wlr_xdg_toplevel_set_activated(prev_toplevel, false);
             struct wlr_scene_tree *prev_tree = prev_toplevel->base->data;
             if (prev_tree) {
-                struct woodland_view *prev_view = prev_tree->node.data;
+                prev_view = prev_tree->node.data;
                 if (prev_view && prev_view->toplevel_handle) {
                     wlr_foreign_toplevel_handle_v1_set_activated(
                         prev_view->toplevel_handle, false);
@@ -84,6 +87,11 @@ void woodland_view_focus(struct woodland_view *view) {
     wl_list_remove(&view->link);
     wl_list_insert(&server->views, &view->link);
     wlr_xdg_toplevel_set_activated(view->xdg_toplevel, true);
+    /* SSD 激活态同步：获焦视图激活色，失焦视图非激活色 */
+    woodland_ssd_set_active(view, true);
+    if (prev_view) {
+        woodland_ssd_set_active(prev_view, false);
+    }
     if (view->toplevel_handle) {
         wlr_foreign_toplevel_handle_v1_set_activated(view->toplevel_handle, true);
     }
@@ -131,6 +139,10 @@ static void xdg_toplevel_map(struct wl_listener *listener, void *data) {
     wlr_scene_node_reparent(&view->scene_tree->node,
                             view->workspace->tree);
     wl_list_insert(&server->views, &view->link);
+    /* 首次 map 时创建 SSD（未 map 前不显示空装饰，同 labwc handle_map） */
+    if (!view->ssd && !view->deco_csd) {
+        woodland_ssd_create(view);
+    }
     woodland_view_focus(view);
     (void)data;
 }
@@ -142,14 +154,28 @@ static void xdg_toplevel_unmap(struct wl_listener *listener, void *data) {
     }
     view->mapped = false;
     wl_list_remove(&view->link);
+    /* unmap 时销毁 SSD（避免残留空装饰）；remap 时按 deco_csd 重建 */
+    if (view->ssd) {
+        woodland_ssd_destroy(view);
+    }
     (void)data;
 }
 
 static void xdg_toplevel_commit(struct wl_listener *listener, void *data) {
     struct woodland_view *view = wl_container_of(listener, view, commit);
-    if (view->xdg_toplevel->base->initial_commit) {
+    struct wlr_xdg_surface *xdg = view->xdg_toplevel->base;
+    if (xdg->initial_commit) {
         wlr_xdg_toplevel_set_size(view->xdg_toplevel, 0, 0);
+        /* initial commit：此时 surface 已 initialized，可以 set_mode 完成 zxdg 协商 */
+        if (view->deco) {
+            enum wlr_xdg_toplevel_decoration_v1_mode mode = view->ssd
+                ? WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE
+                : WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE;
+            wlr_xdg_toplevel_decoration_v1_set_mode(view->deco, mode);
+        }
     }
+    /* 内容尺寸/状态变化后同步 SSD 几何（标题栏/边框/按钮） */
+    woodland_ssd_update(view);
     (void)data;
 }
 
@@ -175,6 +201,16 @@ static void xdg_toplevel_destroy(struct wl_listener *listener, void *data) {
         wl_list_remove(&view->ft_request_minimize.link);
         wl_list_remove(&view->ft_request_close.link);
         wlr_foreign_toplevel_handle_v1_destroy(view->toplevel_handle);
+    }
+    /* zxdg_decoration 监听器（协商过才注册） */
+    if (view->deco_registered) {
+        wl_list_remove(&view->deco_destroy.link);
+        wl_list_remove(&view->deco_request_mode.link);
+        view->deco_registered = false;
+    }
+    /* SSD 在 scene 树销毁时级联释放，这里只清指针 */
+    if (view->ssd) {
+        woodland_ssd_destroy(view);
     }
     free(view);
     (void)data;
@@ -499,6 +535,39 @@ void woodland_cursor_process_motion(struct woodland_server *server, uint32_t tim
     struct wlr_surface *surface = NULL;
     struct woodland_view *view = woodland_view_at(server,
         server->cursor->x, server->cursor->y, &surface, &sx, &sy);
+
+    /* 未命中 surface 时，检查是否悬停在某视图的 SSD 区域（标题栏/边框） */
+    enum woodland_ssd_part ssd_part = WOODLAND_SSD_NONE;
+    uint32_t edges = 0;
+    struct woodland_view *ssd_view = NULL;
+    if (!view) {
+        struct woodland_view *v;
+        wl_list_for_each(v, &server->views, link) {
+            enum woodland_ssd_part part = woodland_ssd_at(v,
+                server->cursor->x, server->cursor->y, &edges);
+            if (part != WOODLAND_SSD_NONE) {
+                ssd_part = part;
+                ssd_view = v;
+                break;
+            }
+        }
+    }
+
+    if (ssd_view) {
+        /* 悬停 SSD：按区域切换光标，不给 surface 指针焦点 */
+        const char *cursor_name = "default";
+        if (ssd_part == WOODLAND_SSD_TITLEBAR) {
+            cursor_name = "default";
+        } else if (ssd_part >= WOODLAND_SSD_BORDER_LEFT
+                && ssd_part <= WOODLAND_SSD_BORDER_BOTTOM) {
+            cursor_name = "se-resize";
+        }
+        wlr_cursor_set_xcursor(server->cursor, server->xcursor_manager,
+            cursor_name);
+        wlr_seat_pointer_clear_focus(seat);
+        return;
+    }
+
     if (!view) {
         wlr_cursor_set_xcursor(server->cursor, server->xcursor_manager, "default");
     }
@@ -639,6 +708,88 @@ static void server_new_xdg_popup(struct wl_listener *listener, void *data) {
     wl_signal_add(&xdg_popup->events.destroy, &popup->destroy);
 }
 
+/* ==================== zxdg_decoration ==================== */
+
+/* 应用客户端请求的装饰模式（不直接 set_mode，避免未 initialized 时 assert） */
+static void deco_apply_mode(struct woodland_view *view,
+                            enum wlr_xdg_toplevel_decoration_v1_mode requested) {
+    switch (requested) {
+    case WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE:
+        view->deco_csd = false;
+        if (view->mapped && !view->ssd) {
+            woodland_ssd_create(view);
+        }
+        break;
+    case WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE:
+        view->deco_csd = true;
+        if (view->ssd) {
+            woodland_ssd_destroy(view);
+        }
+        break;
+    case WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_NONE:
+    default:
+        /* 未指定：默认 SSD（见设计决策） */
+        view->deco_csd = false;
+        if (view->mapped && !view->ssd) {
+            woodland_ssd_create(view);
+        }
+        break;
+    }
+}
+
+/* 客户端 set_mode/unset_mode 时触发：更新状态，set_mode 延迟到 initial commit */
+static void deco_request_mode(struct wl_listener *listener, void *data) {
+    struct woodland_view *view = wl_container_of(listener, view, deco_request_mode);
+    struct wlr_xdg_toplevel_decoration_v1 *deco = data;
+
+    deco_apply_mode(view, deco->requested_mode);
+
+    /* 仅在 surface 已 initialized 时才能 schedule configure */
+    if (deco->toplevel->base->initialized) {
+        enum wlr_xdg_toplevel_decoration_v1_mode mode = view->ssd
+            ? WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE
+            : WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE;
+        wlr_xdg_toplevel_decoration_v1_set_mode(deco, mode);
+    }
+}
+
+static void deco_destroy(struct wl_listener *listener, void *data) {
+    struct woodland_view *view = wl_container_of(listener, view, deco_destroy);
+    if (view->deco_registered) {
+        wl_list_remove(&view->deco_destroy.link);
+        wl_list_remove(&view->deco_request_mode.link);
+        view->deco_registered = false;
+    }
+    view->deco = NULL;
+    (void)data;
+}
+
+static void server_new_toplevel_decoration(struct wl_listener *listener, void *data) {
+    struct woodland_server *server =
+        wl_container_of(listener, server, new_toplevel_decoration);
+    struct wlr_xdg_toplevel_decoration_v1 *deco = data;
+    struct wlr_xdg_surface *xdg_surface = deco->toplevel->base;
+    if (!xdg_surface || !xdg_surface->data) {
+        return;
+    }
+    struct wlr_scene_tree *tree = xdg_surface->data;
+    struct woodland_view *view = tree->node.data;
+    if (!view) {
+        return;
+    }
+
+    /* 注册 mode 请求与销毁监听 */
+    view->deco = deco;
+    view->deco_request_mode.notify = deco_request_mode;
+    wl_signal_add(&deco->events.request_mode, &view->deco_request_mode);
+    view->deco_destroy.notify = deco_destroy;
+    wl_signal_add(&deco->events.destroy, &view->deco_destroy);
+    view->deco_registered = true;
+
+    /* 立即按客户端当前请求模式调整（set_mode 延迟到 initial commit） */
+    deco_apply_mode(view, deco->requested_mode);
+}
+
 /* ==================== init/finish ==================== */
 
 bool woodland_shell_init(struct woodland_server *server) {
@@ -652,10 +803,18 @@ bool woodland_shell_init(struct woodland_server *server) {
     server->foreign_toplevel_manager =
         wlr_foreign_toplevel_manager_v1_create(server->display);
 
+    server->xdg_decoration_manager =
+        wlr_xdg_decoration_manager_v1_create(server->display);
+
     server->new_xdg_toplevel.notify = server_new_xdg_toplevel;
     wl_signal_add(&server->xdg_shell->events.new_toplevel, &server->new_xdg_toplevel);
     server->new_xdg_popup.notify = server_new_xdg_popup;
     wl_signal_add(&server->xdg_shell->events.new_popup, &server->new_xdg_popup);
+    if (server->xdg_decoration_manager) {
+        server->new_toplevel_decoration.notify = server_new_toplevel_decoration;
+        wl_signal_add(&server->xdg_decoration_manager->events.new_toplevel_decoration,
+                      &server->new_toplevel_decoration);
+    }
 
     return true;
 }
@@ -664,6 +823,9 @@ void woodland_shell_finish(struct woodland_server *server) {
     if (server->xdg_shell) {
         wl_list_remove(&server->new_xdg_toplevel.link);
         wl_list_remove(&server->new_xdg_popup.link);
+    }
+    if (server->xdg_decoration_manager) {
+        wl_list_remove(&server->new_toplevel_decoration.link);
     }
 }
 
@@ -703,14 +865,54 @@ static void server_cursor_button(struct wl_listener *listener, void *data) {
         if (view) {
             woodland_view_focus(view);
         } else {
-            /* 点中 layer surface 时按 interactivity 给焦点 */
-            struct wlr_surface *lsurf = NULL;
-            double lsx, lsy;
-            struct wlr_layer_surface_v1 *layer = woodland_layer_surface_at(
-                server, server->cursor->x, server->cursor->y,
-                &lsurf, &lsx, &lsy);
-            if (layer) {
-                woodland_layer_try_focus(server, layer);
+            /* 未命中 surface：先查 SSD 区域（按钮/标题栏/边框） */
+            uint32_t edges = 0;
+            struct woodland_view *ssd_view = NULL;
+            enum woodland_ssd_part ssd_part = WOODLAND_SSD_NONE;
+            struct woodland_view *v;
+            wl_list_for_each(v, &server->views, link) {
+                enum woodland_ssd_part part = woodland_ssd_at(v,
+                    server->cursor->x, server->cursor->y, &edges);
+                if (part != WOODLAND_SSD_NONE) {
+                    ssd_part = part;
+                    ssd_view = v;
+                    break;
+                }
+            }
+            if (ssd_view) {
+                woodland_view_focus(ssd_view);
+                switch (ssd_part) {
+                case WOODLAND_SSD_BUTTON_CLOSE:
+                    wlr_xdg_toplevel_send_close(ssd_view->xdg_toplevel);
+                    break;
+                case WOODLAND_SSD_BUTTON_MAXIMIZE:
+                    view_set_maximized(ssd_view, !ssd_view->maximized);
+                    break;
+                case WOODLAND_SSD_BUTTON_MINIMIZE:
+                    view_set_minimized(ssd_view, true);
+                    break;
+                case WOODLAND_SSD_TITLEBAR:
+                    begin_interactive(ssd_view, WOODLAND_CURSOR_MOVE, 0);
+                    break;
+                case WOODLAND_SSD_BORDER_LEFT:
+                case WOODLAND_SSD_BORDER_RIGHT:
+                case WOODLAND_SSD_BORDER_TOP:
+                case WOODLAND_SSD_BORDER_BOTTOM:
+                    begin_interactive(ssd_view, WOODLAND_CURSOR_RESIZE, edges);
+                    break;
+                default:
+                    break;
+                }
+            } else {
+                /* 点中 layer surface 时按 interactivity 给焦点 */
+                struct wlr_surface *lsurf = NULL;
+                double lsx, lsy;
+                struct wlr_layer_surface_v1 *layer = woodland_layer_surface_at(
+                    server, server->cursor->x, server->cursor->y,
+                    &lsurf, &lsx, &lsy);
+                if (layer) {
+                    woodland_layer_try_focus(server, layer);
+                }
             }
         }
     }
