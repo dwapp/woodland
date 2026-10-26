@@ -10,16 +10,11 @@
 #include "view.h"
 #include "woodland.h"
 
-/* SSD 颜色（硬编码，premultiplied RGBA float）。见设计决策：硬编码常量。 */
-static const float COLOR_TITLEBAR_ACTIVE[4]   = {0.055f, 0.353f, 0.431f, 1.0f}; /* #0e5a6e */
-static const float COLOR_TITLEBAR_INACTIVE[4] = {0.200f, 0.200f, 0.200f, 1.0f}; /* #333333 */
-static const float COLOR_BORDER_ACTIVE[4]     = {0.102f, 0.490f, 0.573f, 1.0f}; /* #1a7d92 */
-static const float COLOR_BORDER_INACTIVE[4]   = {0.333f, 0.333f, 0.333f, 1.0f}; /* #555555 */
-static const float COLOR_BUTTON_CLOSE[4]      = {0.753f, 0.224f, 0.169f, 1.0f}; /* #c0392b */
-static const float COLOR_BUTTON_MAXIMIZE[4]   = {0.153f, 0.682f, 0.376f, 1.0f}; /* #27ae60 */
-static const float COLOR_BUTTON_MINIMIZE[4]   = {0.953f, 0.612f, 0.071f, 1.0f}; /* #f39c12 */
-
-static const float COLOR_TITLE_TEXT[4] = {1.0f, 1.0f, 1.0f, 1.0f};      /* 白色标题文字 */
+/* SSD 颜色（对齐 labwc 默认主题 theme_builtin()，premultiplied RGBA float） */
+static const float COLOR_TITLEBAR_ACTIVE[4]   = {0.882f, 0.871f, 0.859f, 1.0f}; /* #e1dedb */
+static const float COLOR_TITLEBAR_INACTIVE[4] = {0.965f, 0.961f, 0.957f, 1.0f}; /* #f6f5f4 */
+static const float COLOR_BORDER[4]            = {0.667f, 0.667f, 0.667f, 1.0f}; /* #aaaaaa */
+static const float COLOR_TITLE_TEXT[4]        = {0.0f, 0.0f, 0.0f, 1.0f};       /* #000000 标题文字 */
 
 enum { BORDER_TOP = 0, BORDER_BOTTOM, BORDER_LEFT, BORDER_RIGHT, BORDER_COUNT };
 enum { BUTTON_CLOSE = 0, BUTTON_MAXIMIZE, BUTTON_MINIMIZE, BUTTON_COUNT };
@@ -30,7 +25,7 @@ struct woodland_ssd {
     bool active;
     struct wlr_scene_rect *titlebar;
     struct wlr_scene_rect *border[BORDER_COUNT];
-    struct wlr_scene_rect *button[BUTTON_COUNT];
+    struct wlr_scene_buffer *button[BUTTON_COUNT];
     struct woodland_text_buffer *title_text;
     int width;   /* 内容宽（缓存的几何） */
     int height;  /* 内容高 */
@@ -74,7 +69,8 @@ static void ssd_layout(struct woodland_ssd *ssd) {
     wlr_scene_node_set_position(&ssd->border[BORDER_RIGHT]->node, w, 0);
     wlr_scene_rect_set_size(ssd->border[BORDER_RIGHT], bw, h);
 
-    /* 按钮：标题栏右侧，从右往左 close/maximize/minimize */
+    /* 按钮：labwc 默认 titleLayout "icon:iconify,max,close" 的右段，
+     * 自右向左 close/max/iconify；左段是窗口图标（woodland 无窗口图标，留空） */
     int bh = WOODLAND_SSD_BUTTON_H;
     int bwn = WOODLAND_SSD_BUTTON_W;
     int gap = WOODLAND_SSD_BUTTON_GAP;
@@ -86,9 +82,16 @@ static void ssd_layout(struct woodland_ssd *ssd) {
     x -= gap + bwn;
     wlr_scene_node_set_position(&ssd->button[BUTTON_MINIMIZE]->node, x, by);
 
-    /* 标题文字：左侧，避开按钮区（留 8px 内边距），内部垂直居中 */
+    /* 标题文字：在左侧留白与右侧按钮区之间居中（labwc window.label.text.justify: center） */
     if (ssd->title_text) {
-        woodland_text_buffer_set_position(ssd->title_text, 8, -th);
+        int title_w = woodland_text_buffer_get_width(ssd->title_text);
+        int right_btns = BUTTON_COUNT * bwn + (BUTTON_COUNT - 1) * gap;
+        int avail = w - right_btns;
+        int tx = (avail - title_w) / 2;
+        if (tx < 0) {
+            tx = 0;
+        }
+        woodland_text_buffer_set_position(ssd->title_text, tx, -th);
     }
 }
 
@@ -118,19 +121,21 @@ void woodland_ssd_create(struct woodland_view *view) {
     ssd->titlebar = make_rect(ssd->tree, 0, -WOODLAND_SSD_TITLEBAR_H,
         w, WOODLAND_SSD_TITLEBAR_H, COLOR_TITLEBAR_INACTIVE);
     ssd->border[BORDER_TOP] = make_rect(ssd->tree, 0, -WOODLAND_SSD_TITLEBAR_H - WOODLAND_SSD_BORDER_W,
-        w, WOODLAND_SSD_BORDER_W, COLOR_BORDER_INACTIVE);
+        w, WOODLAND_SSD_BORDER_W, COLOR_BORDER);
     ssd->border[BORDER_BOTTOM] = make_rect(ssd->tree, 0, h,
-        w, WOODLAND_SSD_BORDER_W, COLOR_BORDER_INACTIVE);
+        w, WOODLAND_SSD_BORDER_W, COLOR_BORDER);
     ssd->border[BORDER_LEFT] = make_rect(ssd->tree, -WOODLAND_SSD_BORDER_W, 0,
-        WOODLAND_SSD_BORDER_W, h, COLOR_BORDER_INACTIVE);
+        WOODLAND_SSD_BORDER_W, h, COLOR_BORDER);
     ssd->border[BORDER_RIGHT] = make_rect(ssd->tree, w, 0,
-        WOODLAND_SSD_BORDER_W, h, COLOR_BORDER_INACTIVE);
-    ssd->button[BUTTON_CLOSE] = make_rect(ssd->tree, 0, 0,
-        WOODLAND_SSD_BUTTON_W, WOODLAND_SSD_BUTTON_H, COLOR_BUTTON_CLOSE);
-    ssd->button[BUTTON_MAXIMIZE] = make_rect(ssd->tree, 0, 0,
-        WOODLAND_SSD_BUTTON_W, WOODLAND_SSD_BUTTON_H, COLOR_BUTTON_MAXIMIZE);
-    ssd->button[BUTTON_MINIMIZE] = make_rect(ssd->tree, 0, 0,
-        WOODLAND_SSD_BUTTON_W, WOODLAND_SSD_BUTTON_H, COLOR_BUTTON_MINIMIZE);
+        WOODLAND_SSD_BORDER_W, h, COLOR_BORDER);
+
+    /* 按钮符号（—/□/×，黑色，对齐 labwc 默认黑色按钮图标） */
+    ssd->button[BUTTON_CLOSE] = woodland_button_icon_create(
+        ssd->tree, WOODLAND_SSD_ICON_CLOSE, WOODLAND_SSD_BUTTON_W);
+    ssd->button[BUTTON_MAXIMIZE] = woodland_button_icon_create(
+        ssd->tree, WOODLAND_SSD_ICON_MAXIMIZE, WOODLAND_SSD_BUTTON_W);
+    ssd->button[BUTTON_MINIMIZE] = woodland_button_icon_create(
+        ssd->tree, WOODLAND_SSD_ICON_ICONIFY, WOODLAND_SSD_BUTTON_W);
 
     ssd->title_text = woodland_text_buffer_create(ssd->tree);
 
@@ -189,16 +194,14 @@ void woodland_ssd_update(struct woodland_view *view) {
     }
     int w, h;
     ssd_content_size(view, &w, &h);
-    if (w != ssd->width || h != ssd->height) {
-        ssd->width = w;
-        ssd->height = h;
-        ssd_layout(ssd);
-    }
-    /* 标题文本每次刷新（title 变化时 layout 未变，单独更新文本） */
+    ssd->width = w;
+    ssd->height = h;
+    /* 先更新标题文本（内部会重算宽度），再统一布局，保证标题按新宽度居中 */
     if (ssd->title_text) {
-        woodland_text_buffer_update(ssd->title_text,
-            view->title, WOODLAND_SSD_TITLEBAR_H, COLOR_TITLE_TEXT, 1.0f);
+        woodland_text_buffer_update(ssd->title_text, view->title,
+            WOODLAND_SSD_TITLEBAR_H, COLOR_TITLE_TEXT, 1.0f);
     }
+    ssd_layout(ssd);
     ssd_apply_state(ssd);
 }
 
@@ -209,11 +212,8 @@ void woodland_ssd_set_active(struct woodland_view *view, bool active) {
     }
     ssd->active = active;
     const float *tc = active ? COLOR_TITLEBAR_ACTIVE : COLOR_TITLEBAR_INACTIVE;
-    const float *bc = active ? COLOR_BORDER_ACTIVE : COLOR_BORDER_INACTIVE;
     wlr_scene_rect_set_color(ssd->titlebar, tc);
-    for (int i = 0; i < BORDER_COUNT; i++) {
-        wlr_scene_rect_set_color(ssd->border[i], bc);
-    }
+    /* 边框颜色 labwc 默认不随激活态变化（均为 #aaaaaa） */
 }
 
 /* 相对坐标（相对 view 内容原点）命中测试 */

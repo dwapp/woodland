@@ -17,6 +17,17 @@ struct woodland_text_buffer {
     int height;
 };
 
+/* 标题字体（对齐 labwc 默认主题 font_activewindow: sans, size 10） */
+#define WOODLAND_SSD_FONT "Sans 10"
+
+/* 给 pango layout 套用统一字体 */
+static void apply_font(PangoLayout *layout) {
+    PangoFontDescription *desc =
+        pango_font_description_from_string(WOODLAND_SSD_FONT);
+    pango_layout_set_font_description(layout, desc);
+    pango_font_description_free(desc);
+}
+
 /* ==================== cairo 图像 surface → wlr_buffer ==================== */
 
 static struct wlr_buffer_impl text_buffer_impl;
@@ -110,6 +121,7 @@ static int text_measure(const char *text) {
     cairo_surface_t *surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
     cairo_t *c = cairo_create(surf);
     PangoLayout *layout = pango_cairo_create_layout(c);
+    apply_font(layout);
     pango_layout_set_text(layout, text, -1);
     pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
     int w, h;
@@ -162,6 +174,7 @@ void woodland_text_buffer_update(struct woodland_text_buffer *tb,
     cairo_set_source_rgba(c, color[0], color[1], color[2], color[3]);
 
     PangoLayout *layout = pango_cairo_create_layout(c);
+    apply_font(layout);
     pango_layout_set_text(layout, text, -1);
     pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
     pango_layout_set_width(layout, logical_w * PANGO_SCALE);
@@ -200,4 +213,76 @@ void woodland_text_buffer_set_position(struct woodland_text_buffer *tb,
         return;
     }
     wlr_scene_node_set_position(&tb->scene_buffer->node, x, y);
+}
+
+int woodland_text_buffer_get_width(const struct woodland_text_buffer *tb) {
+    return tb ? tb->width : 0;
+}
+
+/* ==================== 按钮符号（cairo 画线） ==================== */
+
+static struct wlr_buffer *icon_create_buffer(int size, float scale,
+        enum woodland_ssd_button_icon icon) {
+    if (size <= 0) {
+        return NULL;
+    }
+    int px = (int)(size * scale);
+    if (px <= 0) px = 1;
+
+    cairo_surface_t *surf =
+        cairo_image_surface_create(CAIRO_FORMAT_ARGB32, px, px);
+    cairo_surface_set_device_scale(surf, scale, scale);
+    cairo_t *c = cairo_create(surf);
+
+    /* 黑色符号，1.5px 线宽 */
+    cairo_set_source_rgba(c, 0.0, 0.0, 0.0, 1.0);
+    cairo_set_line_width(c, 1.5);
+    cairo_set_line_cap(c, CAIRO_LINE_CAP_ROUND);
+
+    double pad = size * 0.30;
+    double s = size - 2 * pad;
+
+    switch (icon) {
+    case WOODLAND_SSD_ICON_ICONIFY:
+        /* 底部横线 — */
+        cairo_move_to(c, pad, size * 0.6);
+        cairo_line_to(c, size - pad, size * 0.6);
+        break;
+    case WOODLAND_SSD_ICON_MAXIMIZE:
+        /* 空心方框 □ */
+        cairo_rectangle(c, pad, pad, s, s);
+        break;
+    case WOODLAND_SSD_ICON_CLOSE:
+        /* 叉 × */
+        cairo_move_to(c, pad, pad);
+        cairo_line_to(c, size - pad, size - pad);
+        cairo_move_to(c, size - pad, pad);
+        cairo_line_to(c, pad, size - pad);
+        break;
+    }
+    cairo_stroke(c);
+
+    cairo_surface_flush(surf);
+    cairo_destroy(c);
+
+    struct text_wlr_buffer *b = calloc(1, sizeof(*b));
+    if (!b) {
+        cairo_surface_destroy(surf);
+        return NULL;
+    }
+    b->surface = surf;
+    wlr_buffer_init(&b->base, &text_buffer_impl, size, size);
+    return &b->base;
+}
+
+struct wlr_scene_buffer *woodland_button_icon_create(
+        struct wlr_scene_tree *parent, enum woodland_ssd_button_icon icon,
+        int size) {
+    struct wlr_buffer *buf = icon_create_buffer(size, 1.0f, icon);
+    if (!buf) {
+        return NULL;
+    }
+    struct wlr_scene_buffer *sb = wlr_scene_buffer_create(parent, buf);
+    wlr_buffer_drop(buf);
+    return sb;
 }

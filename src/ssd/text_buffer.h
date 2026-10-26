@@ -6,6 +6,14 @@
 #include <wlr/types/wlr_buffer.h>
 
 struct wlr_scene_tree;
+struct wlr_scene_buffer;
+
+/** 按钮符号类型（对齐 labwc titleLayout: iconify/max/close）。 */
+enum woodland_ssd_button_icon {
+    WOODLAND_SSD_ICON_ICONIFY,
+    WOODLAND_SSD_ICON_MAXIMIZE,
+    WOODLAND_SSD_ICON_CLOSE,
+};
 
 /** 用 pango + cairo 渲染单行文本到 wlr_buffer 的封装。 */
 struct woodland_text_buffer;
@@ -35,5 +43,16 @@ void woodland_text_buffer_update(struct woodland_text_buffer *tb,
 /** 移动文本 buffer 节点。 */
 void woodland_text_buffer_set_position(struct woodland_text_buffer *tb,
                                        int x, int y);
+
+/** 返回文本逻辑宽度（空文本返回 0）。 */
+int woodland_text_buffer_get_width(const struct woodland_text_buffer *tb);
+
+/**
+ * 用 cairo 绘制一个黑色按钮符号（—/□/×）并作为 wlr_scene_buffer 挂到 parent。
+ * @return 新创建的 scene_buffer 节点（归调用者销毁）；失败返回 NULL。
+ */
+struct wlr_scene_buffer *woodland_button_icon_create(
+    struct wlr_scene_tree *parent, enum woodland_ssd_button_icon icon,
+    int size);
 
 #endif /* WOODLAND_TEXT_BUFFER_H */
