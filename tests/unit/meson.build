@@ -19,7 +19,7 @@ test('cursor', test_cursor)
 test_seat = executable('test_seat', 'test_seat.c',
   dependencies: [wlroots, wayland_server],
   include_directories: woodland_inc,
-  link_with: [cursor_lib, output_lib, shell_lib, seat_lib, workspace_lib])
+  link_with: [cursor_lib, output_lib, shell_lib, seat_lib, workspace_lib, layer_lib])
 test('seat', test_seat)
 
 test_workspace = executable('test_workspace', 'test_workspace.c',
@@ -31,7 +31,7 @@ test('workspace', test_workspace)
 test_view = executable('test_view', 'test_view.c',
   dependencies: [wlroots, wayland_server],
   include_directories: woodland_inc,
-  link_with: [output_lib, shell_lib])
+  link_with: [output_lib, shell_lib, layer_lib])
 test('view', test_view)
 
 test_layer = executable('test_layer', 'test_layer.c',

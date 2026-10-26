@@ -5,6 +5,7 @@
 #include <wlr/types/wlr_scene.h>
 #include <wlr/util/log.h>
 
+#include "layer.h"
 #include "output.h"
 #include "view.h"
 #include "workspace.h"
@@ -14,19 +15,17 @@
 
 struct wlr_box woodland_view_maximized_geometry(struct woodland_server *server) {
     struct wlr_box box = {0};
-    struct wlr_output *output = NULL;
 
     /* 取输出 layout 中的第一个输出作为最大化目标（单输出场景与多输出首个一致） */
     struct woodland_output *wo;
     wl_list_for_each(wo, &server->outputs, link) {
-        output = wo->wlr_output;
-        break;
-    }
-    if (!output) {
+        /* 有 usable_area（已扣除 exclusive zone）则用它，否则用完整 box */
+        if (wo->usable_area.width != 0 || wo->usable_area.height != 0) {
+            return wo->usable_area;
+        }
+        wlr_output_layout_get_box(server->output_layout, wo->wlr_output, &box);
         return box;
     }
-
-    wlr_output_layout_get_box(server->output_layout, output, &box);
     return box;
 }
 
@@ -688,7 +687,19 @@ static void server_cursor_button(struct wl_listener *listener, void *data) {
         struct wlr_surface *surface = NULL;
         struct woodland_view *view = woodland_view_at(server,
             server->cursor->x, server->cursor->y, &surface, &sx, &sy);
-        woodland_view_focus(view);
+        if (view) {
+            woodland_view_focus(view);
+        } else {
+            /* 点中 layer surface 时按 interactivity 给焦点 */
+            struct wlr_surface *lsurf = NULL;
+            double lsx, lsy;
+            struct wlr_layer_surface_v1 *layer = woodland_layer_surface_at(
+                server, server->cursor->x, server->cursor->y,
+                &lsurf, &lsx, &lsy);
+            if (layer) {
+                woodland_layer_try_focus(server, layer);
+            }
+        }
     }
 }
 

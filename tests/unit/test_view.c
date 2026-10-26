@@ -43,6 +43,14 @@ int main(void) {
     assert(fs_geo.width == 800);
     assert(fs_geo.height == 600);
 
+    /* exclusive zone 占用后 maximize 应避开：手动设 usable_area */
+    struct woodland_output *wo =
+        wl_container_of(server.outputs.next, wo, link);
+    wo->usable_area = (struct wlr_box){ .x = 10, .y = 10, .width = 780, .height = 580 };
+    struct wlr_box max_geo2 = woodland_view_maximized_geometry(&server);
+    assert(max_geo2.x == 10 && max_geo2.y == 10);
+    assert(max_geo2.width == 780 && max_geo2.height == 580);
+
     woodland_output_finish(&server);
 
     /* 逆序释放 wlr 资源 */
