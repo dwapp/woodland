@@ -10,6 +10,7 @@
 #include <wlr/util/log.h>
 
 #include "cursor.h"
+#include "layer.h"
 #include "output.h"
 #include "seat.h"
 #include "server.h"
@@ -115,6 +116,11 @@ bool woodland_server_init(struct woodland_server *server) {
         return false;
     }
 
+    if (!woodland_layer_init(server)) {
+        wlr_log(WLR_ERROR, "failed to init layer");
+        return false;
+    }
+
     woodland_cursor_init_events(server);
 
     server->cursor_shape_manager =
@@ -176,6 +182,7 @@ void woodland_server_finish(struct woodland_server *server) {
     }
     woodland_cursor_finish_events(server);
     woodland_shell_finish(server);
+    woodland_layer_finish(server);
     woodland_workspace_finish(server);
     woodland_seat_finish(server);
     woodland_cursor_finish(server);

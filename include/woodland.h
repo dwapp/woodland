@@ -10,6 +10,7 @@
 #include <wlr/types/wlr_cursor_shape_v1.h>
 #include <wlr/types/wlr_ext_workspace_v1.h>
 #include <wlr/types/wlr_foreign_toplevel_management_v1.h>
+#include <wlr/types/wlr_layer_shell_v1.h>
 #include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_scene.h>
 #include <wlr/types/wlr_seat.h>
@@ -74,6 +75,11 @@ struct woodland_server {
     struct wlr_ext_workspace_group_handle_v1 *ext_workspace_group;
     struct wl_listener ext_workspace_commit;
     struct wlr_foreign_toplevel_manager_v1 *foreign_toplevel_manager;
+
+    /* layer-shell */
+    struct wlr_layer_shell_v1 *layer_shell;
+    struct wl_listener new_layer_surface;
+    struct wlr_layer_surface_v1 *focused_layer; // 当前持有键盘焦点的 layer surface
 
     const char *startup_cmd;              // -s 启动命令
 };
