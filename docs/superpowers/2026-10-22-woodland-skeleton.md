@@ -253,12 +253,14 @@ extern const struct woodland_layout tiling_layout;
 - `layout/`：堆叠布局（默认）
 - **验证**：能启动并操作多个 Wayland/X11 窗口，工作区切换，窗口状态（最大化/最小化/全屏）
 
-> **进展（2026-10-26）**：M2 部分完成。tinywl 能力补齐已合入（PR #1）；xdg-shell 完整状态处理（maximize/fullscreen/minimize/set_title/set_app_id/set_parent）+ 10 工作区（Alt+1~9/0 切换）+ ext-workspace-v1 + foreign-toplevel-v1 已在 `feature/m3-xdg-workspaces` 实现；layer-shell（zwlr_layer_shell_v1 四层 + exclusive zone + 焦点）已在 `feature/m4-layer-shell` 实现。剩余：xwayland、SSD、贴边（snap）等后续里程碑。
+> **进展（2026-10-26）**：M2 部分完成。tinywl 能力补齐已合入（PR #1）；xdg-shell 完整状态处理（maximize/fullscreen/minimize/set_title/set_app_id/set_parent）+ 10 工作区（Alt+1~9/0 切换）+ ext-workspace-v1 + foreign-toplevel-v1 已在 `feature/m3-xdg-workspaces` 实现；layer-shell（zwlr_layer_shell_v1 四层 + exclusive zone + 焦点）已在 `feature/m4-layer-shell` 实现；SSD（zxdg_decoration_manager_v1 + labwc 默认样式对齐）已在 `feature/m6-ssd` 实现。剩余：xwayland、贴边（snap）等后续里程碑。
 
 ### M3：SSD 装饰 + 特效（可选）
 - `decorations/`：SSD 标题栏/边框/阴影（参考 labwc `src/ssd/`）
 - `effects/`：scenefx 模糊/圆角/阴影，编译期+运行期开关
 - **验证**：SSD 窗口正常显示装饰；`effects=false` 时零特效开销；`effects=true` 时模糊/圆角生效
+
+> **进展（2026-10-26）**：SSD 已完成（`feature/m6-ssd`）。`zxdg_decoration_manager_v1` 协商（client-side 优先，未声明时默认 server-side）、`src/ssd/ssd.c` 标题栏/边框/拖拽命中、`src/ssd/text_buffer.c`（pango+cairo 渲染标题、cairo 绘制按钮符号）。默认样式对齐 labwc `theme_builtin()`：边框 1px `#aaaaaa`、标题栏 active `#e1dedb` / inactive `#f6f5f4`、标题 `#000000` 居中（Sans 10）、按钮 26×26 黑色符号（`icon:iconify,max,close` 右段）。剩余：hover/按下按钮态、阴影与圆角（属 `effects/`）。
 
 ### M4：协议兼容（私有协议）
 - `protocols/` 框架：XML 提取 + 协议实现分派

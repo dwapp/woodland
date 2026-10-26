@@ -8,12 +8,12 @@
 struct woodland_view;
 struct wlr_scene_tree;
 
-/* SSD 几何常量（硬编码，见设计决策） */
-#define WOODLAND_SSD_TITLEBAR_H 24
-#define WOODLAND_SSD_BORDER_W   4
-#define WOODLAND_SSD_BUTTON_W  18
-#define WOODLAND_SSD_BUTTON_H  18
-#define WOODLAND_SSD_BUTTON_GAP 4
+/* SSD 几何常量（对齐 labwc 默认主题，见 theme_builtin()） */
+#define WOODLAND_SSD_TITLEBAR_H 26
+#define WOODLAND_SSD_BORDER_W   1
+#define WOODLAND_SSD_BUTTON_W  26
+#define WOODLAND_SSD_BUTTON_H  26
+#define WOODLAND_SSD_BUTTON_GAP 0
 
 /** SSD 可命中区域类型（用于光标交互）。 */
 enum woodland_ssd_part {

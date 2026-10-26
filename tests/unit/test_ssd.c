@@ -32,20 +32,32 @@ int main(void) {
     woodland_ssd_create(&view);
     assert(view.ssd != NULL);
 
-    /* titlebar 命中：布局坐标 (100, 88) → 相对 (0, -12) 在标题栏内 */
+    /* titlebar 命中：布局坐标 (150, 88) → 相对 (50, -12) 在标题栏内（高 26） */
     uint32_t edges = 0;
     enum woodland_ssd_part part =
         woodland_ssd_at(&view, 150, 88, &edges);
     assert(part == WOODLAND_SSD_TITLEBAR);
 
-    /* 关闭按钮命中：按钮从右侧 w-4-18=378 起，相对 x∈[378,396]，y∈[-21,-3] */
+    /* 按钮：宽 26、间距 0，自右向左 close/max/iconify，占 [400-78, 400) */
+    /* 关闭按钮：相对 x∈[374,400) */
     part = woodland_ssd_at(&view, 100 + 380, 100 - 12, &edges);
     assert(part == WOODLAND_SSD_BUTTON_CLOSE);
+    /* 最大化：相对 x∈[348,374) */
+    part = woodland_ssd_at(&view, 100 + 360, 100 - 12, &edges);
+    assert(part == WOODLAND_SSD_BUTTON_MAXIMIZE);
+    /* 最小化：相对 x∈[322,348) */
+    part = woodland_ssd_at(&view, 100 + 330, 100 - 12, &edges);
+    assert(part == WOODLAND_SSD_BUTTON_MINIMIZE);
 
-    /* 左边框命中：相对 x∈[-4,0) */
-    part = woodland_ssd_at(&view, 100 - 2, 100 + 150, &edges);
+    /* 左边框命中：相对 x∈[-1,0)（边框宽 1） */
+    part = woodland_ssd_at(&view, 100 - 0.5, 100 + 150, &edges);
     assert(part == WOODLAND_SSD_BORDER_LEFT);
     assert(edges == WLR_EDGE_LEFT);
+
+    /* 顶部边框命中：相对 y∈[-27,-26) */
+    part = woodland_ssd_at(&view, 100 + 200, 100 - 26.5, &edges);
+    assert(part == WOODLAND_SSD_BORDER_TOP);
+    assert(edges == WLR_EDGE_TOP);
 
     /* 内容区不命中 SSD */
     part = woodland_ssd_at(&view, 100 + 200, 100 + 150, &edges);
