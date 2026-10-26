@@ -3,9 +3,14 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+#include <wlr/types/wlr_alpha_modifier_v1.h>
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_cursor_shape_v1.h>
+#include <wlr/types/wlr_data_control_v1.h>
 #include <wlr/types/wlr_data_device.h>
+#include <wlr/types/wlr_ext_data_control_v1.h>
+#include <wlr/types/wlr_fractional_scale_v1.h>
+#include <wlr/types/wlr_single_pixel_buffer_v1.h>
 #include <wlr/types/wlr_subcompositor.h>
 #include <wlr/util/log.h>
 
@@ -84,6 +89,16 @@ bool woodland_server_init(struct woodland_server *server) {
     wlr_compositor_create(server->display, 5, server->renderer);
     wlr_subcompositor_create(server->display);
     wlr_data_device_manager_create(server->display);
+
+    /* 补充协议：全部是 wlroots 原生 manager，创建即完成接线。
+     * alpha_modifier / single_pixel 由 scene 自动集成；
+     * fractional_scale 由 scene surface 进入输出时自动 notify。
+     * 版本号对齐 labwc（ext_data_control=1、fractional_scale=1）。 */
+    wlr_data_control_manager_v1_create(server->display);
+    wlr_ext_data_control_manager_v1_create(server->display, 1);
+    wlr_single_pixel_buffer_manager_v1_create(server->display);
+    wlr_fractional_scale_manager_v1_create(server->display, 1);
+    wlr_alpha_modifier_v1_create(server->display);
 
     server->scene = wlr_scene_create();
     if (!server->scene) {
