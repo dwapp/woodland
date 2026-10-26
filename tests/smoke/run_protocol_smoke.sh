@@ -72,5 +72,30 @@ echo "$output" | grep -q 'zwlr_layer_shell_v1' || {
     echo "$output" >&2
     exit 1
 }
+echo "$output" | grep -q 'ext_data_control_manager_v1' || {
+    echo "ext_data_control_manager_v1 global missing from output:" >&2
+    echo "$output" >&2
+    exit 1
+}
+echo "$output" | grep -q 'zwlr_data_control_manager_v1' || {
+    echo "zwlr_data_control_manager_v1 global missing from output:" >&2
+    echo "$output" >&2
+    exit 1
+}
+echo "$output" | grep -q 'wp_alpha_modifier_v1' || {
+    echo "wp_alpha_modifier_v1 global missing from output:" >&2
+    echo "$output" >&2
+    exit 1
+}
+echo "$output" | grep -q 'wp_single_pixel_buffer_manager_v1' || {
+    echo "wp_single_pixel_buffer_manager_v1 global missing from output:" >&2
+    echo "$output" >&2
+    exit 1
+}
+echo "$output" | grep -q 'wp_fractional_scale_manager_v1' || {
+    echo "wp_fractional_scale_manager_v1 global missing from output:" >&2
+    echo "$output" >&2
+    exit 1
+}
 
-echo "protocol smoke OK: wl_compositor + xdg_wm_base + ext_workspace_manager_v1 + zwlr_foreign_toplevel_manager_v1 + zwlr_layer_shell_v1 present"
+echo "protocol smoke OK: wl_compositor + xdg_wm_base + ext_workspace_manager_v1 + zwlr_foreign_toplevel_manager_v1 + zwlr_layer_shell_v1 + ext_data_control_manager_v1 + zwlr_data_control_manager_v1 + wp_alpha_modifier_v1 + wp_single_pixel_buffer_manager_v1 + wp_fractional_scale_manager_v1 present"
