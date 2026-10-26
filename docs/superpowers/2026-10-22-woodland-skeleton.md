@@ -253,7 +253,7 @@ extern const struct woodland_layout tiling_layout;
 - `layout/`：堆叠布局（默认）
 - **验证**：能启动并操作多个 Wayland/X11 窗口，工作区切换，窗口状态（最大化/最小化/全屏）
 
-> **进展（2026-10-26）**：M2 部分完成。tinywl 能力补齐已合入（PR #1）；xdg-shell 完整状态处理（maximize/fullscreen/minimize/set_title/set_app_id/set_parent）+ 10 工作区（Alt+1~9/0 切换）+ ext-workspace-v1 + foreign-toplevel-v1 已在 `feature/m3-xdg-workspaces` 实现。剩余：xwayland、SSD、贴边（snap）等后续里程碑。
+> **进展（2026-10-26）**：M2 部分完成。tinywl 能力补齐已合入（PR #1）；xdg-shell 完整状态处理（maximize/fullscreen/minimize/set_title/set_app_id/set_parent）+ 10 工作区（Alt+1~9/0 切换）+ ext-workspace-v1 + foreign-toplevel-v1 已在 `feature/m3-xdg-workspaces` 实现；layer-shell（zwlr_layer_shell_v1 四层 + exclusive zone + 焦点）已在 `feature/m4-layer-shell` 实现。剩余：xwayland、SSD、贴边（snap）等后续里程碑。
 
 ### M3：SSD 装饰 + 特效（可选）
 - `decorations/`：SSD 标题栏/边框/阴影（参考 labwc `src/ssd/`）
