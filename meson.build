@@ -27,6 +27,8 @@ wlroots = dependency('wlroots-0.20', version: wlroots_version,
 
 wayland_server = dependency('wayland-server')
 xkbcommon = dependency('xkbcommon')
+pangocairo = dependency('pangocairo')
+cairo = dependency('cairo')
 
 # 特性开关 → config.h
 conf_data = configuration_data()

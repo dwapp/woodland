@@ -397,6 +397,10 @@ static void xdg_toplevel_set_title(struct wl_listener *listener, void *data) {
         wlr_foreign_toplevel_handle_v1_set_title(
             view->toplevel_handle, view->title);
     }
+    /* 标题变化时刷新 SSD 标题文本 */
+    if (view->ssd) {
+        woodland_ssd_update(view);
+    }
     (void)data;
 }
 

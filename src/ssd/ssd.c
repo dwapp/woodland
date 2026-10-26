@@ -6,6 +6,7 @@
 #include <wlr/util/log.h>
 
 #include "ssd.h"
+#include "text_buffer.h"
 #include "view.h"
 #include "woodland.h"
 
@@ -18,6 +19,8 @@ static const float COLOR_BUTTON_CLOSE[4]      = {0.753f, 0.224f, 0.169f, 1.0f}; 
 static const float COLOR_BUTTON_MAXIMIZE[4]   = {0.153f, 0.682f, 0.376f, 1.0f}; /* #27ae60 */
 static const float COLOR_BUTTON_MINIMIZE[4]   = {0.953f, 0.612f, 0.071f, 1.0f}; /* #f39c12 */
 
+static const float COLOR_TITLE_TEXT[4] = {1.0f, 1.0f, 1.0f, 1.0f};      /* 白色标题文字 */
+
 enum { BORDER_TOP = 0, BORDER_BOTTOM, BORDER_LEFT, BORDER_RIGHT, BORDER_COUNT };
 enum { BUTTON_CLOSE = 0, BUTTON_MAXIMIZE, BUTTON_MINIMIZE, BUTTON_COUNT };
 
@@ -28,6 +31,7 @@ struct woodland_ssd {
     struct wlr_scene_rect *titlebar;
     struct wlr_scene_rect *border[BORDER_COUNT];
     struct wlr_scene_rect *button[BUTTON_COUNT];
+    struct woodland_text_buffer *title_text;
     int width;   /* 内容宽（缓存的几何） */
     int height;  /* 内容高 */
 };
@@ -81,6 +85,11 @@ static void ssd_layout(struct woodland_ssd *ssd) {
     wlr_scene_node_set_position(&ssd->button[BUTTON_MAXIMIZE]->node, x, by);
     x -= gap + bwn;
     wlr_scene_node_set_position(&ssd->button[BUTTON_MINIMIZE]->node, x, by);
+
+    /* 标题文字：左侧，避开按钮区（留 8px 内边距），内部垂直居中 */
+    if (ssd->title_text) {
+        woodland_text_buffer_set_position(ssd->title_text, 8, -th);
+    }
 }
 
 void woodland_ssd_create(struct woodland_view *view) {
@@ -123,6 +132,8 @@ void woodland_ssd_create(struct woodland_view *view) {
     ssd->button[BUTTON_MINIMIZE] = make_rect(ssd->tree, 0, 0,
         WOODLAND_SSD_BUTTON_W, WOODLAND_SSD_BUTTON_H, COLOR_BUTTON_MINIMIZE);
 
+    ssd->title_text = woodland_text_buffer_create(ssd->tree);
+
     if (!ssd->titlebar || !ssd->border[BORDER_TOP] || !ssd->border[BORDER_BOTTOM]
         || !ssd->border[BORDER_LEFT] || !ssd->border[BORDER_RIGHT]
         || !ssd->button[BUTTON_CLOSE] || !ssd->button[BUTTON_MAXIMIZE]
@@ -144,7 +155,10 @@ void woodland_ssd_destroy(struct woodland_view *view) {
         return;
     }
     view->ssd = NULL;
-    /* scene 树销毁会级联释放所有 rect 子节点 */
+    /* title_text 的 scene buffer 节点随 ssd->tree 级联销毁，这里只 free 封装 */
+    if (ssd->title_text) {
+        free(ssd->title_text);
+    }
     wlr_scene_node_destroy(&ssd->tree->node);
     free(ssd);
 }
@@ -179,6 +193,11 @@ void woodland_ssd_update(struct woodland_view *view) {
         ssd->width = w;
         ssd->height = h;
         ssd_layout(ssd);
+    }
+    /* 标题文本每次刷新（title 变化时 layout 未变，单独更新文本） */
+    if (ssd->title_text) {
+        woodland_text_buffer_update(ssd->title_text,
+            view->title, WOODLAND_SSD_TITLEBAR_H, COLOR_TITLE_TEXT, 1.0f);
     }
     ssd_apply_state(ssd);
 }
