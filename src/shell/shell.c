@@ -83,6 +83,95 @@ void woodland_view_placement(const struct wlr_box *area,
     out->height = content_h;
 }
 
+/*
+ * 单轴贴边吸附：在候选线里挑位移最小的一个。
+ *
+ * 候选来源：工作区两端（起点贴 lo、末边贴 hi）+ 每条外部边（贴上去 / 贴回来）。
+ * 位移超过 threshold 的一概不吸附——这样"吸附"只在贴近时生效，
+ * 光标继续拉动超过阈值就自然脱离（labwc edge resistance 的简化版）。
+ */
+int woodland_snap_axis(int desired, int size, int lo, int hi,
+                       const int *edges, int n_edges, int threshold) {
+    /* 外框比工作区还大：没有可贴的意义，原样返回 */
+    if (size > hi - lo) {
+        return desired;
+    }
+
+    int best = desired;
+    int best_delta = threshold + 1;
+
+    /* 先试工作区两端，再试其它窗口的边（同距离时更偏向前者） */
+    for (int i = 0; i < n_edges + 2; i++) {
+        if (i > 1) {
+            int edge = edges[i - 2];
+            int d0 = edge - desired;
+            int d1 = d0 - size;   /* 我们的末边贴到该边 */
+            if (d0 < 0) {
+                d0 = -d0;
+            }
+            if (d1 < 0) {
+                d1 = -d1;
+            }
+            if (d0 <= threshold && d0 < best_delta) {
+                best_delta = d0;
+                best = edge;
+            }
+            if (d1 <= threshold && d1 < best_delta) {
+                best_delta = d1;
+                best = edge - size;
+            }
+            continue;
+        }
+
+        int cand = i == 0 ? lo : hi - size;
+        int delta = cand - desired;
+        if (delta < 0) {
+            delta = -delta;
+        }
+        if (delta <= threshold && delta < best_delta) {
+            best_delta = delta;
+            best = cand;
+        }
+    }
+
+    return best;
+}
+
+/* transient 相对父窗口居中（参考 labwc box_center：居中后退回 bound 内侧） */
+void woodland_view_center_on(const struct wlr_box *parent_box,
+                             int content_w, int content_h,
+                             const struct woodland_ssd_margins *margins,
+                             const struct wlr_box *area, struct wlr_box *out) {
+    int outer_w = content_w + margins->left + margins->right;
+    int outer_h = content_h + margins->top + margins->bottom;
+
+    int x = parent_box->x + (parent_box->width - outer_w) / 2;
+    int y = parent_box->y + (parent_box->height - outer_h) / 2;
+
+    if (x < area->x) {
+        x = area->x;
+    } else if (x + outer_w > area->x + area->width) {
+        x = area->x + area->width - outer_w;
+    }
+    if (y < area->y) {
+        y = area->y;
+    } else if (y + outer_h > area->y + area->height) {
+        y = area->y + area->height - outer_h;
+    }
+    /* 子窗口比工作区还大：贴左上，不产生负向越界 */
+    if (x < area->x) {
+        x = area->x;
+    }
+    if (y < area->y) {
+        y = area->y;
+    }
+
+    out->x = x + margins->left;
+    out->y = y + margins->top;
+    out->width = content_w;
+    out->height = content_h;
+}
+
 /* ==================== view 聚焦与命中 ==================== */
 
 void woodland_view_focus(struct woodland_view *view) {
@@ -163,7 +252,7 @@ struct woodland_view *woodland_view_at(struct woodland_server *server,
 
 /* ==================== 窗口放置 ==================== */
 
-/* 首次 map：按 SSD 边距层叠放置，保证标题栏/边框落在工作区内 */
+/* 首次 map：transient 相对父窗口居中，其余按 SSD 边距层叠放置 */
 static void view_place_initial(struct woodland_view *view) {
     struct woodland_server *server = view->server;
     struct woodland_ssd_margins margins;
@@ -173,17 +262,28 @@ static void view_place_initial(struct woodland_view *view) {
     int content_w = view->xdg_toplevel->base->geometry.width;
     int content_h = view->xdg_toplevel->base->geometry.height;
 
-    /* 层叠步进：第 n 个窗口偏移 (n-1)%8 格，避免新窗口完全盖住上一个 */
-    int count = 0;
-    struct woodland_view *it;
-    wl_list_for_each(it, &server->views, link) {
-        count++;
-    }
-    int cascade = ((count - 1) % 8) * 32;
-
     struct wlr_box geometry;
-    woodland_view_placement(&area, content_w, content_h, &margins,
-                            cascade, &geometry);
+    if (view->parent && view->parent->mapped) {
+        /* 对话框/工具窗：以父窗口内容框为中心（越界时贴回工作区） */
+        struct wlr_box parent_box = {
+            .x = view->parent->scene_tree->node.x,
+            .y = view->parent->scene_tree->node.y,
+            .width = view->parent->xdg_toplevel->base->geometry.width,
+            .height = view->parent->xdg_toplevel->base->geometry.height,
+        };
+        woodland_view_center_on(&parent_box, content_w, content_h, &margins,
+                                &area, &geometry);
+    } else {
+        /* 层叠步进：第 n 个窗口偏移 (n-1)%8 格，避免新窗口完全盖住上一个 */
+        int count = 0;
+        struct woodland_view *it;
+        wl_list_for_each(it, &server->views, link) {
+            count++;
+        }
+        int cascade = ((count - 1) % 8) * 32;
+        woodland_view_placement(&area, content_w, content_h, &margins,
+                                cascade, &geometry);
+    }
     wlr_scene_node_set_position(&view->scene_tree->node, geometry.x, geometry.y);
 }
 
@@ -234,6 +334,15 @@ static void xdg_toplevel_unmap(struct wl_listener *listener, void *data) {
     struct woodland_view *view = wl_container_of(listener, view, unmap);
     if (view == view->server->grabbed_view) {
         woodland_cursor_reset_mode(view->server);
+    }
+    /* SSD 即将销毁：清掉指向它的指针状态，避免悬空 */
+    if (view->server->hover_view == view) {
+        view->server->hover_view = NULL;
+        view->server->hover_part = WOODLAND_SSD_NONE;
+    }
+    if (view->server->pressed_view == view) {
+        view->server->pressed_view = NULL;
+        view->server->pressed_part = WOODLAND_SSD_NONE;
     }
     view->mapped = false;
     wl_list_remove(&view->link);
@@ -292,6 +401,14 @@ static void xdg_toplevel_destroy(struct wl_listener *listener, void *data) {
     /* SSD 在 scene 树销毁时级联释放，这里只清指针 */
     if (view->ssd) {
         woodland_ssd_destroy(view);
+    }
+    if (view->server->hover_view == view) {
+        view->server->hover_view = NULL;
+        view->server->hover_part = WOODLAND_SSD_NONE;
+    }
+    if (view->server->pressed_view == view) {
+        view->server->pressed_view = NULL;
+        view->server->pressed_part = WOODLAND_SSD_NONE;
     }
     free(view);
     (void)data;
@@ -582,11 +699,118 @@ void woodland_cursor_reset_mode(struct woodland_server *server) {
     server->grabbed_view = NULL;
 }
 
+/* ==================== SSD 按钮 hover/pressed ==================== */
+
+/*
+ * 更新悬停的按钮。
+ *
+ * 指针每帧只会悬停在一个 SSD 部件上，所以这里维护"唯一的 hover 目标"：
+ * 换了视图先清旧的，避免两个窗口同时亮着。
+ */
+static void ssd_update_hover(struct woodland_server *server,
+                             struct woodland_view *view,
+                             enum woodland_ssd_part part) {
+    if (server->hover_view == view && server->hover_part == part) {
+        return;
+    }
+    if (server->hover_view && server->hover_view != view) {
+        woodland_ssd_set_hover(server->hover_view, WOODLAND_SSD_NONE);
+    }
+    server->hover_view = view;
+    server->hover_part = part;
+    if (view) {
+        woodland_ssd_set_hover(view, part);
+    }
+}
+
+/* 清掉按下态（不执行动作） */
+static void ssd_clear_pressed(struct woodland_server *server) {
+    if (server->pressed_view) {
+        woodland_ssd_set_pressed(server->pressed_view, WOODLAND_SSD_NONE);
+    }
+    server->pressed_view = NULL;
+    server->pressed_part = WOODLAND_SSD_NONE;
+}
+
+/* 吸附候选边上限：每个视图贡献 2 条边（左右或上下） */
+#define WOODLAND_SNAP_MAX_EDGES 64
+
+/*
+ * 收集吸附候选线（纯数据，交给 woodland_snap_axis 决策）。
+ *
+ * x_edges=true 收集竖直边（外框左右边），此时只考虑纵向范围与
+ * [span_start, span_start+span_len) 有交叠的视图——否则隔着半屏的窗口
+ * 也会把我们的窗口吸过去。
+ */
+static int collect_snap_edges(struct woodland_server *server,
+                              struct woodland_view *exclude, bool x_edges,
+                              int span_start, int span_len,
+                              int *edges, int max_edges) {
+    int n = 0;
+    struct woodland_view *it;
+    wl_list_for_each(it, &server->views, link) {
+        if (it == exclude || !it->mapped || it->minimized || it->fullscreen
+            || it->workspace != exclude->workspace) {
+            continue;
+        }
+        struct woodland_ssd_margins m;
+        woodland_ssd_get_margins(it, &m);
+        struct wlr_box box = {
+            .x = it->scene_tree->node.x - m.left,
+            .y = it->scene_tree->node.y - m.top,
+            .width = it->xdg_toplevel->base->geometry.width + m.left + m.right,
+            .height = it->xdg_toplevel->base->geometry.height + m.top + m.bottom,
+        };
+        int other_start = x_edges ? box.y : box.x;
+        int other_len = x_edges ? box.height : box.width;
+        if (other_start + other_len <= span_start
+            || span_start + span_len <= other_start) {
+            continue;
+        }
+        if (n + 2 > max_edges) {
+            break;
+        }
+        edges[n++] = x_edges ? box.x : box.y;
+        edges[n++] = x_edges ? box.x + box.width : box.y + box.height;
+    }
+    return n;
+}
+
+/*
+ * 拖动移动：外框跟随光标，靠近工作区边缘或其它窗口边缘时吸附。
+ *
+ * 先按 x 吸附（用当前的纵向跨度判断邻窗是否并排），再按吸附后的 x
+ * 算 y，避免两次吸附互相打脸。
+ */
 static void process_cursor_move(struct woodland_server *server) {
     struct woodland_view *view = server->grabbed_view;
+    struct woodland_ssd_margins margins;
+    woodland_ssd_get_margins(view, &margins);
+    struct wlr_box *geo = &view->xdg_toplevel->base->geometry;
+
+    /* grab_x/y 是光标相对内容原点的偏移，换算成外框原点 */
+    int x = (int)(server->cursor->x - server->grab_x) - margins.left;
+    int y = (int)(server->cursor->y - server->grab_y) - margins.top;
+    int outer_w = geo->width + margins.left + margins.right;
+    int outer_h = geo->height + margins.top + margins.bottom;
+
+    if (!view->maximized && !view->fullscreen) {
+        struct wlr_box area = woodland_view_maximized_geometry(server);
+        int edges[WOODLAND_SNAP_MAX_EDGES];
+
+        int n = collect_snap_edges(server, view, true, y, outer_h,
+                                   edges, WOODLAND_SNAP_MAX_EDGES);
+        x = woodland_snap_axis(x, outer_w, area.x, area.x + area.width,
+                               edges, n, WOODLAND_SNAP_DISTANCE);
+
+        n = collect_snap_edges(server, view, false, x, outer_w,
+                               edges, WOODLAND_SNAP_MAX_EDGES);
+        y = woodland_snap_axis(y, outer_h, area.y, area.y + area.height,
+                               edges, n, WOODLAND_SNAP_DISTANCE);
+    }
+
     wlr_scene_node_set_position(&view->scene_tree->node,
-        server->cursor->x - server->grab_x,
-        server->cursor->y - server->grab_y);
+        x + margins.left, y + margins.top);
 }
 
 static void process_cursor_resize(struct woodland_server *server) {
@@ -674,8 +898,17 @@ void woodland_cursor_process_motion(struct woodland_server *server, uint32_t tim
         wlr_cursor_set_xcursor(server->cursor, server->xcursor_manager,
             cursor_name);
         wlr_seat_pointer_clear_focus(seat);
+        /* 只有按钮才亮；标题栏/边框传 NONE（顺带清掉上一个按钮的高亮） */
+        bool on_button = ssd_part == WOODLAND_SSD_BUTTON_CLOSE
+            || ssd_part == WOODLAND_SSD_BUTTON_MAXIMIZE
+            || ssd_part == WOODLAND_SSD_BUTTON_MINIMIZE;
+        ssd_update_hover(server, on_button ? ssd_view : NULL,
+                         on_button ? ssd_part : WOODLAND_SSD_NONE);
         return;
     }
+
+    /* 离开 SSD 区域（含移到客户端内容上）：清掉按钮高亮 */
+    ssd_update_hover(server, NULL, WOODLAND_SSD_NONE);
 
     if (!view) {
         wlr_cursor_set_xcursor(server->cursor, server->xcursor_manager, "default");
@@ -961,6 +1194,41 @@ static void server_cursor_motion_absolute(struct wl_listener *listener, void *da
     woodland_cursor_process_motion(server, event->time_msec);
 }
 
+/*
+ * 释放 SSD 按钮：只有指针仍停在按下的那个按钮上才执行动作。
+ *
+ * 动作放在释放而不是按下，是为了让"按下态"有意义（按住时能看到凹陷），
+ * 同时支持按住后拖离按钮取消（与常见工具包的行为一致）。
+ */
+static void ssd_button_release(struct woodland_server *server) {
+    struct woodland_view *view = server->pressed_view;
+    enum woodland_ssd_part part = server->pressed_part;
+    ssd_clear_pressed(server);
+
+    if (!view || !view->mapped) {
+        return;
+    }
+    uint32_t edges = 0;
+    if (woodland_ssd_at(view, server->cursor->x, server->cursor->y, &edges)
+            != part) {
+        return;
+    }
+
+    switch (part) {
+    case WOODLAND_SSD_BUTTON_CLOSE:
+        wlr_xdg_toplevel_send_close(view->xdg_toplevel);
+        break;
+    case WOODLAND_SSD_BUTTON_MAXIMIZE:
+        view_set_maximized(view, !view->maximized);
+        break;
+    case WOODLAND_SSD_BUTTON_MINIMIZE:
+        view_set_minimized(view, true);
+        break;
+    default:
+        break;
+    }
+}
+
 static void server_cursor_button(struct wl_listener *listener, void *data) {
     struct woodland_server *server =
         wl_container_of(listener, server, cursor_button);
@@ -969,7 +1237,10 @@ static void server_cursor_button(struct wl_listener *listener, void *data) {
         event->time_msec, event->button, event->state);
     if (event->state == WL_POINTER_BUTTON_STATE_RELEASED) {
         woodland_cursor_reset_mode(server);
+        ssd_button_release(server);
     } else {
+        /* 新的按下：先清掉上一次遗留的按下态 */
+        ssd_clear_pressed(server);
         double sx, sy;
         struct wlr_surface *surface = NULL;
         struct woodland_view *view = woodland_view_at(server,
@@ -995,13 +1266,12 @@ static void server_cursor_button(struct wl_listener *listener, void *data) {
                 woodland_view_focus(ssd_view);
                 switch (ssd_part) {
                 case WOODLAND_SSD_BUTTON_CLOSE:
-                    wlr_xdg_toplevel_send_close(ssd_view->xdg_toplevel);
-                    break;
                 case WOODLAND_SSD_BUTTON_MAXIMIZE:
-                    view_set_maximized(ssd_view, !ssd_view->maximized);
-                    break;
                 case WOODLAND_SSD_BUTTON_MINIMIZE:
-                    view_set_minimized(ssd_view, true);
+                    /* 记下按下目标，释放时再执行（见 ssd_button_release） */
+                    server->pressed_view = ssd_view;
+                    server->pressed_part = ssd_part;
+                    woodland_ssd_set_pressed(ssd_view, ssd_part);
                     break;
                 case WOODLAND_SSD_TITLEBAR:
                     begin_interactive(ssd_view, WOODLAND_CURSOR_MOVE, 0);

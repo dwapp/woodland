@@ -97,4 +97,30 @@ void woodland_view_placement(const struct wlr_box *area,
                              const struct woodland_ssd_margins *margins,
                              int cascade, struct wlr_box *out);
 
+/** 贴边吸附阈值（px）：外框边缘距目标线不超过该值即吸附（labwc screen_edge_strength 默认 20）。 */
+#define WOODLAND_SNAP_DISTANCE 20
+
+/**
+ * 单轴贴边吸附（纯函数）。
+ *
+ * desired/size：移动中外框在该轴的起点与长度；[lo, hi] 是工作区在该轴的范围；
+ * edges/n_edges 是其它窗口外框在该轴的边坐标；threshold 是吸附阈值。
+ *
+ * 候选位置 = 工作区两端（起点贴 lo、末边贴 hi）+ 每条 edge 的"贴上去"(edge)
+ * 与"贴回来"(edge - size)，取位移最小且在阈值内者。外框比工作区还大时不吸附。
+ */
+int woodland_snap_axis(int desired, int size, int lo, int hi,
+                       const int *edges, int n_edges, int threshold);
+
+/**
+ * transient 相对父窗口居中（纯函数，语义同 labwc view_compute_centered_position）。
+ *
+ * 外框（内容 + margins）以 parent_box 为中心；越出 area 时贴回 area 内侧，
+ * 中心点也落不进 area 时贴左上。out 为内容原点。
+ */
+void woodland_view_center_on(const struct wlr_box *parent_box,
+                             int content_w, int content_h,
+                             const struct woodland_ssd_margins *margins,
+                             const struct wlr_box *area, struct wlr_box *out);
+
 #endif
