@@ -45,3 +45,9 @@ test_ssd = executable('test_ssd', 'test_ssd.c',
   include_directories: woodland_inc,
   link_with: [ssd_lib, shell_lib, output_lib, layer_lib])
 test('ssd', test_ssd)
+
+test_capture = executable('test_capture', 'test_capture.c',
+  dependencies: [wlroots, wayland_server],
+  include_directories: woodland_inc,
+  link_with: [capture_lib])
+test('capture', test_capture)

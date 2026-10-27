@@ -14,6 +14,8 @@ struct woodland_ssd;
 struct woodland_ssd_margins;
 struct wlr_surface;
 struct wlr_output;
+struct wlr_ext_foreign_toplevel_handle_v1;
+struct wlr_ext_image_capture_source_v1;
 
 struct woodland_view {
     struct wl_list link;               // woodland_server.views
@@ -37,6 +39,12 @@ struct woodland_view {
     struct wl_listener deco_request_mode; // zxdg_decoration 模式请求监听器
     struct wlr_box saved_geometry;     // 退出 max/fullscreen 时恢复
     struct wlr_foreign_toplevel_handle_v1 *toplevel_handle;
+    /* ext-foreign-toplevel-list-v1 的句柄（截图/任务栏客户端用） */
+    struct wlr_ext_foreign_toplevel_handle_v1 *ext_toplevel_handle;
+    struct wl_listener ext_handle_destroy;
+    /* 按窗口取源时惰性创建的捕获源，绑定 view->scene_tree */
+    struct wlr_ext_image_capture_source_v1 *capture_source;
+    struct wl_listener capture_source_destroy;
     struct wl_listener map;
     struct wl_listener unmap;
     struct wl_listener commit;

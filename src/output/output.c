@@ -6,6 +6,7 @@
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_scene.h>
+#include <wlr/types/wlr_xdg_output_v1.h>
 #include <wlr/util/log.h>
 
 #include "layer.h"
@@ -166,6 +167,13 @@ bool woodland_output_init(struct woodland_server *server) {
     if (!server->scene_layout) {
         wlr_output_layout_destroy(server->output_layout);
         server->output_layout = NULL;
+        return false;
+    }
+
+    /* xdg-output：客户端（grim 等截图工具）靠它拿输出的布局位置与逻辑尺寸，
+     * 否则只能按 wl_output 的物理模式猜，区域截图会算错。 */
+    if (!wlr_xdg_output_manager_v1_create(server->display, server->output_layout)) {
+        wlr_log(WLR_ERROR, "failed to create xdg-output manager");
         return false;
     }
 
