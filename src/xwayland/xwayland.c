@@ -312,7 +312,7 @@ static void xwl_request_activate(struct wl_listener *listener, void *data) {
     if (view->minimized) {
         woodland_view_set_minimized(view, false);
     }
-    woodland_view_focus(view);
+    woodland_focus_view(view, true);
     (void)data;
 }
 

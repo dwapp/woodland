@@ -8,6 +8,7 @@
 #include <wlr/types/wlr_scene.h>
 #include <xkbcommon/xkbcommon.h>
 
+#include "focus.h"
 #include "seat.h"
 #include "view.h"
 #include "workspace.h"
@@ -24,30 +25,20 @@ static void keyboard_handle_modifiers(struct wl_listener *listener, void *data) 
     (void)data;
 }
 
-static bool handle_keybinding(struct woodland_server *server, xkb_keysym_t sym) {
+static bool handle_keybinding(struct woodland_server *server, xkb_keysym_t sym,
+                              uint32_t modifiers) {
     switch (sym) {
     case XKB_KEY_Escape:
         wl_display_terminate(server->display);
         break;
-    case XKB_KEY_F1: {
-        /* 切到当前工作区内下一个可见（非最小化）窗口：
-         * views 链表头插（最近聚焦在头），从头往后找第一个
-         * 非当前焦点的可见窗口。 */
-        struct wlr_surface *focused =
-            server->seat->keyboard_state.focused_surface;
-        struct woodland_view *view;
-        wl_list_for_each(view, &server->views, link) {
-            if (!view->mapped || view->minimized ||
-                view->workspace != server->active_workspace) {
-                continue;
-            }
-            if (woodland_view_surface(view) != focused) {
-                woodland_view_focus(view);
-                break;
-            }
-        }
+    case XKB_KEY_Tab:
+        /* Alt+Tab 沿 z 序往前，Alt+Shift+Tab 往回（labwc NextWindow 语义） */
+        woodland_focus_cycle(server, (modifiers & WLR_MODIFIER_SHIFT) == 0);
         break;
-    }
+    case XKB_KEY_F1:
+        /* 老键位保留：等价于下一个窗口 */
+        woodland_focus_cycle(server, true);
+        break;
     case XKB_KEY_1:
     case XKB_KEY_2:
     case XKB_KEY_3:
@@ -98,7 +89,7 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data) {
     if ((modifiers & WLR_MODIFIER_ALT) &&
         event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
         for (int i = 0; i < nsyms; i++) {
-            handled = handle_keybinding(server, syms[i]);
+            handled = handle_keybinding(server, syms[i], modifiers);
         }
     }
 

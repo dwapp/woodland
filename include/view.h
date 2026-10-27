@@ -8,6 +8,11 @@
 #include <wlr/types/wlr_xdg_decoration_v1.h>
 #include <wlr/types/wlr_xdg_shell.h>
 
+/* 位置管理与焦点管理的接口都按 struct woodland_view 定义，
+ * 统一从这里带出去，调用方只需要 include "view.h"。 */
+#include "focus.h"
+#include "placement.h"
+
 struct woodland_server;
 struct woodland_workspace;
 struct woodland_ssd;
@@ -58,6 +63,15 @@ struct woodland_view {
     struct wl_listener deco_destroy;   // zxdg_decoration 销毁监听器
     struct wl_listener deco_request_mode; // zxdg_decoration 模式请求监听器
     struct wlr_box saved_geometry;     // 退出 max/fullscreen 时恢复
+    /*
+     * 贴边铺满（snap to edge）：
+     *   snapped_edges       当前贴住的边（WLR_EDGE_* 位掩码，0 = 未贴边）
+     *   pending_snap_edges  拖动中"松手就会贴"的边，释放时据此决策
+     *   snap_saved_geometry 贴边前的外框，拖出时按它恢复尺寸
+     */
+    uint32_t snapped_edges;
+    uint32_t pending_snap_edges;
+    struct wlr_box snap_saved_geometry;
     struct wlr_foreign_toplevel_handle_v1 *toplevel_handle;
     /* ext-foreign-toplevel-list-v1 的句柄（截图/任务栏客户端用） */
     struct wlr_ext_foreign_toplevel_handle_v1 *ext_toplevel_handle;
@@ -123,9 +137,6 @@ struct woodland_view *woodland_view_from_surface(struct wlr_surface *surface);
 /** 窗口 map：归入工作区、建 SSD、首次放置、聚焦。 */
 void woodland_view_map(struct woodland_view *view);
 
-/** 首次放置：transient 相对父窗口居中，其余按 SSD 边距层叠（只摆位置）。 */
-void woodland_view_place_initial(struct woodland_view *view);
-
 /** 窗口 unmap：清指针状态、销毁 SSD、摘出 views 链表。 */
 void woodland_view_unmap(struct woodland_view *view);
 
@@ -162,9 +173,6 @@ struct woodland_view *woodland_view_at(struct woodland_server *server,
                                        struct wlr_surface **surface,
                                        double *sx, double *sy);
 
-/** 聚焦视图（键盘焦点 + 激活态 + raise_to_top）。 */
-void woodland_view_focus(struct woodland_view *view);
-
 /** 交互式移动/缩放的指针 motion 处理。 */
 void woodland_cursor_process_motion(struct woodland_server *server, uint32_t time);
 
@@ -175,49 +183,9 @@ void woodland_cursor_reset_mode(struct woodland_server *server);
 void woodland_cursor_init_events(struct woodland_server *server);
 void woodland_cursor_finish_events(struct woodland_server *server);
 
-/** 最大化几何（布局坐标，取输出 layout 的活动 box）。 */
-struct wlr_box woodland_view_maximized_geometry(struct woodland_server *server);
-
-/** 全屏几何（指定输出的完整 box，布局坐标）。 */
-struct wlr_box woodland_view_fullscreen_geometry(struct woodland_server *server,
-                                                 struct wlr_output *output);
-
-/**
- * 计算新窗口的内容原点（布局坐标）。
- *
- * area 为可用工作区，content_w/h 为客户端内容尺寸，margins 为 SSD 外扩，
- * cascade 为层叠偏移像素。外框（内容 + margins）整体落在 area 内，
- * 这样标题栏不会被输出边缘裁掉。
+/*
+ * 几何相关的纯函数（放置/吸附/居中/约束/贴边铺满）与焦点管理接口
+ * 分别在 placement.h / focus.h 里声明，本头文件已一并 include。
  */
-void woodland_view_placement(const struct wlr_box *area,
-                             int content_w, int content_h,
-                             const struct woodland_ssd_margins *margins,
-                             int cascade, struct wlr_box *out);
-
-/** 贴边吸附阈值（px）：外框边缘距目标线不超过该值即吸附（labwc screen_edge_strength 默认 20）。 */
-#define WOODLAND_SNAP_DISTANCE 20
-
-/**
- * 单轴贴边吸附（纯函数）。
- *
- * desired/size：移动中外框在该轴的起点与长度；[lo, hi] 是工作区在该轴的范围；
- * edges/n_edges 是其它窗口外框在该轴的边坐标；threshold 是吸附阈值。
- *
- * 候选位置 = 工作区两端（起点贴 lo、末边贴 hi）+ 每条 edge 的"贴上去"(edge)
- * 与"贴回来"(edge - size)，取位移最小且在阈值内者。外框比工作区还大时不吸附。
- */
-int woodland_snap_axis(int desired, int size, int lo, int hi,
-                       const int *edges, int n_edges, int threshold);
-
-/**
- * transient 相对父窗口居中（纯函数，语义同 labwc view_compute_centered_position）。
- *
- * 外框（内容 + margins）以 parent_box 为中心；越出 area 时贴回 area 内侧，
- * 中心点也落不进 area 时贴左上。out 为内容原点。
- */
-void woodland_view_center_on(const struct wlr_box *parent_box,
-                             int content_w, int content_h,
-                             const struct woodland_ssd_margins *margins,
-                             const struct wlr_box *area, struct wlr_box *out);
 
 #endif

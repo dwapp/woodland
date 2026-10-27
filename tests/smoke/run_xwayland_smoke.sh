@@ -14,13 +14,25 @@ BIN="${1:-./build/src/woodland}"
 XOVERRIDE="${2:-./build/tests/xoverride}"
 [ -x "$BIN" ] || { echo "binary not found: $BIN" >&2; exit 125; }
 
-for tool in Xwayland xterm grim lswt convert file; do
+for tool in Xwayland grim lswt convert identify file; do
     command -v "$tool" >/dev/null 2>&1 || {
         echo "$tool not found, skip xwayland smoke" >&2
         exit 77
     }
 done
 [ -x "$XOVERRIDE" ] || { echo "xoverride not built, skip" >&2; exit 77; }
+
+# 终端窗口最接近真实使用场景，但它要分配 pty；受限沙箱里没有 /dev/ptmx
+# 时退到 xlogo —— 同样是普通 X11 顶层窗口，只是不依赖 pty。
+if [ -e /dev/ptmx ] && command -v xterm >/dev/null 2>&1; then
+    XAPP=xterm
+    XAPP_ARGS="-geometry 60x12"
+else
+    command -v xlogo >/dev/null 2>&1 || {
+        echo "neither xterm nor xlogo available, skip" >&2; exit 77; }
+    XAPP=xlogo
+    XAPP_ARGS="-geometry 300x200"
+fi
 
 unset WAYLAND_DISPLAY
 export XDG_RUNTIME_DIR="$(mktemp -d)"
@@ -73,19 +85,22 @@ DISPLAY_NAME="$(sed -n 's/.*DISPLAY=\(:[0-9][0-9]*\)$/\1/p' "$WORK/comp.log" | h
 export DISPLAY="$DISPLAY_NAME"
 
 # ---- 1) managed 的 X11 顶层窗口 ----
-xterm -geometry 60x12 >"$WORK/xterm.log" 2>&1 &
+# shellcheck disable=SC2086
+"$XAPP" $XAPP_ARGS >"$WORK/xapp.log" 2>&1 &
 client_pids="$client_pids $!"
 
 toplevels=""
 i=0
 while [ "$i" -lt 80 ]; do
     toplevels="$(lswt -j 2>/dev/null || true)"
-    echo "$toplevels" | grep -q '"xterm"' && break
+    echo "$toplevels" | grep -q "\"$XAPP\"" && break
     sleep 0.1; i=$((i+1))
 done
-echo "$toplevels" | grep -q '"xterm"' || {
-    echo "xterm toplevel not listed by lswt:" >&2
+echo "$toplevels" | grep -q "\"$XAPP\"" || {
+    echo "$XAPP toplevel not listed by lswt:" >&2
     echo "$toplevels" >&2
+    echo "--- client log ---" >&2
+    cat "$WORK/xapp.log" >&2 || true
     exit 1
 }
 count_before="$(echo "$toplevels" | grep -c '"app_id"' || true)"
@@ -102,7 +117,8 @@ color_count() {
         | sed -n "s/^ *\([0-9][0-9]*\):.*$3.*/\1/p" | head -1
 }
 
-TITLEBAR="#E1DEDB"   # labwc 激活态标题栏底色
+TITLEBAR="#E1DEDB"       # labwc 激活态标题栏底色
+TITLEBAR_DIM="#F7F6F4"   # 非激活态（0.965*255 渲染为 247，不是 246）
 n="$(color_count "$WORK/managed.png" "400x26+0+0" "$TITLEBAR")"
 [ -n "${n:-}" ] && [ "$n" -gt 1000 ] || {
     echo "no SSD titlebar pixels at top of the X11 window (got '${n:-0}')" >&2
@@ -140,4 +156,30 @@ count_after="$(echo "$toplevels_after" | grep -c '"app_id"' || true)"
     exit 1
 }
 
-echo "xwayland smoke OK: xterm toplevel + SSD titlebar + override-redirect ($DISPLAY_NAME)"
+# ---- 4) 焦点唯一 + 关闭后焦点回退 ----
+# 同一个工作区里只能有一个窗口是"激活态"：第二个窗口拿到焦点后，
+# 第一个的标题栏必须变暗；关掉焦点窗口后，剩下的窗口要重新变亮。
+"$XAPP" $XAPP_ARGS >"$WORK/xapp2.log" 2>&1 &
+second_pid=$!
+client_pids="$client_pids $second_pid"
+sleep 1.2
+grim "$WORK/focus-two.png"
+dim="$(identify -format '%wx%h' "$WORK/focus-two.png")"
+inactive_px="$(color_count "$WORK/focus-two.png" "$dim+0+0" "$TITLEBAR_DIM")"
+[ -n "${inactive_px:-}" ] && [ "$inactive_px" -gt 500 ] || {
+    echo "no inactive titlebar: focus is not exclusive (got '${inactive_px:-0}')" >&2
+    exit 1
+}
+
+kill -TERM "$second_pid" 2>/dev/null || true
+sleep 1.2
+grim "$WORK/focus-after.png"
+active_px="$(color_count "$WORK/focus-after.png" "$dim+0+0" "$TITLEBAR")"
+[ -n "${active_px:-}" ] && [ "$active_px" -gt 500 ] || {
+    echo "focus did not fall back after closing the focused window" \
+         "(active pixels: '${active_px:-0}')" >&2
+    exit 1
+}
+
+echo "xwayland smoke OK: $XAPP toplevel + SSD titlebar + override-redirect" \
+     "+ focus fallback ($DISPLAY_NAME)"

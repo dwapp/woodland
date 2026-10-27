@@ -7,6 +7,7 @@
 #include <wlr/types/wlr_scene.h>
 #include <wlr/util/log.h>
 
+#include "focus.h"
 #include "workspace.h"
 #include "woodland.h"
 
@@ -109,8 +110,9 @@ struct woodland_workspace *woodland_workspace_by_name(
     return NULL;
 }
 
-void woodland_workspace_switch(struct woodland_server *server,
-                               struct woodland_workspace *target) {
+void woodland_workspace_switch_focus(struct woodland_server *server,
+                                     struct woodland_workspace *target,
+                                     bool restore_focus) {
     if (target == NULL || target == server->active_workspace) {
         return;
     }
@@ -121,11 +123,20 @@ void woodland_workspace_switch(struct woodland_server *server,
     wlr_ext_workspace_handle_v1_set_active(target->ext_workspace, true);
     server->active_workspace = target;
 
-    /* 切换后清除键盘焦点，避免按键继续发给旧工作区的隐藏窗口。
-     * 但若焦点在 layer surface（跨工作区常驻）则保留。 */
-    if (server->seat && server->focused_layer == NULL) {
-        wlr_seat_keyboard_notify_clear_focus(server->seat);
+    if (restore_focus) {
+        /* 焦点回退会挑新工作区 z 序最上的窗口；若焦点在常驻的 layer
+         * surface 上则保持不动（见 woodland_focus_fallback）。 */
+        woodland_focus_fallback(server);
+    } else if (server->seat && server->focused_layer == NULL) {
+        /* 调用方马上要设焦点：先清掉旧工作区的键盘焦点，避免按键
+         * 继续发给已隐藏的窗口。 */
+        woodland_focus_none(server);
     }
+}
+
+void woodland_workspace_switch(struct woodland_server *server,
+                               struct woodland_workspace *target) {
+    woodland_workspace_switch_focus(server, target, true);
 }
 
 void woodland_workspace_finish(struct woodland_server *server) {
