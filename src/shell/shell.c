@@ -126,6 +126,21 @@ struct woodland_view *woodland_view_at(struct woodland_server *server,
 
 /* ==================== toplevel 视图事件 ==================== */
 
+/*
+ * 服务端最终采用的装饰模式。
+ *
+ * 只看策略位 deco_csd，**不能**看 view->ssd 是否存在：SSD 对象在 map 时才创建，
+ * 而 zxdg 协商发生在 initial commit（早于 map），那时 ssd 必为 NULL，
+ * 拿它判断会给"请求 server-side"的客户端回一个 client-side configure，
+ * 客户端于是自己再画一条标题栏 —— 叠加我们的 SSD 就是双标题栏（foot 即此例）。
+ */
+static enum wlr_xdg_toplevel_decoration_v1_mode
+view_decoration_mode(const struct woodland_view *view) {
+    return view->deco_csd
+        ? WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE
+        : WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE;
+}
+
 static void xdg_toplevel_map(struct wl_listener *listener, void *data) {
     struct woodland_view *view = wl_container_of(listener, view, map);
     struct woodland_server *server = view->server;
@@ -168,10 +183,8 @@ static void xdg_toplevel_commit(struct wl_listener *listener, void *data) {
         wlr_xdg_toplevel_set_size(view->xdg_toplevel, 0, 0);
         /* initial commit：此时 surface 已 initialized，可以 set_mode 完成 zxdg 协商 */
         if (view->deco) {
-            enum wlr_xdg_toplevel_decoration_v1_mode mode = view->ssd
-                ? WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE
-                : WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE;
-            wlr_xdg_toplevel_decoration_v1_set_mode(view->deco, mode);
+            wlr_xdg_toplevel_decoration_v1_set_mode(view->deco,
+                view_decoration_mode(view));
         }
     }
     /* 内容尺寸/状态变化后同步 SSD 几何（标题栏/边框/按钮） */
@@ -748,12 +761,11 @@ static void deco_request_mode(struct wl_listener *listener, void *data) {
 
     deco_apply_mode(view, deco->requested_mode);
 
-    /* 仅在 surface 已 initialized 时才能 schedule configure */
+    /* 仅在 surface 已 initialized 时才能 schedule configure；回给客户端的模式
+     * 必须是"我们实际会采用的模式"，否则客户端会重复画装饰 */
     if (deco->toplevel->base->initialized) {
-        enum wlr_xdg_toplevel_decoration_v1_mode mode = view->ssd
-            ? WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE
-            : WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE;
-        wlr_xdg_toplevel_decoration_v1_set_mode(deco, mode);
+        wlr_xdg_toplevel_decoration_v1_set_mode(deco,
+            view_decoration_mode(view));
     }
 }
 
@@ -790,8 +802,12 @@ static void server_new_toplevel_decoration(struct wl_listener *listener, void *d
     wl_signal_add(&deco->events.destroy, &view->deco_destroy);
     view->deco_registered = true;
 
-    /* 立即按客户端当前请求模式调整（set_mode 延迟到 initial commit） */
+    /* 立即按客户端当前请求模式调整（未 initialized 时 set_mode 延迟到 initial commit） */
     deco_apply_mode(view, deco->requested_mode);
+    if (xdg_surface->initialized) {
+        wlr_xdg_toplevel_decoration_v1_set_mode(deco,
+            view_decoration_mode(view));
+    }
 }
 
 /* ==================== init/finish ==================== */
