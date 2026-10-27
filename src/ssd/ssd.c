@@ -64,26 +64,61 @@ static struct wlr_scene_rect *make_rect(struct wlr_scene_tree *parent,
     return r;
 }
 
+/*
+ * 单条边框矩形的几何（相对内容原点）。woodland 没有圆角（圆角属 effects/），
+ * 所以取 labwc 的直角/tiled 形态：上下边横向跨满（含左右边框的宽度），
+ * 左右边纵向从标题栏顶延伸到底部——四边首尾相接，标题栏也被边框围住，
+ * 不留 1px 的空隙。
+ */
+static void ssd_border_geometry(int w, int h, int index,
+        int *out_x, int *out_y, int *out_w, int *out_h) {
+    int th = WOODLAND_SSD_TITLEBAR_H;
+    int b = WOODLAND_SSD_BORDER_W;
+    switch (index) {
+    case BORDER_TOP:
+        *out_x = -b;
+        *out_y = -th - b;
+        *out_w = w + 2 * b;
+        *out_h = b;
+        break;
+    case BORDER_BOTTOM:
+        *out_x = -b;
+        *out_y = h;
+        *out_w = w + 2 * b;
+        *out_h = b;
+        break;
+    case BORDER_LEFT:
+        *out_x = -b;
+        *out_y = -th;
+        *out_w = b;
+        *out_h = th + h;
+        break;
+    default: /* BORDER_RIGHT */
+        *out_x = w;
+        *out_y = -th;
+        *out_w = b;
+        *out_h = th + h;
+        break;
+    }
+}
+
 /* 重新摆放所有组件（标题栏/边框/按钮） */
 static void ssd_layout(struct woodland_ssd *ssd) {
     int w = ssd->width;
     int h = ssd->height;
     int th = WOODLAND_SSD_TITLEBAR_H;
-    int bw = WOODLAND_SSD_BORDER_W;
 
     /* 标题栏：内容顶部上方 */
     wlr_scene_node_set_position(&ssd->titlebar->node, 0, -th);
     wlr_scene_rect_set_size(ssd->titlebar, w, th);
 
-    /* 边框：包在内容四周（负坐标），四角由相邻边自然覆盖 */
-    wlr_scene_node_set_position(&ssd->border[BORDER_TOP]->node, 0, -th - bw);
-    wlr_scene_rect_set_size(ssd->border[BORDER_TOP], w, bw);
-    wlr_scene_node_set_position(&ssd->border[BORDER_BOTTOM]->node, 0, h);
-    wlr_scene_rect_set_size(ssd->border[BORDER_BOTTOM], w, bw);
-    wlr_scene_node_set_position(&ssd->border[BORDER_LEFT]->node, -bw, 0);
-    wlr_scene_rect_set_size(ssd->border[BORDER_LEFT], bw, h);
-    wlr_scene_node_set_position(&ssd->border[BORDER_RIGHT]->node, w, 0);
-    wlr_scene_rect_set_size(ssd->border[BORDER_RIGHT], bw, h);
+    /* 边框：包住内容 + 标题栏，构成完整外框（负坐标） */
+    for (int i = 0; i < BORDER_COUNT; i++) {
+        int bx, by, rw, rh;
+        ssd_border_geometry(w, h, i, &bx, &by, &rw, &rh);
+        wlr_scene_node_set_position(&ssd->border[i]->node, bx, by);
+        wlr_scene_rect_set_size(ssd->border[i], rw, rh);
+    }
 
     /* 按钮：labwc 默认 titleLayout "icon:iconify,max,close" 的右段，
      * 自右向左 close/max/iconify；左段是窗口图标（woodland 无窗口图标，留空） */
@@ -134,16 +169,11 @@ void woodland_ssd_create(struct woodland_view *view) {
     ssd->height = h;
     ssd->active = false;
 
-    ssd->titlebar = make_rect(ssd->tree, 0, -WOODLAND_SSD_TITLEBAR_H,
-        w, WOODLAND_SSD_TITLEBAR_H, COLOR_TITLEBAR_INACTIVE);
-    ssd->border[BORDER_TOP] = make_rect(ssd->tree, 0, -WOODLAND_SSD_TITLEBAR_H - WOODLAND_SSD_BORDER_W,
-        w, WOODLAND_SSD_BORDER_W, COLOR_BORDER);
-    ssd->border[BORDER_BOTTOM] = make_rect(ssd->tree, 0, h,
-        w, WOODLAND_SSD_BORDER_W, COLOR_BORDER);
-    ssd->border[BORDER_LEFT] = make_rect(ssd->tree, -WOODLAND_SSD_BORDER_W, 0,
-        WOODLAND_SSD_BORDER_W, h, COLOR_BORDER);
-    ssd->border[BORDER_RIGHT] = make_rect(ssd->tree, w, 0,
-        WOODLAND_SSD_BORDER_W, h, COLOR_BORDER);
+    /* 位置/尺寸都交给 ssd_layout() 统一设置，这里只建节点（1x1 占位） */
+    ssd->titlebar = make_rect(ssd->tree, 0, 0, 1, 1, COLOR_TITLEBAR_INACTIVE);
+    for (int i = 0; i < BORDER_COUNT; i++) {
+        ssd->border[i] = make_rect(ssd->tree, 0, 0, 1, 1, COLOR_BORDER);
+    }
 
     /* 按钮符号（—/□/×，黑色，对齐 labwc 默认黑色按钮图标） */
     ssd->button[BUTTON_CLOSE] = woodland_button_icon_create(
@@ -238,7 +268,6 @@ static enum woodland_ssd_part ssd_hit_relative(struct woodland_ssd *ssd,
     int w = ssd->width;
     int h = ssd->height;
     int th = WOODLAND_SSD_TITLEBAR_H;
-    int bw = WOODLAND_SSD_BORDER_W;
 
     /* 标题栏（含按钮） */
     if (rx >= 0 && rx < w && ry >= -th && ry < 0) {
@@ -264,25 +293,25 @@ static enum woodland_ssd_part ssd_hit_relative(struct woodland_ssd *ssd,
         return WOODLAND_SSD_TITLEBAR;
     }
 
-    /* 顶部边框 */
-    if (rx >= -bw && rx < w + bw && ry >= -th - bw && ry < -th) {
-        *edges = WLR_EDGE_TOP;
-        return WOODLAND_SSD_BORDER_TOP;
-    }
-    /* 底部边框 */
-    if (rx >= 0 && rx < w && ry >= h && ry < h + bw) {
-        *edges = WLR_EDGE_BOTTOM;
-        return WOODLAND_SSD_BORDER_BOTTOM;
-    }
-    /* 左/右边框 */
-    if (ry >= 0 && ry < h) {
-        if (rx >= -bw && rx < 0) {
-            *edges = WLR_EDGE_LEFT;
-            return WOODLAND_SSD_BORDER_LEFT;
-        }
-        if (rx >= w && rx < w + bw) {
-            *edges = WLR_EDGE_RIGHT;
-            return WOODLAND_SSD_BORDER_RIGHT;
+    /* 边框：几何与 ssd_layout() 共用 ssd_border_geometry()，保证所见即所点 */
+    static const enum woodland_ssd_part part_of[BORDER_COUNT] = {
+        [BORDER_TOP] = WOODLAND_SSD_BORDER_TOP,
+        [BORDER_BOTTOM] = WOODLAND_SSD_BORDER_BOTTOM,
+        [BORDER_LEFT] = WOODLAND_SSD_BORDER_LEFT,
+        [BORDER_RIGHT] = WOODLAND_SSD_BORDER_RIGHT,
+    };
+    static const uint32_t edge_of[BORDER_COUNT] = {
+        [BORDER_TOP] = WLR_EDGE_TOP,
+        [BORDER_BOTTOM] = WLR_EDGE_BOTTOM,
+        [BORDER_LEFT] = WLR_EDGE_LEFT,
+        [BORDER_RIGHT] = WLR_EDGE_RIGHT,
+    };
+    for (int i = 0; i < BORDER_COUNT; i++) {
+        int bx, by, rw, rh;
+        ssd_border_geometry(w, h, i, &bx, &by, &rw, &rh);
+        if (rx >= bx && rx < bx + rw && ry >= by && ry < by + rh) {
+            *edges = edge_of[i];
+            return part_of[i];
         }
     }
 
