@@ -253,7 +253,13 @@ extern const struct woodland_layout tiling_layout;
 - `layout/`：堆叠布局（默认）
 - **验证**：能启动并操作多个 Wayland/X11 窗口，工作区切换，窗口状态（最大化/最小化/全屏）
 
-> **进展（2026-10-26）**：M2 部分完成。tinywl 能力补齐已合入（PR #1）；xdg-shell 完整状态处理（maximize/fullscreen/minimize/set_title/set_app_id/set_parent）+ 10 工作区（Alt+1~9/0 切换）+ ext-workspace-v1 + foreign-toplevel-v1 已在 `feature/m3-xdg-workspaces` 实现；layer-shell（zwlr_layer_shell_v1 四层 + exclusive zone + 焦点）已在 `feature/m4-layer-shell` 实现；SSD（zxdg_decoration_manager_v1 + labwc 默认样式对齐）已在 `feature/m6-ssd` 实现。剩余：xwayland、贴边（snap）等后续里程碑。
+> **进展（2026-10-26）**：M2 部分完成。tinywl 能力补齐已合入（PR #1）；xdg-shell 完整状态处理（maximize/fullscreen/minimize/set_title/set_app_id/set_parent）+ 10 工作区（Alt+1~9/0 切换）+ ext-workspace-v1 + foreign-toplevel-v1 已在 `feature/m3-xdg-workspaces` 实现；layer-shell（zwlr_layer_shell_v1 四层 + exclusive zone + 焦点）已在 `feature/m4-layer-shell` 实现；SSD（zxdg_decoration_manager_v1 + labwc 默认样式对齐）已在 `feature/m6-ssd` 实现。
+>
+> **进展（2026-10-27，xwayland 基础支持）**：`feature/m8-xwayland` 补上 X11 视图，M2 收尾。做法不是给 X11 另起一套窗口管理，而是把 `struct woodland_view` 抽成**双后端**：新增 `type`（XDG / XWAYLAND）+ `xwayland_surface`，并把「surface / 内容矩形 / 请求尺寸 / 激活态 / 关闭」收进 `woodland_view_surface()`、`woodland_view_content_box()`、`woodland_view_request_size()`、`woodland_view_set_activated()`、`woodland_view_close()` 五个访问器；map/unmap/destroy/放置/最大化/全屏/最小化/焦点/贴边吸附全部两端共用，`ssd.c`、`seat.c`、`layer.c` 里写死 `xdg_toplevel` 的地方也改走访问器 —— X11 窗口因此**直接复用**同一套 labwc 风格 SSD 与吸附逻辑。
+> `src/xwayland/`：`wlr_xwayland_create(..., lazy=true)`（首个 X 客户端连接才拉进程）、`wlr_xwayland_set_seat()`、`server_start` 里导出 `DISPLAY`。时序按 labwc：`map_request`（尺寸已知 → 算放置 → `wlr_xwayland_surface_configure` 回 configure）→ `associate`（建 scene surface、挂 surface map/unmap/commit）→ `map`（建 SSD、进工作区、聚焦）。`_MOTIF_WM_HINTS` 请求无边框的窗口（`decorations == NO_BORDER`）不画 SSD。`override-redirect` 窗口走 unmanaged：单独一棵 scene 树按 X 侧坐标定位，不建 view、不进窗口列表、不参与焦点（菜单/提示/拖拽影子）。标题栏关闭按钮走 `wlr_xwayland_surface_close`，最大化/全屏走 `wlr_xwayland_surface_set_maximized/fullscreen` + 我们自己 configure 尺寸。
+> `-Dxwayland=disabled` 会连带关掉 wlroots 子项目的 xwayland 支持，因此 `shell.c` 里的 X11 分支用 `#if WOODLAND_HAVE_XWAYLAND` 一起编译掉。
+> 验证：新增 `tests/smoke/run_xwayland_smoke.sh` + `tests/smoke/xoverride.c`（建 override-redirect 窗口的小客户端），断言 xterm 出现在 `lswt` 列表、截图顶部 26px 有 `#E1DEDB` 标题栏底色、unmanaged 窗口不产生 toplevel 但红色像素可见；`meson test` 13 项全绿。手动验过 xterm 最大化（`wmctrl -b add,maximized_vert,maximized_horz` → 内容 1280x694、标题栏让出 26px）、层叠、以及两个 weston 客户端回归。剩余：X11 的面板/dock 类窗口、拖拽（DND）、`_NET_WM_ICON` 图标、treeland-xwindow-control。
+
 
 ### M3：SSD 装饰 + 特效（可选）
 - `decorations/`：SSD 标题栏/边框/阴影（参考 labwc `src/ssd/`）

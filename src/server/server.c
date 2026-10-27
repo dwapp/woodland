@@ -13,8 +13,10 @@
 #include <wlr/types/wlr_single_pixel_buffer_v1.h>
 #include <wlr/types/wlr_subcompositor.h>
 #include <wlr/util/log.h>
+#include <wlr/xwayland.h>
 
 #include "capture.h"
+#include "config.h"
 #include "cursor.h"
 #include "layer.h"
 #include "output.h"
@@ -23,6 +25,9 @@
 #include "view.h"
 #include "workspace.h"
 #include "woodland.h"
+#if WOODLAND_HAVE_XWAYLAND
+#include "xwayland.h"
+#endif
 
 static int handle_terminate(int signal, void *data) {
     struct wl_display *display = data;
@@ -87,7 +92,8 @@ bool woodland_server_init(struct woodland_server *server) {
     /* 基础协议：compositor 是客户端分配 surface 的必需接口；
      * subcompositor 处理 subsurface；data-device-manager 处理剪贴板。
      * 三者均挂在 display 上，随 display 销毁自动释放。 */
-    wlr_compositor_create(server->display, 5, server->renderer);
+    server->compositor = wlr_compositor_create(server->display, 5,
+                                               server->renderer);
     wlr_subcompositor_create(server->display);
     wlr_data_device_manager_create(server->display);
 
@@ -144,6 +150,15 @@ bool woodland_server_init(struct woodland_server *server) {
 
     woodland_cursor_init_events(server);
 
+    /* Xwayland：需要 compositor（surface 分配）与 seat（X 输入焦点），
+     * 所以放在 seat/shell 之后。lazy 模式：首个 X 客户端连接才拉进程。 */
+#if WOODLAND_HAVE_XWAYLAND
+    if (!woodland_xwayland_init(server)) {
+        wlr_log(WLR_ERROR, "failed to init xwayland");
+        return false;
+    }
+#endif
+
     server->cursor_shape_manager =
         wlr_cursor_shape_manager_v1_create(server->display, 1);
     if (!server->cursor_shape_manager) {
@@ -171,6 +186,11 @@ bool woodland_server_start(struct woodland_server *server) {
     }
 
     setenv("WAYLAND_DISPLAY", socket, true);
+    /* X 客户端（以及 startup command 拉起的 X 程序）通过 DISPLAY 找 Xwayland */
+    if (server->xwayland && server->xwayland->display_name) {
+        setenv("DISPLAY", server->xwayland->display_name, true);
+        wlr_log(WLR_INFO, "DISPLAY=%s", server->xwayland->display_name);
+    }
     if (server->startup_cmd) {
         pid_t pid = fork();
         if (pid < 0) {
@@ -202,6 +222,9 @@ void woodland_server_finish(struct woodland_server *server) {
         wl_list_remove(&server->request_set_shape.link);
     }
     woodland_cursor_finish_events(server);
+#if WOODLAND_HAVE_XWAYLAND
+    woodland_xwayland_finish(server);
+#endif
     woodland_capture_finish(server);
     woodland_shell_finish(server);
     woodland_layer_finish(server);

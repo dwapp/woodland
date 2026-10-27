@@ -30,8 +30,14 @@ xkbcommon = dependency('xkbcommon')
 pangocairo = dependency('pangocairo')
 cairo = dependency('cairo')
 
-# 特性开关 → config.h
+# Xwayland：依赖只提供 Xwayland 可执行文件路径（wlroots 编译期读取）。
+# 代码始终参与编译（view 访问器里要引用 wlroots 的 xwayland API），
+# -Dxwayland=disabled 只表示运行时不创建 Xwayland、不接 X 客户端。
+xwayland_dep = dependency('xwayland', required: false)
 conf_data = configuration_data()
+conf_data.set10('WOODLAND_HAVE_XWAYLAND',
+                get_option('xwayland').allowed())
+
 conf_data.set10('WOODLAND_HAVE_EFFECTS',
                 get_option('effects').enabled() and scenefx.found())
 configure_file(output: 'config.h', configuration: conf_data)

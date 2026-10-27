@@ -3,6 +3,6 @@ option('effects', type: 'feature', value: 'disabled',
 option('tiling-layout', type: 'feature', value: 'disabled',
        description: 'Enable non-stacking layout modes')
 option('xwayland', type: 'feature', value: 'enabled',
-       description: 'Enable X11 application support')
+       description: 'Start Xwayland at runtime (X11 application support)')
 option('test', type: 'feature', value: 'disabled',
        description: 'Build and run tests')

@@ -14,13 +14,33 @@ struct woodland_ssd;
 struct woodland_ssd_margins;
 struct wlr_surface;
 struct wlr_output;
+struct wlr_scene_surface;
+struct wlr_xwayland_surface;
 struct wlr_ext_foreign_toplevel_handle_v1;
 struct wlr_ext_image_capture_source_v1;
+
+/** 交互式光标模式（tinywl 语义：移动/缩放/穿越）。 */
+enum woodland_cursor_mode {
+    WOODLAND_CURSOR_PASSTHROUGH,
+    WOODLAND_CURSOR_MOVE,
+    WOODLAND_CURSOR_RESIZE,
+};
+
+/** 视图后端：Wayland 原生（xdg-shell）或 X11（Xwayland）。 */
+enum woodland_view_type {
+    WOODLAND_VIEW_XDG = 0,
+    WOODLAND_VIEW_XWAYLAND,
+};
 
 struct woodland_view {
     struct wl_list link;               // woodland_server.views
     struct woodland_server *server;
-    struct wlr_xdg_toplevel *xdg_toplevel;
+    enum woodland_view_type type;
+    struct wlr_xdg_toplevel *xdg_toplevel;         // type == XDG 时有效
+    struct wlr_xwayland_surface *xwayland_surface; // type == XWAYLAND 时有效
+    /* X11 视图的 surface 节点：associate 时建、dissociate 时清（xdg 由 shell 自带） */
+    struct wlr_scene_surface *scene_surface;
+    bool override_redirect;            // X11 覆盖重定向窗口：无装饰、不聚焦、不进窗口列表
     struct wlr_scene_tree *scene_tree;
     struct woodland_workspace *workspace;   // 归属工作区
     struct woodland_view *parent;           // 父视图（transient 对话框）
@@ -62,7 +82,76 @@ struct woodland_view {
     struct wl_listener ft_request_fullscreen;
     struct wl_listener ft_request_minimize;
     struct wl_listener ft_request_close;
+    /* Xwayland 独有事件（type == XWAYLAND 时才接线） */
+    struct wl_listener associate;
+    struct wl_listener dissociate;
+    struct wl_listener map_request;      // xsurface->events.map_request
+    struct wl_listener request_configure;
+    struct wl_listener request_activate;
+    struct wl_listener request_close;
+    struct wl_listener set_class;
+    struct wl_listener set_geometry;
 };
+
+/* ==================== 双后端访问器 ==================== */
+
+/*
+ * 下面几个函数把「xdg toplevel 还是 xwayland surface」的差异收在一处，
+ * shell/ssd/seat/layer 都只走这些接口，不再直接摸 view->xdg_toplevel。
+ */
+
+/** 视图当前的 wlr_surface（未 associate / 已销毁时为 NULL）。 */
+struct wlr_surface *woodland_view_surface(const struct woodland_view *view);
+
+/** 内容矩形（相对 scene_tree 原点）。xdg 取 base->geometry，X11 取窗口尺寸、原点 0,0。 */
+void woodland_view_content_box(const struct woodland_view *view, struct wlr_box *box);
+
+/** 请求客户端调整内容尺寸（xdg set_size / X11 configure）。 */
+void woodland_view_request_size(struct woodland_view *view, int width, int height);
+
+/** 设置激活态（xdg set_activated / X11 _NET_WM_STATE + 输入焦点）。 */
+void woodland_view_set_activated(struct woodland_view *view, bool activated);
+
+/** 请求客户端关闭窗口（标题栏关闭按钮）。 */
+void woodland_view_close(struct woodland_view *view);
+
+/** 由 wlr_surface 反查视图（可能是 xdg toplevel 或 xwayland surface）。 */
+struct woodland_view *woodland_view_from_surface(struct wlr_surface *surface);
+
+/* ==================== 视图生命周期（两个后端共用） ==================== */
+
+/** 窗口 map：归入工作区、建 SSD、首次放置、聚焦。 */
+void woodland_view_map(struct woodland_view *view);
+
+/** 首次放置：transient 相对父窗口居中，其余按 SSD 边距层叠（只摆位置）。 */
+void woodland_view_place_initial(struct woodland_view *view);
+
+/** 窗口 unmap：清指针状态、销毁 SSD、摘出 views 链表。 */
+void woodland_view_unmap(struct woodland_view *view);
+
+/** 释放视图（各后端先摘掉自己的 listener 再调这里）。 */
+void woodland_view_destroy(struct woodland_view *view);
+
+/** 创建 foreign-toplevel / ext-foreign-toplevel-list 句柄（两个后端共用）。 */
+void woodland_view_init_handles(struct woodland_view *view);
+
+/** 开始交互式移动/缩放。 */
+void woodland_view_begin_interactive(struct woodland_view *view,
+                                    enum woodland_cursor_mode mode,
+                                    uint32_t edges);
+
+void woodland_view_set_maximized(struct woodland_view *view, bool maximized);
+void woodland_view_set_fullscreen(struct woodland_view *view, bool fullscreen,
+                                  struct wlr_output *output);
+void woodland_view_set_minimized(struct woodland_view *view, bool minimized);
+
+/** 更新标题/应用标识（内部拷一份，不接管入参所有权）。 */
+void woodland_view_set_title(struct woodland_view *view, const char *title);
+void woodland_view_set_app_id(struct woodland_view *view, const char *app_id);
+
+/** 设置父视图（transient 对话框相对父窗口居中）。 */
+void woodland_view_set_parent(struct woodland_view *view,
+                              struct woodland_view *parent);
 
 bool woodland_shell_init(struct woodland_server *server);
 void woodland_shell_finish(struct woodland_server *server);

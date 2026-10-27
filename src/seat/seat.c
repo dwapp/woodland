@@ -41,7 +41,7 @@ static bool handle_keybinding(struct woodland_server *server, xkb_keysym_t sym) 
                 view->workspace != server->active_workspace) {
                 continue;
             }
-            if (view->xdg_toplevel->base->surface != focused) {
+            if (woodland_view_surface(view) != focused) {
                 woodland_view_focus(view);
                 break;
             }
