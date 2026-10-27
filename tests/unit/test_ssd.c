@@ -82,6 +82,16 @@ int main(void) {
     woodland_ssd_set_active(&view, true);
     woodland_ssd_set_active(&view, false);
 
+    /* 按钮 hover/按下态：状态切换不崩溃，且与命中区域一一对应 */
+    assert(woodland_ssd_at(&view, 100 + 380, 100 - 12, &edges)
+        == WOODLAND_SSD_BUTTON_CLOSE);
+    woodland_ssd_set_hover(&view, WOODLAND_SSD_BUTTON_CLOSE);
+    woodland_ssd_set_pressed(&view, WOODLAND_SSD_BUTTON_CLOSE);
+    woodland_ssd_set_pressed(&view, WOODLAND_SSD_NONE);
+    woodland_ssd_set_hover(&view, WOODLAND_SSD_NONE);
+    /* 标题栏/边框不是按钮：传 NONE 清除高亮 */
+    woodland_ssd_set_hover(&view, WOODLAND_SSD_NONE);
+
     /* 外边距：普通窗口 = 边框 1 + 标题栏 26（顶 27） */
     struct woodland_ssd_margins margins = {0};
     woodland_ssd_get_margins(&view, &margins);

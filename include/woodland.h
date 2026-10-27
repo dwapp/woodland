@@ -18,6 +18,8 @@
 #include <wlr/types/wlr_xdg_decoration_v1.h>
 #include <wlr/types/wlr_xdg_shell.h>
 
+#include "ssd.h"
+
 /** 交互式光标模式（tinywl 语义：移动/缩放/穿越）。 */
 enum woodland_cursor_mode {
     WOODLAND_CURSOR_PASSTHROUGH,
@@ -62,6 +64,12 @@ struct woodland_server {
     double grab_x, grab_y;
     struct wlr_box grab_geobox;
     uint32_t resize_edges;
+
+    /* SSD 按钮的指针状态：悬停高亮 / 按下（释放时执行动作） */
+    struct woodland_view *hover_view;
+    enum woodland_ssd_part hover_part;
+    struct woodland_view *pressed_view;
+    enum woodland_ssd_part pressed_part;
 
     /* shell 与视图 */
     struct wlr_xdg_shell *xdg_shell;

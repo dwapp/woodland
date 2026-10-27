@@ -15,6 +15,11 @@ static const float COLOR_TITLEBAR_ACTIVE[4]   = {0.882f, 0.871f, 0.859f, 1.0f}; 
 static const float COLOR_TITLEBAR_INACTIVE[4] = {0.965f, 0.961f, 0.957f, 1.0f}; /* #f6f5f4 */
 static const float COLOR_BORDER[4]            = {0.667f, 0.667f, 0.667f, 1.0f}; /* #aaaaaa */
 static const float COLOR_TITLE_TEXT[4]        = {0.0f, 0.0f, 0.0f, 1.0f};       /* #000000 标题文字 */
+/* 按钮态覆盖层：labwc window.button.hover.bg.color = #80808020；
+ * labwc 本身没有"按下态"（它靠换一套凹陷图标），这里用同色加深一档
+ * 的覆盖层近似（#80808059）。两者都按预乘 alpha 写。 */
+static const float COLOR_BUTTON_HOVER[4]      = {0.063f, 0.063f, 0.063f, 0.125f};
+static const float COLOR_BUTTON_PRESSED[4]    = {0.176f, 0.176f, 0.176f, 0.349f};
 
 enum { BORDER_TOP = 0, BORDER_BOTTOM, BORDER_LEFT, BORDER_RIGHT, BORDER_COUNT };
 enum { BUTTON_CLOSE = 0, BUTTON_MAXIMIZE, BUTTON_MINIMIZE, BUTTON_COUNT };
@@ -25,8 +30,11 @@ struct woodland_ssd {
     bool active;
     struct wlr_scene_rect *titlebar;
     struct wlr_scene_rect *border[BORDER_COUNT];
+    struct wlr_scene_rect *button_bg[BUTTON_COUNT];  // 按钮悬停/按下底色（在图标之下）
     struct wlr_scene_buffer *button[BUTTON_COUNT];
     struct woodland_text_buffer *title_text;
+    enum woodland_ssd_part hover_part;    // 悬停的按钮（NONE = 无）
+    enum woodland_ssd_part pressed_part;  // 按下的按钮（NONE = 无）
     int width;   /* 内容宽（缓存的几何） */
     int height;  /* 内容高 */
 };
@@ -102,6 +110,34 @@ static void ssd_border_geometry(int w, int h, int index,
     }
 }
 
+/* SSD 部件 → 按钮下标（非按钮返回 -1） */
+static int button_index(enum woodland_ssd_part part) {
+    switch (part) {
+    case WOODLAND_SSD_BUTTON_CLOSE:    return BUTTON_CLOSE;
+    case WOODLAND_SSD_BUTTON_MAXIMIZE: return BUTTON_MAXIMIZE;
+    case WOODLAND_SSD_BUTTON_MINIMIZE: return BUTTON_MINIMIZE;
+    default:                           return -1;
+    }
+}
+
+/* 按 hover/pressed 状态刷新按钮底色（图标不动，只叠一层半透明覆盖） */
+static void ssd_update_buttons(struct woodland_ssd *ssd) {
+    int hovered = button_index(ssd->hover_part);
+    int pressed = button_index(ssd->pressed_part);
+    for (int i = 0; i < BUTTON_COUNT; i++) {
+        const float *color = NULL;
+        if (i == pressed) {
+            color = COLOR_BUTTON_PRESSED;
+        } else if (i == hovered) {
+            color = COLOR_BUTTON_HOVER;
+        }
+        if (color) {
+            wlr_scene_rect_set_color(ssd->button_bg[i], color);
+        }
+        wlr_scene_node_set_enabled(&ssd->button_bg[i]->node, color != NULL);
+    }
+}
+
 /* 重新摆放所有组件（标题栏/边框/按钮） */
 static void ssd_layout(struct woodland_ssd *ssd) {
     int w = ssd->width;
@@ -122,16 +158,22 @@ static void ssd_layout(struct woodland_ssd *ssd) {
 
     /* 按钮：labwc 默认 titleLayout "icon:iconify,max,close" 的右段，
      * 自右向左 close/max/iconify；左段是窗口图标（woodland 无窗口图标，留空） */
+    static const int button_order[BUTTON_COUNT] = {
+        BUTTON_CLOSE, BUTTON_MAXIMIZE, BUTTON_MINIMIZE,
+    };
     int bh = WOODLAND_SSD_BUTTON_H;
     int bwn = WOODLAND_SSD_BUTTON_W;
     int gap = WOODLAND_SSD_BUTTON_GAP;
     int by = -th + (th - bh) / 2;
     int x = w - gap - bwn;
-    wlr_scene_node_set_position(&ssd->button[BUTTON_CLOSE]->node, x, by);
-    x -= gap + bwn;
-    wlr_scene_node_set_position(&ssd->button[BUTTON_MAXIMIZE]->node, x, by);
-    x -= gap + bwn;
-    wlr_scene_node_set_position(&ssd->button[BUTTON_MINIMIZE]->node, x, by);
+    for (int i = 0; i < BUTTON_COUNT; i++) {
+        int idx = button_order[i];
+        /* 底色在图标之下，位置与图标完全重合 */
+        wlr_scene_node_set_position(&ssd->button_bg[idx]->node, x, by);
+        wlr_scene_rect_set_size(ssd->button_bg[idx], bwn, bh);
+        wlr_scene_node_set_position(&ssd->button[idx]->node, x, by);
+        x -= gap + bwn;
+    }
 
     /* 标题文字：在左侧留白与右侧按钮区之间居中（labwc window.label.text.justify: center） */
     if (ssd->title_text) {
@@ -168,11 +210,21 @@ void woodland_ssd_create(struct woodland_view *view) {
     ssd->width = w;
     ssd->height = h;
     ssd->active = false;
+    ssd->hover_part = WOODLAND_SSD_NONE;
+    ssd->pressed_part = WOODLAND_SSD_NONE;
 
     /* 位置/尺寸都交给 ssd_layout() 统一设置，这里只建节点（1x1 占位） */
     ssd->titlebar = make_rect(ssd->tree, 0, 0, 1, 1, COLOR_TITLEBAR_INACTIVE);
     for (int i = 0; i < BORDER_COUNT; i++) {
         ssd->border[i] = make_rect(ssd->tree, 0, 0, 1, 1, COLOR_BORDER);
+    }
+    /* 按钮底色：先建（在下层），图标后建（盖在上面）；默认隐藏 */
+    for (int i = 0; i < BUTTON_COUNT; i++) {
+        ssd->button_bg[i] = make_rect(ssd->tree, 0, 0,
+            WOODLAND_SSD_BUTTON_W, WOODLAND_SSD_BUTTON_H, COLOR_BUTTON_HOVER);
+        if (ssd->button_bg[i]) {
+            wlr_scene_node_set_enabled(&ssd->button_bg[i]->node, false);
+        }
     }
 
     /* 按钮符号（—/□/×，黑色，对齐 labwc 默认黑色按钮图标） */
@@ -185,8 +237,11 @@ void woodland_ssd_create(struct woodland_view *view) {
 
     ssd->title_text = woodland_text_buffer_create(ssd->tree);
 
-    if (!ssd->titlebar || !ssd->border[BORDER_TOP] || !ssd->border[BORDER_BOTTOM]
+    if (!ssd->titlebar
+        || !ssd->border[BORDER_TOP] || !ssd->border[BORDER_BOTTOM]
         || !ssd->border[BORDER_LEFT] || !ssd->border[BORDER_RIGHT]
+        || !ssd->button_bg[BUTTON_CLOSE] || !ssd->button_bg[BUTTON_MAXIMIZE]
+        || !ssd->button_bg[BUTTON_MINIMIZE]
         || !ssd->button[BUTTON_CLOSE] || !ssd->button[BUTTON_MAXIMIZE]
         || !ssd->button[BUTTON_MINIMIZE]) {
         wlr_log(WLR_ERROR, "failed to create ssd scene rects");
@@ -260,6 +315,26 @@ void woodland_ssd_set_active(struct woodland_view *view, bool active) {
     const float *tc = active ? COLOR_TITLEBAR_ACTIVE : COLOR_TITLEBAR_INACTIVE;
     wlr_scene_rect_set_color(ssd->titlebar, tc);
     /* 边框颜色 labwc 默认不随激活态变化（均为 #aaaaaa） */
+}
+
+void woodland_ssd_set_hover(struct woodland_view *view,
+                            enum woodland_ssd_part part) {
+    struct woodland_ssd *ssd = view->ssd;
+    if (!ssd || ssd->hover_part == part) {
+        return;
+    }
+    ssd->hover_part = part;
+    ssd_update_buttons(ssd);
+}
+
+void woodland_ssd_set_pressed(struct woodland_view *view,
+                              enum woodland_ssd_part part) {
+    struct woodland_ssd *ssd = view->ssd;
+    if (!ssd || ssd->pressed_part == part) {
+        return;
+    }
+    ssd->pressed_part = part;
+    ssd_update_buttons(ssd);
 }
 
 /* 相对坐标（相对 view 内容原点）命中测试 */

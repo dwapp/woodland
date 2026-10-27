@@ -260,7 +260,7 @@ extern const struct woodland_layout tiling_layout;
 - `effects/`：scenefx 模糊/圆角/阴影，编译期+运行期开关
 - **验证**：SSD 窗口正常显示装饰；`effects=false` 时零特效开销；`effects=true` 时模糊/圆角生效
 
-> **进展（2026-10-26）**：SSD 已完成（`feature/m6-ssd`）。`zxdg_decoration_manager_v1` 协商（按策略位决定，请求 client-side 才回 client-side，未声明时默认 server-side）、`src/ssd/ssd.c` 标题栏/边框/拖拽命中、`src/ssd/text_buffer.c`（pango+cairo 渲染标题、cairo 绘制按钮符号）。默认样式对齐 labwc `theme_builtin()`：边框 1px `#aaaaaa`、标题栏 active `#e1dedb` / inactive `#f6f5f4`、标题 `#000000` 居中（Sans 10）、按钮 26×26 黑色符号（`icon:iconify,max,close` 右段）。几何按 labwc 的 margin 模型：`woodland_ssd_get_margins()` 给出装饰外扩（普通 1/27/1/1、最大化仅标题栏 26、全屏/CSD 为 0），窗口放置与最大化/全屏都用它让位，标题栏不会被输出边缘裁掉。剩余：hover/按下按钮态、阴影与圆角（属 `effects/`）、贴边与临时窗口相对父窗口放置。
+> **进展（2026-10-26）**：SSD 已完成（`feature/m6-ssd`）。`zxdg_decoration_manager_v1` 协商（按策略位决定，请求 client-side 才回 client-side，未声明时默认 server-side）、`src/ssd/ssd.c` 标题栏/边框/拖拽命中、`src/ssd/text_buffer.c`（pango+cairo 渲染标题、cairo 绘制按钮符号）。默认样式对齐 labwc `theme_builtin()`：边框 1px `#aaaaaa`、标题栏 active `#e1dedb` / inactive `#f6f5f4`、标题 `#000000` 居中（Sans 10）、按钮 26×26 黑色符号（`icon:iconify,max,close` 右段）。几何按 labwc 的 margin 模型：`woodland_ssd_get_margins()` 给出装饰外扩（普通 1/27/1/1、最大化仅标题栏 26、全屏/CSD 为 0），窗口放置与最大化/全屏都用它让位，标题栏不会被输出边缘裁掉。贴边与放置：拖动时外框吸附工作区边缘与邻窗边缘（阈值 20px，越阈值自然脱离）、transient 相对父窗口居中（越界贴回工作区）、按钮 hover/按下态（hover `#80808020` 对齐 labwc，按下 `#80808059` 近似凹陷；动作改为释放时触发）。剩余：阴影与圆角（属 `effects/`）、窗口图标按钮、贴边分屏（drag-to-tile）。
 
 ### M4：协议兼容（私有协议）
 - `protocols/` 框架：XML 提取 + 协议实现分派

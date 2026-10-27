@@ -59,6 +59,22 @@ void woodland_ssd_update(struct woodland_view *view);
 /** 切换激活态（颜色两态）。 */
 void woodland_ssd_set_active(struct woodland_view *view, bool active);
 
+/**
+ * 设置按钮悬停态（part 为 WOODLAND_SSD_BUTTON_* 或 WOODLAND_SSD_NONE）。
+ *
+ * 非按钮区域（标题栏/边框）一律传 NONE：悬停高亮只作用于按钮。
+ */
+void woodland_ssd_set_hover(struct woodland_view *view,
+                            enum woodland_ssd_part part);
+
+/**
+ * 设置按钮按下态（part 为 WOODLAND_SSD_BUTTON_* 或 WOODLAND_SSD_NONE）。
+ *
+ * 按下态比悬停态更深一层；释放后由调用方清回 NONE。
+ */
+void woodland_ssd_set_pressed(struct woodland_view *view,
+                              enum woodland_ssd_part part);
+
 /** 命中测试：返回 (lx,ly)（布局坐标）命中的 SSD 区域，并输出 resize edges。 */
 enum woodland_ssd_part woodland_ssd_at(struct woodland_view *view,
                                        double lx, double ly,
