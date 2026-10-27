@@ -14,6 +14,7 @@
 #include <wlr/types/wlr_subcompositor.h>
 #include <wlr/util/log.h>
 
+#include "capture.h"
 #include "cursor.h"
 #include "layer.h"
 #include "output.h"
@@ -136,6 +137,11 @@ bool woodland_server_init(struct woodland_server *server) {
         return false;
     }
 
+    if (!woodland_capture_init(server)) {
+        wlr_log(WLR_ERROR, "failed to init capture");
+        return false;
+    }
+
     woodland_cursor_init_events(server);
 
     server->cursor_shape_manager =
@@ -196,6 +202,7 @@ void woodland_server_finish(struct woodland_server *server) {
         wl_list_remove(&server->request_set_shape.link);
     }
     woodland_cursor_finish_events(server);
+    woodland_capture_finish(server);
     woodland_shell_finish(server);
     woodland_layer_finish(server);
     woodland_workspace_finish(server);

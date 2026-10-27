@@ -102,5 +102,17 @@ echo "$output" | grep -q 'zxdg_decoration_manager_v1' || {
     echo "$output" >&2
     exit 1
 }
+for iface in zwlr_screencopy_manager_v1 \
+             ext_image_copy_capture_manager_v1 \
+             ext_output_image_capture_source_manager_v1 \
+             ext_foreign_toplevel_image_capture_source_manager_v1 \
+             ext_foreign_toplevel_list_v1 \
+             zxdg_output_manager_v1; do
+    echo "$output" | grep -q "$iface" || {
+        echo "$iface global missing from output:" >&2
+        echo "$output" >&2
+        exit 1
+    }
+done
 
-echo "protocol smoke OK: wl_compositor + xdg_wm_base + ext_workspace_manager_v1 + zwlr_foreign_toplevel_manager_v1 + zwlr_layer_shell_v1 + ext_data_control_manager_v1 + zwlr_data_control_manager_v1 + wp_alpha_modifier_v1 + wp_single_pixel_buffer_manager_v1 + wp_fractional_scale_manager_v1 + zxdg_decoration_manager_v1 present"
+echo "protocol smoke OK: wl_compositor + xdg_wm_base + ext_workspace_manager_v1 + zwlr_foreign_toplevel_manager_v1 + zwlr_layer_shell_v1 + ext_data_control_manager_v1 + zwlr_data_control_manager_v1 + wp_alpha_modifier_v1 + wp_single_pixel_buffer_manager_v1 + wp_fractional_scale_manager_v1 + zxdg_decoration_manager_v1 + zxdg_output_manager_v1 + zwlr_screencopy_manager_v1 + ext_image_copy_capture_manager_v1 + ext_output_image_capture_source_manager_v1 + ext_foreign_toplevel_image_capture_source_manager_v1 + ext_foreign_toplevel_list_v1 present"

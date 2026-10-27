@@ -8,11 +8,15 @@
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_cursor_shape_v1.h>
+#include <wlr/types/wlr_ext_foreign_toplevel_list_v1.h>
+#include <wlr/types/wlr_ext_image_capture_source_v1.h>
+#include <wlr/types/wlr_ext_image_copy_capture_v1.h>
 #include <wlr/types/wlr_ext_workspace_v1.h>
 #include <wlr/types/wlr_foreign_toplevel_management_v1.h>
 #include <wlr/types/wlr_layer_shell_v1.h>
 #include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_scene.h>
+#include <wlr/types/wlr_screencopy_v1.h>
 #include <wlr/types/wlr_seat.h>
 #include <wlr/types/wlr_xcursor_manager.h>
 #include <wlr/types/wlr_xdg_decoration_v1.h>
@@ -93,6 +97,14 @@ struct woodland_server {
     struct wlr_layer_shell_v1 *layer_shell;
     struct wl_listener new_layer_surface;
     struct wlr_layer_surface_v1 *focused_layer; // 当前持有键盘焦点的 layer surface
+
+    /* 截图/录屏（src/capture） */
+    struct wlr_screencopy_manager_v1 *screencopy_manager;
+    struct wlr_ext_image_copy_capture_manager_v1 *image_copy_capture_manager;
+    struct wlr_ext_output_image_capture_source_manager_v1 *output_capture_source_manager;
+    struct wlr_ext_foreign_toplevel_image_capture_source_manager_v1 *toplevel_capture_manager;
+    struct wl_listener toplevel_capture_request;
+    struct wlr_ext_foreign_toplevel_list_v1 *ext_toplevel_list;
 
     const char *startup_cmd;              // -s 启动命令
 };

@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include <stdlib.h>
 
+#include <wlr/types/wlr_ext_foreign_toplevel_list_v1.h>
 #include <wlr/types/wlr_pointer.h>
 #include <wlr/types/wlr_scene.h>
 #include <wlr/types/wlr_xdg_decoration_v1.h>
 #include <wlr/util/log.h>
 
+#include "capture.h"
 #include "layer.h"
 #include "output.h"
 #include "ssd.h"
@@ -392,6 +394,14 @@ static void xdg_toplevel_destroy(struct wl_listener *listener, void *data) {
         wl_list_remove(&view->ft_request_close.link);
         wlr_foreign_toplevel_handle_v1_destroy(view->toplevel_handle);
     }
+    /* ext-foreign-toplevel-list 句柄 */
+    if (view->ext_toplevel_handle) {
+        wl_list_remove(&view->ext_handle_destroy.link);
+        wlr_ext_foreign_toplevel_handle_v1_destroy(view->ext_toplevel_handle);
+        view->ext_toplevel_handle = NULL;
+    }
+    /* 按窗口捕获源：源随 scene 节点释放，这里只摘监听 */
+    woodland_capture_view_finish(view);
     /* zxdg_decoration 监听器（协商过才注册） */
     if (view->deco_registered) {
         wl_list_remove(&view->deco_destroy.link);
@@ -612,6 +622,28 @@ static void xdg_toplevel_request_minimize(struct wl_listener *listener, void *da
     (void)data;
 }
 
+/* 客户端/合成器侧销毁句柄时清指针，避免视图销毁时二次释放 */
+static void ext_toplevel_handle_destroy(struct wl_listener *listener, void *data) {
+    struct woodland_view *view =
+        wl_container_of(listener, view, ext_handle_destroy);
+    wl_list_remove(&view->ext_handle_destroy.link);
+    view->ext_toplevel_handle = NULL;
+    (void)data;
+}
+
+/* ext-foreign-toplevel-list 的句柄状态：只有 title/app_id 两项 */
+static void ext_toplevel_sync_state(struct woodland_view *view) {
+    if (!view->ext_toplevel_handle) {
+        return;
+    }
+    struct wlr_ext_foreign_toplevel_handle_v1_state state = {
+        .title = view->title,
+        .app_id = view->app_id,
+    };
+    wlr_ext_foreign_toplevel_handle_v1_update_state(
+        view->ext_toplevel_handle, &state);
+}
+
 static void xdg_toplevel_set_title(struct wl_listener *listener, void *data) {
     struct woodland_view *view = wl_container_of(listener, view, set_title);
     view->title = view->xdg_toplevel->title;
@@ -619,6 +651,7 @@ static void xdg_toplevel_set_title(struct wl_listener *listener, void *data) {
         wlr_foreign_toplevel_handle_v1_set_title(
             view->toplevel_handle, view->title);
     }
+    ext_toplevel_sync_state(view);
     /* 标题变化时刷新 SSD 标题文本 */
     if (view->ssd) {
         woodland_ssd_update(view);
@@ -633,6 +666,7 @@ static void xdg_toplevel_set_app_id(struct wl_listener *listener, void *data) {
         wlr_foreign_toplevel_handle_v1_set_app_id(
             view->toplevel_handle, view->app_id);
     }
+    ext_toplevel_sync_state(view);
     (void)data;
 }
 
@@ -990,6 +1024,23 @@ static void server_new_xdg_toplevel(struct wl_listener *listener, void *data) {
                           &view->ft_request_close);
         }
     }
+
+    /* ext-foreign-toplevel-list-v1 句柄：截图/任务栏类客户端（lswt、grim -T）用。
+     * handle->data 指回 view，capture 模块据它建「按窗口取源」。 */
+    if (server->ext_toplevel_list) {
+        struct wlr_ext_foreign_toplevel_handle_v1_state state = {
+            .title = view->title,
+            .app_id = view->app_id,
+        };
+        view->ext_toplevel_handle = wlr_ext_foreign_toplevel_handle_v1_create(
+            server->ext_toplevel_list, &state);
+        if (view->ext_toplevel_handle) {
+            view->ext_toplevel_handle->data = view;
+            view->ext_handle_destroy.notify = ext_toplevel_handle_destroy;
+            wl_signal_add(&view->ext_toplevel_handle->events.destroy,
+                          &view->ext_handle_destroy);
+        }
+    }
 }
 
 /* ==================== popup ==================== */
@@ -1147,6 +1198,11 @@ bool woodland_shell_init(struct woodland_server *server) {
 
     server->foreign_toplevel_manager =
         wlr_foreign_toplevel_manager_v1_create(server->display);
+
+    /* ext-foreign-toplevel-list-v1：只读的窗口列表，配合
+     * ext-foreign-toplevel-image-capture-source-v1 做按窗口截图 */
+    server->ext_toplevel_list =
+        wlr_ext_foreign_toplevel_list_v1_create(server->display, 1);
 
     server->xdg_decoration_manager =
         wlr_xdg_decoration_manager_v1_create(server->display);

@@ -267,6 +267,8 @@ extern const struct woodland_layout tiling_layout;
 - 按规格 §7 分级推进：先上游协议（wlroots 自带），再 public 6 个，再 dde 通用子集
 - **验证**：协议握手测试通过（复用 treeland 测试客户端思路）
 
+> **进展（2026-10-27）**：截图/录屏协议已完成（`feature/m7-capture`，`src/capture/`）。`zwlr_screencopy_manager_v1`（grim 等老客户端）、`ext_image_copy_capture_manager_v1`、`ext_output_image_capture_source_manager_v1`、`ext_foreign_toplevel_image_capture_source_manager_v1` + `ext_foreign_toplevel_list_v1` 全部建好。按窗口取源由 `new_request` 惰性创建（`wlr_ext_image_capture_source_v1_create_with_scene_node(view->scene_tree)`，源随 scene 节点销毁），抓的是「窗口 + SSD 装饰」整棵子树，没有像 labwc 那样额外维护无装饰的 capture 场景树。顺带补了 `zxdg_output_manager_v1`（grim 没有它只能按物理模式猜布局，`-g` 区域截图会算成 0x0）。验证：`wayland-info` 断言全局、`lswt -j` 列表带 identifier、`grim` 整屏 1280x720 / 区域 200x150 / `grim -T <identifier>` 单窗口 252x278，均进 `meson test`（`smoke-capture`）。
+
 ### M5：IME + 壁纸 + 屏保
 - `ime/`：input-method-v2 + text-input-v3 + 内置候选面板
 - `wallpaper/`：wallpaper-manager + wallpaper-shell（合成器不渲染壁纸）
