@@ -30,8 +30,25 @@ enum woodland_ssd_part {
 
 struct woodland_ssd;
 
+/* SSD 占用的外边距（内容矩形之外的部分），语义同 labwc ssd_thickness() */
+struct woodland_ssd_margins {
+    int left;
+    int top;
+    int right;
+    int bottom;
+};
+
 /** 创建 SSD 并挂到 view->scene_tree（lower_to_bottom）。 */
 void woodland_ssd_create(struct woodland_view *view);
+
+/**
+ * 当前状态下 SSD 占用的外边距。
+ *
+ * 窗口布局（放置/最大化）必须把它算进去：内容原点 = 外框原点 + 边距。
+ * 不依赖 SSD 是否已创建（map 之前就要能算），只看 deco_csd / maximized / fullscreen。
+ */
+void woodland_ssd_get_margins(struct woodland_view *view,
+                              struct woodland_ssd_margins *margins);
 
 /** 销毁 SSD（清空 view->ssd）。 */
 void woodland_ssd_destroy(struct woodland_view *view);

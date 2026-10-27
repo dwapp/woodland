@@ -67,6 +67,35 @@ int main(void) {
     woodland_ssd_set_active(&view, true);
     woodland_ssd_set_active(&view, false);
 
+    /* 外边距：普通窗口 = 边框 1 + 标题栏 26（顶 27） */
+    struct woodland_ssd_margins margins = {0};
+    woodland_ssd_get_margins(&view, &margins);
+    assert(margins.left == WOODLAND_SSD_BORDER_W);
+    assert(margins.right == WOODLAND_SSD_BORDER_W);
+    assert(margins.bottom == WOODLAND_SSD_BORDER_W);
+    assert(margins.top == WOODLAND_SSD_TITLEBAR_H + WOODLAND_SSD_BORDER_W);
+
+    /* 最大化：无边框，只留标题栏 */
+    view.maximized = true;
+    woodland_ssd_get_margins(&view, &margins);
+    assert(margins.left == 0 && margins.right == 0 && margins.bottom == 0);
+    assert(margins.top == WOODLAND_SSD_TITLEBAR_H);
+    view.maximized = false;
+
+    /* 全屏：装饰全隐，无任何外边距 */
+    view.fullscreen = true;
+    woodland_ssd_get_margins(&view, &margins);
+    assert(margins.left == 0 && margins.top == 0
+        && margins.right == 0 && margins.bottom == 0);
+    view.fullscreen = false;
+
+    /* CSD（客户端自绘）：同样无边距，否则窗口会被挪出空档 */
+    view.deco_csd = true;
+    woodland_ssd_get_margins(&view, &margins);
+    assert(margins.left == 0 && margins.top == 0
+        && margins.right == 0 && margins.bottom == 0);
+    view.deco_csd = false;
+
     /* destroy：view->ssd 置空，scene 树级联释放 */
     woodland_ssd_destroy(&view);
     assert(view.ssd == NULL);

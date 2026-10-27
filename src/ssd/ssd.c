@@ -38,6 +38,22 @@ static void ssd_content_size(struct woodland_view *view, int *w, int *h) {
     *h = xdg->geometry.height;
 }
 
+void woodland_ssd_get_margins(struct woodland_view *view,
+                              struct woodland_ssd_margins *margins) {
+    margins->left = margins->top = margins->right = margins->bottom = 0;
+    /* CSD（客户端自绘）与 fullscreen 都没有服务端装饰占用空间 */
+    if (view->deco_csd || view->fullscreen) {
+        return;
+    }
+    if (view->maximized) {
+        /* 最大化隐藏边框、保留标题栏（见 ssd_apply_state） */
+        margins->top = WOODLAND_SSD_TITLEBAR_H;
+        return;
+    }
+    margins->left = margins->right = margins->bottom = WOODLAND_SSD_BORDER_W;
+    margins->top = WOODLAND_SSD_TITLEBAR_H + WOODLAND_SSD_BORDER_W;
+}
+
 static struct wlr_scene_rect *make_rect(struct wlr_scene_tree *parent,
         int x, int y, int w, int h, const float color[4]) {
     struct wlr_scene_rect *r = wlr_scene_rect_create(parent, w, h, color);

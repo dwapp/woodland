@@ -11,6 +11,7 @@
 struct woodland_server;
 struct woodland_workspace;
 struct woodland_ssd;
+struct woodland_ssd_margins;
 struct wlr_surface;
 struct wlr_output;
 
@@ -22,6 +23,7 @@ struct woodland_view {
     struct woodland_workspace *workspace;   // 归属工作区
     struct woodland_view *parent;           // 父视图（transient 对话框）
     bool mapped;
+    bool placed;                       // 是否已做过首次放置（remap 不再重摆）
     bool minimized;
     bool maximized;
     bool fullscreen;
@@ -82,5 +84,17 @@ struct wlr_box woodland_view_maximized_geometry(struct woodland_server *server);
 /** 全屏几何（指定输出的完整 box，布局坐标）。 */
 struct wlr_box woodland_view_fullscreen_geometry(struct woodland_server *server,
                                                  struct wlr_output *output);
+
+/**
+ * 计算新窗口的内容原点（布局坐标）。
+ *
+ * area 为可用工作区，content_w/h 为客户端内容尺寸，margins 为 SSD 外扩，
+ * cascade 为层叠偏移像素。外框（内容 + margins）整体落在 area 内，
+ * 这样标题栏不会被输出边缘裁掉。
+ */
+void woodland_view_placement(const struct wlr_box *area,
+                             int content_w, int content_h,
+                             const struct woodland_ssd_margins *margins,
+                             int cascade, struct wlr_box *out);
 
 #endif
