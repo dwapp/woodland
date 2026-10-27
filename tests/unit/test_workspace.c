@@ -25,6 +25,8 @@ int main(void) {
     assert(server.scene);
     server.seat = wlr_seat_create(server.display, "test-seat");
     assert(server.seat);
+    /* 工作区切换会回调焦点回退，回退要遍历 z 序视图链表 */
+    wl_list_init(&server.views);
 
     assert(woodland_workspace_init(&server));
 

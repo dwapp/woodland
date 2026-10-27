@@ -20,6 +20,7 @@
 #include <wlr/types/wlr_seat.h>
 #include <wlr/types/wlr_xcursor_manager.h>
 #include <wlr/types/wlr_xdg_decoration_v1.h>
+#include <wlr/types/wlr_xdg_dialog_v1.h>
 #include <wlr/types/wlr_xdg_shell.h>
 
 #include "ssd.h"
@@ -63,6 +64,7 @@ struct woodland_server {
     enum woodland_cursor_mode cursor_mode;
     struct woodland_view *grabbed_view;
     double grab_x, grab_y;
+    double drag_start_x, drag_start_y;   // 本次拖动起点（判断是否真的拖动了）
     struct wlr_box grab_geobox;
     uint32_t resize_edges;
 
@@ -74,9 +76,22 @@ struct woodland_server {
 
     /* shell 与视图 */
     struct wlr_xdg_shell *xdg_shell;
-    struct wl_list views;                 // struct woodland_view.link 链表头
+    struct wl_list views;                 // struct woodland_view.link 链表头（z 序，最上在前）
+    /*
+     * 当前焦点视图。
+     *
+     * 不能只靠 seat->keyboard_state.focused_surface：没有键盘设备
+     * （headless / 纯触摸）时键盘 enter 不会发出，那个字段永远是 NULL，
+     * 焦点切换就只能靠猜。这里显式记一份，surface 字段仍用于下发输入。
+     */
+    struct woodland_view *focused_view;
+    /* 新窗口放置策略（-p / woodland_placement_policy_parse） */
+    enum woodland_placement_policy placement_policy;
     struct wl_listener new_xdg_toplevel;
     struct wl_listener new_xdg_popup;
+
+    /* xdg-dialog-v1：模态对话框标志（焦点分配要用） */
+    struct wlr_xdg_wm_dialog_v1 *xdg_dialog_manager;
 
     /* zxdg 装饰 */
     struct wlr_xdg_decoration_manager_v1 *xdg_decoration_manager;

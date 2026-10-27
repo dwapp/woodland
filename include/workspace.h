@@ -24,4 +24,15 @@ struct woodland_workspace *woodland_workspace_by_name(
 void woodland_workspace_switch(struct woodland_server *server,
                                struct woodland_workspace *target);
 
+/**
+ * 切换工作区并处理键盘焦点。
+ *
+ * restore_focus=true：切完把焦点交给新工作区 z 序最上的窗口（用户按
+ * Alt+N 的正常语义）；false：只清焦点，调用方稍后会自己设焦点
+ * （聚焦其它工作区的窗口时用，避免焦点先落到别人身上再被抢走）。
+ */
+void woodland_workspace_switch_focus(struct woodland_server *server,
+                                     struct woodland_workspace *target,
+                                     bool restore_focus);
+
 #endif

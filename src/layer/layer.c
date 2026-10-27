@@ -79,14 +79,9 @@ void woodland_layer_try_focus(struct woodland_server *server,
             }
         }
         server->focused_layer = layer_surface;
-        /* 失活当前 toplevel（xdg 或 xwayland 通吃） */
-        struct wlr_surface *focused = seat->keyboard_state.focused_surface;
-        if (focused) {
-            struct woodland_view *prev = woodland_view_from_surface(focused);
-            if (prev != NULL) {
-                woodland_view_set_activated(prev, false);
-            }
-        }
+        /* 失活当前 toplevel（xdg 或 xwayland 通吃）：
+         * activated / SSD 激活色 / foreign-toplevel 三处一起改 */
+        woodland_focus_yield_to_layer(server);
         struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(seat);
         if (keyboard != NULL) {
             wlr_seat_keyboard_notify_enter(seat, layer_surface->surface,
@@ -97,15 +92,8 @@ void woodland_layer_try_focus(struct woodland_server *server,
     case ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE:
         if (server->focused_layer == layer_surface) {
             server->focused_layer = NULL;
-            /* 焦点还给当前工作区顶层视图 */
-            struct woodland_view *view;
-            wl_list_for_each(view, &server->views, link) {
-                if (view->mapped && !view->minimized &&
-                    view->workspace == server->active_workspace) {
-                    woodland_view_focus(view);
-                    break;
-                }
-            }
+            /* 焦点还给当前工作区顶层视图（统一的回退逻辑） */
+            woodland_focus_fallback(server);
         }
         break;
     }
@@ -193,9 +181,11 @@ static void handle_node_destroy(struct wl_listener *listener, void *data) {
         wl_container_of(listener, layer, node_destroy);
     struct woodland_server *server = layer->server;
 
-    /* 若持有键盘焦点，先清 */
+    /* 若持有键盘焦点，先把指针清掉再回退给 toplevel：
+     * layer 被销毁会带走键盘焦点，不回退的话输入会直接丢失 */
     if (server->focused_layer == layer->layer_surface) {
         server->focused_layer = NULL;
+        woodland_focus_fallback(server);
     }
     /* wlroots 可能已释放 scene_layer_surface，置 NULL 防误用 */
     layer->scene_layer_surface = NULL;
