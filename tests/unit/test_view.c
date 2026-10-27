@@ -9,6 +9,7 @@
 #include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_scene.h>
 #include "output.h"
+#include "ssd.h"
 #include "view.h"
 #include "woodland.h"
 
@@ -51,6 +52,33 @@ int main(void) {
     struct wlr_box max_geo2 = woodland_view_maximized_geometry(&server);
     assert(max_geo2.x == 10 && max_geo2.y == 10);
     assert(max_geo2.width == 780 && max_geo2.height == 580);
+
+    /*
+     * 放置：外框（内容 + SSD 边距）整体落进工作区。
+     * 内容原点必须让出左上边距，否则标题栏会顶到屏幕外。
+     */
+    struct woodland_ssd_margins margins = {
+        .left = 1, .top = 27, .right = 1, .bottom = 1,
+    };
+    struct wlr_box place;
+
+    /* 无层叠：内容原点 = 工作区原点 + (left, top) */
+    woodland_view_placement(&max_geo2, 400, 300, &margins, 0, &place);
+    assert(place.x == 11 && place.y == 37);
+    assert(place.width == 400 && place.height == 300);
+
+    /* 层叠偏移 32：整体右移下移 32 */
+    woodland_view_placement(&max_geo2, 400, 300, &margins, 32, &place);
+    assert(place.x == 43 && place.y == 69);
+
+    /* 偏移过大：回贴工作区右下，外框右/下边缘正好贴住工作区边界 */
+    woodland_view_placement(&max_geo2, 400, 300, &margins, 1000, &place);
+    assert(place.x + place.width + margins.right == 10 + 780);
+    assert(place.y + place.height + margins.bottom == 10 + 580);
+
+    /* 内容比工作区还大：贴回左上，不外溢到负坐标 */
+    woodland_view_placement(&max_geo2, 1000, 800, &margins, 0, &place);
+    assert(place.x == 11 && place.y == 37);
 
     woodland_output_finish(&server);
 

@@ -46,6 +46,43 @@ struct wlr_box woodland_view_fullscreen_geometry(struct woodland_server *server,
     return box;
 }
 
+/*
+ * 层叠放置：外框（内容 + SSD 边距）落进 area。
+ *
+ * 内容原点 = 外框原点 + 边距；外框宽度含左右边距、高度含标题栏，
+ * 这样标题栏/边框不会被输出边缘裁掉（旧实现直接把内容放 (0,0)，
+ * y=-26 的标题栏就跑到屏幕外了）。
+ */
+void woodland_view_placement(const struct wlr_box *area,
+                             int content_w, int content_h,
+                             const struct woodland_ssd_margins *margins,
+                             int cascade, struct wlr_box *out) {
+    int outer_w = content_w + margins->left + margins->right;
+    int outer_h = content_h + margins->top + margins->bottom;
+
+    int x = area->x + cascade;
+    int y = area->y + cascade;
+    int max_x = area->x + area->width - outer_w;
+    int max_y = area->y + area->height - outer_h;
+    if (x > max_x) {
+        x = max_x;
+    }
+    if (y > max_y) {
+        y = max_y;
+    }
+    if (x < area->x) {
+        x = area->x;
+    }
+    if (y < area->y) {
+        y = area->y;
+    }
+
+    out->x = x + margins->left;
+    out->y = y + margins->top;
+    out->width = content_w;
+    out->height = content_h;
+}
+
 /* ==================== view 聚焦与命中 ==================== */
 
 void woodland_view_focus(struct woodland_view *view) {
@@ -124,6 +161,32 @@ struct woodland_view *woodland_view_at(struct woodland_server *server,
     return tree->node.data;
 }
 
+/* ==================== 窗口放置 ==================== */
+
+/* 首次 map：按 SSD 边距层叠放置，保证标题栏/边框落在工作区内 */
+static void view_place_initial(struct woodland_view *view) {
+    struct woodland_server *server = view->server;
+    struct woodland_ssd_margins margins;
+    woodland_ssd_get_margins(view, &margins);
+
+    struct wlr_box area = woodland_view_maximized_geometry(server);
+    int content_w = view->xdg_toplevel->base->geometry.width;
+    int content_h = view->xdg_toplevel->base->geometry.height;
+
+    /* 层叠步进：第 n 个窗口偏移 (n-1)%8 格，避免新窗口完全盖住上一个 */
+    int count = 0;
+    struct woodland_view *it;
+    wl_list_for_each(it, &server->views, link) {
+        count++;
+    }
+    int cascade = ((count - 1) % 8) * 32;
+
+    struct wlr_box geometry;
+    woodland_view_placement(&area, content_w, content_h, &margins,
+                            cascade, &geometry);
+    wlr_scene_node_set_position(&view->scene_tree->node, geometry.x, geometry.y);
+}
+
 /* ==================== toplevel 视图事件 ==================== */
 
 /*
@@ -157,6 +220,11 @@ static void xdg_toplevel_map(struct wl_listener *listener, void *data) {
     /* 首次 map 时创建 SSD（未 map 前不显示空装饰，同 labwc handle_map） */
     if (!view->ssd && !view->deco_csd) {
         woodland_ssd_create(view);
+    }
+    /* 只在首次 map 放置；remap 保留用户摆好的位置 */
+    if (!view->placed) {
+        view->placed = true;
+        view_place_initial(view);
     }
     woodland_view_focus(view);
     (void)data;
@@ -283,6 +351,29 @@ static void view_apply_geometry(struct woodland_view *view, struct wlr_box *box)
     wlr_xdg_toplevel_set_size(view->xdg_toplevel, box->width, box->height);
 }
 
+/*
+ * 按"外框"应用几何：内容 = 外框减去 SSD 边距。
+ *
+ * 最大化/全屏给的是整块区域，装饰（标题栏）占外框顶部，内容必须让位，
+ * 否则标题栏会被推到屏幕/输出边界外面。
+ */
+static void view_apply_outer_geometry(struct woodland_view *view,
+                                      struct wlr_box *box) {
+    struct woodland_ssd_margins margins;
+    woodland_ssd_get_margins(view, &margins);
+    int content_w = box->width - margins.left - margins.right;
+    int content_h = box->height - margins.top - margins.bottom;
+    if (content_w < 1) {
+        content_w = 1;
+    }
+    if (content_h < 1) {
+        content_h = 1;
+    }
+    wlr_scene_node_set_position(&view->scene_tree->node,
+        box->x + margins.left, box->y + margins.top);
+    wlr_xdg_toplevel_set_size(view->xdg_toplevel, content_w, content_h);
+}
+
 static void view_set_maximized(struct woodland_view *view, bool maximized) {
     if (maximized == view->maximized) {
         return;
@@ -298,7 +389,8 @@ static void view_set_maximized(struct woodland_view *view, bool maximized) {
         view_save_geometry(view);
         view->maximized = true;
         struct wlr_box box = woodland_view_maximized_geometry(server);
-        view_apply_geometry(view, &box);
+        /* 最大化保留标题栏，内容让出 titlebar 高度 */
+        view_apply_outer_geometry(view, &box);
         wlr_xdg_toplevel_set_maximized(view->xdg_toplevel, true);
     } else {
         view->maximized = false;
@@ -339,7 +431,7 @@ static void view_set_fullscreen(struct woodland_view *view, bool fullscreen,
             }
         }
         struct wlr_box box = woodland_view_fullscreen_geometry(server, output);
-        view_apply_geometry(view, &box);
+        view_apply_outer_geometry(view, &box);
         wlr_xdg_toplevel_set_fullscreen(view->xdg_toplevel, true);
     } else {
         view->fullscreen = false;
