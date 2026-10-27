@@ -23,13 +23,10 @@
 #include <wlr/types/wlr_xdg_shell.h>
 
 #include "ssd.h"
+#include "view.h"
 
-/** 交互式光标模式（tinywl 语义：移动/缩放/穿越）。 */
-enum woodland_cursor_mode {
-    WOODLAND_CURSOR_PASSTHROUGH,
-    WOODLAND_CURSOR_MOVE,
-    WOODLAND_CURSOR_RESIZE,
-};
+struct wlr_xwayland;
+struct wlr_compositor;
 
 struct woodland_server {
     struct wl_display *display;
@@ -105,6 +102,14 @@ struct woodland_server {
     struct wlr_ext_foreign_toplevel_image_capture_source_manager_v1 *toplevel_capture_manager;
     struct wl_listener toplevel_capture_request;
     struct wlr_ext_foreign_toplevel_list_v1 *ext_toplevel_list;
+
+    /* Xwayland（src/xwayland） */
+    struct wlr_compositor *compositor;    // wlr_xwayland_create 需要
+    struct wlr_xwayland *xwayland;
+    struct wl_list xwayland_unmanaged;    // override-redirect 窗口链表头
+    struct wlr_scene_tree *xwayland_unmanaged_tree; // 浮在普通视图之上
+    struct wl_listener new_xwayland_surface;
+    struct wl_listener xwayland_ready;
 
     const char *startup_cmd;              // -s 启动命令
 };

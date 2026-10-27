@@ -39,11 +39,12 @@ struct woodland_ssd {
     int height;  /* 内容高 */
 };
 
-/* 内容尺寸来源：xdg toplevel base geometry */
+/* 内容尺寸来源：走 view 的双后端访问器（xdg base geometry / X11 窗口尺寸） */
 static void ssd_content_size(struct woodland_view *view, int *w, int *h) {
-    struct wlr_xdg_surface *xdg = view->xdg_toplevel->base;
-    *w = xdg->geometry.width;
-    *h = xdg->geometry.height;
+    struct wlr_box content;
+    woodland_view_content_box(view, &content);
+    *w = content.width;
+    *h = content.height;
 }
 
 void woodland_ssd_get_margins(struct woodland_view *view,

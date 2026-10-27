@@ -79,13 +79,12 @@ void woodland_layer_try_focus(struct woodland_server *server,
             }
         }
         server->focused_layer = layer_surface;
-        /* 失活当前 xdg view */
+        /* 失活当前 toplevel（xdg 或 xwayland 通吃） */
         struct wlr_surface *focused = seat->keyboard_state.focused_surface;
         if (focused) {
-            struct wlr_xdg_toplevel *prev =
-                wlr_xdg_toplevel_try_from_wlr_surface(focused);
+            struct woodland_view *prev = woodland_view_from_surface(focused);
             if (prev != NULL) {
-                wlr_xdg_toplevel_set_activated(prev, false);
+                woodland_view_set_activated(prev, false);
             }
         }
         struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(seat);
