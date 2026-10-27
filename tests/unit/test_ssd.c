@@ -59,6 +59,21 @@ int main(void) {
     assert(part == WOODLAND_SSD_BORDER_TOP);
     assert(edges == WLR_EDGE_TOP);
 
+    /* 边框必须包住标题栏：标题栏高度处的左边框（相对 y∈[-26,0)）也要命中，
+     * 且四角不留空隙（顶边框横向跨满到 x=-1 / x=400） */
+    part = woodland_ssd_at(&view, 100 - 0.5, 100 - 12, &edges);
+    assert(part == WOODLAND_SSD_BORDER_LEFT);
+    assert(edges == WLR_EDGE_LEFT);
+    part = woodland_ssd_at(&view, 100 + 400.5, 100 - 12, &edges);
+    assert(part == WOODLAND_SSD_BORDER_RIGHT);
+    assert(edges == WLR_EDGE_RIGHT);
+    part = woodland_ssd_at(&view, 100 - 0.5, 100 - 26.5, &edges);
+    assert(part == WOODLAND_SSD_BORDER_TOP);
+    assert(edges == WLR_EDGE_TOP);
+    part = woodland_ssd_at(&view, 100 - 0.5, 100 + 300.5, &edges);
+    assert(part == WOODLAND_SSD_BORDER_BOTTOM);
+    assert(edges == WLR_EDGE_BOTTOM);
+
     /* 内容区不命中 SSD */
     part = woodland_ssd_at(&view, 100 + 200, 100 + 150, &edges);
     assert(part == WOODLAND_SSD_NONE);
