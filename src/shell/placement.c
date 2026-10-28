@@ -89,15 +89,44 @@ struct woodland_output *woodland_output_at(struct woodland_server *server,
     return NULL;
 }
 
-static struct woodland_output *output_from_wlr(struct woodland_server *server,
-                                               struct wlr_output *wlr_output) {
+/*
+ * 离 (lx,ly) 最近的输出，用于「点不在任何输出上」（输出之间的空隙、
+ * 窗口被拖到输出之外）的情形。
+ *
+ * 不用 wlr_output_layout_closest_point：它只回填坐标，要拿回输出还得
+ * 再探一次；而它返回的最近点落在框内距右/下边 1/256 处，加点偏移去
+ * 探就可能探到框外，于是右/下侧的副屏会被误判成主屏。这里直接按每个
+ * 输出的布局框算最近点距离，取最小者，边界不用猜。
+ */
+struct woodland_output *woodland_output_nearest(struct woodland_server *server,
+                                                double lx, double ly) {
+    if (!server || !server->output_layout) {
+        return NULL;
+    }
+    struct woodland_output *best = NULL;
+    double best_dist = 0;
     struct woodland_output *wo;
     wl_list_for_each(wo, &server->outputs, link) {
-        if (wo->wlr_output == wlr_output) {
-            return wo;
+        if (!wo->wlr_output) {
+            continue;
+        }
+        struct wlr_box box;
+        /* 布局坐标：与 cursor->x/y、窗口几何同坐标系 */
+        wlr_output_layout_get_box(server->output_layout, wo->wlr_output, &box);
+        if (box.width <= 0 || box.height <= 0) {
+            continue;
+        }
+        double px, py;
+        wlr_box_closest_point(&box, lx, ly, &px, &py);
+        double dx = lx - px;
+        double dy = ly - py;
+        double dist = dx * dx + dy * dy;
+        if (!best || dist < best_dist) {
+            best = wo;
+            best_dist = dist;
         }
     }
-    return NULL;
+    return best;
 }
 
 /* 外框中心所在的输出；落在输出之间的空隙时退化为最近的输出。 */
@@ -116,23 +145,9 @@ struct woodland_output *woodland_output_for_view(struct woodland_view *view) {
     if (wo) {
         return wo;
     }
-
-    struct wlr_output *nearest =
-        wlr_output_layout_output_at(server->output_layout, cx, cy);
-    if (!nearest) {
-        /* 输出之间的空隙：取最近的输出（closest_point 只回填坐标） */
-        double ox = 0, oy = 0;
-        wlr_output_layout_closest_point(server->output_layout, NULL,
-                                        cx, cy, &ox, &oy);
-        nearest = woodland_output_at(server, ox + 0.5, oy + 0.5)
-            ? woodland_output_at(server, ox + 0.5, oy + 0.5)->wlr_output
-            : NULL;
-    }
-    if (nearest) {
-        wo = output_from_wlr(server, nearest);
-        if (wo) {
-            return wo;
-        }
+    wo = woodland_output_nearest(server, cx, cy);
+    if (wo) {
+        return wo;
     }
     return woodland_output_first(server);
 }
@@ -157,6 +172,9 @@ void woodland_output_workarea(struct woodland_output *output, struct wlr_box *ou
 void woodland_workarea_at(struct woodland_server *server, double lx, double ly,
                           struct wlr_box *out) {
     struct woodland_output *wo = woodland_output_at(server, lx, ly);
+    if (!wo) {
+        wo = woodland_output_nearest(server, lx, ly);
+    }
     if (!wo) {
         wo = woodland_output_first(server);
     }
@@ -653,18 +671,10 @@ void woodland_view_place_initial(struct woodland_view *view) {
 
     struct wlr_box geometry;
     if (view->parent && view->parent->mapped) {
-        /* 对话框/工具窗：以父窗口内容框为中心（越界时贴回工作区） */
-        struct wlr_box parent_content;
-        woodland_view_content_box(view->parent, &parent_content);
+        /* 对话框/工具窗：以父窗口外框为中心（越界时贴回工作区） */
         struct wlr_box parent_outer;
         woodland_view_outer_box(view->parent, &parent_outer);
-        struct wlr_box parent_box = {
-            .x = parent_outer.x,
-            .y = parent_outer.y,
-            .width = parent_outer.width,
-            .height = parent_outer.height,
-        };
-        woodland_view_center_on(&parent_box, content_w, content_h, &margins,
+        woodland_view_center_on(&parent_outer, content_w, content_h, &margins,
                                 &area, &geometry);
     } else {
         switch (server->placement_policy) {

@@ -172,6 +172,18 @@ int main(void) {
     assert(woodland_output_at(&server, 100, 100) == o1);
     assert(woodland_output_at(&server, 5000, 5000) == NULL);
 
+    /* 右/下侧的副屏：closest_point 返回的最近点在框内距右边 1/256 处，
+     * 拿它加点偏移反查输出会探到框外。以前这里会退回首输出，把右副屏上
+     * 的窗口按主屏工作区摆放（最大化/全屏摆错屏） */
+    struct woodland_output *o3 = add_output(&server, 800, 600, 2400, 0);
+    assert(woodland_output_nearest(&server, 100, 300) == o1);
+    /* 空隙里：离 o3 左边更近 */
+    assert(woodland_output_nearest(&server, 2300, 300) == o3);
+    /* 拖到最右输出的外面：仍应判给 o3，而不是首输出 */
+    assert(woodland_output_nearest(&server, 3000, 300) == o3);
+    woodland_workarea_at(&server, 3000, 300, &hit);
+    assert(hit.x == 2400 && hit.width == 800);
+
     /* 最大化几何按输出算：副屏最大化不该跑到主屏 */
     struct wlr_box max2 = woodland_view_maximized_geometry_on(&server, o2);
     assert(max2.x == 800 && max2.width == 800);
