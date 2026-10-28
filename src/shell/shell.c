@@ -216,10 +216,14 @@ void woodland_view_unmap(struct woodland_view *view) {
         view->server->pressed_view = NULL;
         view->server->pressed_part = WOODLAND_SSD_NONE;
     }
-    /* 显式比较 focused_view：unmap 后 focusable() 立刻为假，
-     * 靠 focus_current() 反查会漏掉"焦点正指向它"这个事实，留下悬空指针 */
+    /* 焦点：先按正常卸载路径复位（改 activated / SSD 激活色 / foreign-toplevel，
+     * 并清掉键盘焦点），再摘链表。只把 focused_view 置空会留下"句柄还是
+     * 激活态"的残影——没有键盘设备时 focus_current() 反查不到旧视图，
+     * 回退时就没人负责把它变暗。摘链表放在后面，回退会自然跳过它。 */
     bool was_focused = (view->server->focused_view == view);
     if (was_focused) {
+        woodland_focus_none(view->server);
+        /* 没有 seat 时 focus_none 会提前返回，指针得自己清 */
         view->server->focused_view = NULL;
     }
     /* 只在确实在链表里时摘除：X11 窗口可能没 map 过就 unmap */
@@ -231,8 +235,7 @@ void woodland_view_unmap(struct woodland_view *view) {
     if (view->ssd) {
         woodland_ssd_destroy(view);
     }
-    /* 焦点回退：unmap 前必须先把 was_focused 取出来，之后视图已不在
-     * 链表里，回退会自然跳过它 */
+    /* 焦点回退：此时视图已不在链表里，回退不会再选中它 */
     if (was_focused) {
         woodland_focus_fallback(view->server);
     }
@@ -244,6 +247,8 @@ void woodland_view_destroy(struct woodland_view *view) {
     bool was_focused = (view->server->focused_view == view);
     if (was_focused) {
         woodland_focus_none(view->server);
+        /* 没有 seat 时 focus_none 会提前返回，指针得自己清 */
+        view->server->focused_view = NULL;
     }
     if (view->mapped) {
         wl_list_remove(&view->link);

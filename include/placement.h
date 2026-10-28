@@ -44,12 +44,21 @@ bool woodland_placement_policy_parse(const char *name,
 
 /* ==================== 输出与工作区 ==================== */
 
-/** 布局坐标 (lx, ly) 落在哪个输出上；不在任何输出内返回 NULL。 */
+/**
+ * 点 (lx,ly) 所在的输出；不在任何输出上时返回 NULL。
+ */
 struct woodland_output *woodland_output_at(struct woodland_server *server,
                                            double lx, double ly);
 
 /** 输出链表的第一个（单输出场景与"主输出"一致）。 */
 struct woodland_output *woodland_output_first(struct woodland_server *server);
+
+/**
+ * 离 (lx,ly) 最近的输出（点不在任何输出上时用：输出之间的空隙、
+ * 窗口被拖到输出之外）。没有输出时返回 NULL。
+ */
+struct woodland_output *woodland_output_nearest(struct woodland_server *server,
+                                                double lx, double ly);
 
 /**
  * 视图所在的输出。
