@@ -9,6 +9,36 @@
 #include "output.h"
 #include "woodland.h"
 
+/*
+ * output_removed 的观察者。
+ *
+ * 协议层靠这个信号在拔除后补一份 configuration + done：被 --off 禁用的
+ * 输出早已不在 layout 里，销毁它不会触发 layout change，只靠 layout 驱动
+ * 的广播补不上。这里断言信号确实发出来、参数是被销毁的 wlr_output，并且
+ * 发出时它已经从 server->outputs 摘掉了（协议层广播会遍历那条链表）。
+ */
+struct removed_probe {
+    struct wl_listener listener;
+    struct woodland_server *server;
+    int count;
+    struct wlr_output *output;
+    size_t outputs_at_emit;
+};
+
+static void handle_removed(struct wl_listener *listener, void *data) {
+    struct removed_probe *probe =
+        wl_container_of(listener, probe, listener);
+    probe->count++;
+    probe->output = data;
+
+    size_t n = 0;
+    struct woodland_output *o;
+    wl_list_for_each(o, &probe->server->outputs, link) {
+        n++;
+    }
+    probe->outputs_at_emit = n;
+}
+
 int main(void) {
     struct woodland_server server = {0};
     server.display = wl_display_create();
@@ -35,6 +65,19 @@ int main(void) {
     struct woodland_output *o;
     wl_list_for_each(o, &server.outputs, link) n++;
     assert(n == 1);
+
+    /* 拔除：信号必须发出一次，且发出时该输出已不在链表里 */
+    struct removed_probe probe = { .server = &server };
+    probe.listener.notify = handle_removed;
+    wl_signal_add(&server.output_removed, &probe.listener);
+
+    wlr_output_destroy(out);
+
+    assert(probe.count == 1);
+    assert(probe.output == out);
+    assert(probe.outputs_at_emit == 0);
+    assert(server.outputs.next == &server.outputs);
+    wl_list_remove(&probe.listener.link);
 
     woodland_output_finish(&server);
 
