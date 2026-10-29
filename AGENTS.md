@@ -66,6 +66,29 @@ woodland 是 Wayland 合成器：主循环会**正常阻塞在 `ep_poll`** 等�
 实际是 ASan 与该内核的高熵 ASLR 不兼容，和代码无关。用 `setarch $(uname -m) -R ./xxx` 关掉
 ASLR 就正常了。**别把这种 DEADLYSIGNAL 当成自己的 bug 去修**，先关 ASLR 复现一次再说。
 
+## ⚠️ wlroots 语义陷阱（接协议时最容易踩）
+
+**1. `wlr_idle_inhibitor_v1` 销毁时先 emit destroy、后摘链表。**
+`types/wlr_idle_inhibit_v1.c` 的 `idle_inhibitor_v1_destroy()` 顺序是
+`wl_signal_emit_mutable(destroy)` → `wl_list_remove(&inhibitor->link)`。所以 destroy
+回调里读 `manager->inhibitors` 仍能看到正在销毁的那一个：
+按它判空会让**最后一个抑制器关掉后 idle 永久停摆**（屏幕再也不熄）。
+聚合要数自己的链表，或按 `wl_list_length(...) > 1` 判断（见 `src/protocol/idle.c`）。
+回归测试：`meson test -C build smoke-idle-inhibit`（旧实现会 FAIL）。
+
+**2. `wl_signal` 的监听器按注册顺序调用，顺序就是行为。**
+`server->cursor->events.motion` 上，协议层（发 relative-pointer）和 shell（更新 pointer
+focus）各挂一个回调。协议层先注册就会用**旧焦点**发相对位移：跨 surface 的第一帧
+delta 被丢弃或发给刚离开的客户端。所以 `woodland_cursor_init_events()` 必须早于
+`woodland_protocol_init()`（见 `src/server/server.c`）。同理，新输出的补广播监听器
+必须注册在 `handle_new_output` 之后。
+
+**3. `output-management` 的 test 请求不许有副作用。**
+协议要求 test 只验证、不应用；布局变更（`wlr_output_layout_add/remove`）必须在
+commit 成功之后做。多输出要用 `wlr_backend_test()` + `wlr_backend_commit()` 整组过，
+不要逐个 `wlr_output_commit_state()` —— 后者中途失败没法撤销。
+回归测试：`meson test -C build smoke-output-mgmt`（`wlr-randr --dryrun` 挪位置后位置必须不变）。
+
 ## 项目规则
 
 - 只用 C（C11 起步）。不引入 C++/Qt/QML。
