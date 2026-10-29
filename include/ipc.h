@@ -37,6 +37,10 @@ const char *woodland_ipc_path(const struct woodland_server *server);
 /**
  * 执行一条命令，把 JSON 响应写进 out（调用方已 init）。
  * 返回响应里的 ok 字段。
+ *
+ * 契约：只要 server/line/out 非空，返回时 out 里一定是一段**完整**的
+ * JSON——包括拼装中途内存失败的情况（此时换成一条 ok=false 的错误响应）。
+ * 传输层因此可以直接把 out 发出去，不需要再判断缓冲区是否写坏了。
  */
 bool woodland_ipc_dispatch(struct woodland_server *server, const char *line,
                            struct woodland_json *out);
