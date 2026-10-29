@@ -112,3 +112,10 @@ void woodland_protocol_notify_activity(struct woodland_server *server) {
 bool woodland_protocol_shortcuts_inhibited(struct woodland_server *server) {
     return woodland_proto_idle_shortcuts_inhibited(server->proto);
 }
+
+void woodland_protocol_output_changed(struct woodland_server *server) {
+    if (!server) {
+        return;
+    }
+    woodland_proto_output_broadcast(server->proto);
+}

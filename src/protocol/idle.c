@@ -23,7 +23,8 @@
 /*
  * 抑制器由 wlroots 持有，但它只提供"新增"事件，不提供"全部清空"。
  * 每来一个抑制器挂一个销毁监听，任一销毁就重算一次聚合状态——
- * 否则最后一个抑制器消失后 idle 会一直停着。
+ * 否则最后一个抑制器消失后 idle 会一直停着。聚合只数自己的链表，
+ * 原因见 idle_refresh()。
  */
 struct woodland_idle_inhibitor {
     struct woodland_proto_idle *idle;
@@ -48,11 +49,22 @@ struct woodland_proto_idle {
     struct wl_listener focus_change;
 };
 
+/*
+ * 聚合看的是**我们自己**的链表，而不是 wlroots 的 manager->inhibitors。
+ *
+ * wlroots 在 wlr_idle_inhibit_v1.c 里是"先 emit destroy、再从 manager 链表
+ * 摘除"（idle_inhibitor_v1_destroy），所以 destroy 回调执行时 manager 里还
+ * 留着正在销毁的那一个。按 manager 判空的话，最后一个抑制器关掉后仍被算作
+ * 非空，idle 从此再也恢复不了——屏幕永不熄灭，且没有任何事件能纠正它。
+ *
+ * destroy 回调在调用本函数前已经把自己从 inhibitors 摘掉了，所以这里读到
+ * 的一定是"还活着"的那些，与 wlroots 的内部顺序无关。
+ */
 static void idle_refresh(struct woodland_proto_idle *idle) {
-    if (!idle->notifier || !idle->inhibit) {
+    if (!idle->notifier) {
         return;
     }
-    bool inhibited = !wl_list_empty(&idle->inhibit->inhibitors);
+    bool inhibited = !wl_list_empty(&idle->inhibitors);
     wlr_idle_notifier_v1_set_inhibited(idle->notifier, inhibited);
 }
 
@@ -76,8 +88,9 @@ static void idle_handle_new_inhibitor(struct wl_listener *listener,
 
     struct woodland_idle_inhibitor *inhibitor = calloc(1, sizeof(*inhibitor));
     if (!inhibitor) {
-        /* 记不住销毁也没关系：idle 只是停不下来，不影响可用性 */
-        wlr_log(WLR_ERROR, "cannot track idle inhibitor, idle stays inhibited");
+        /* 跟踪不了销毁就等于没有这个抑制器：宁可让 idle 正常恢复计时，
+         * 也不要留一个永远回收不掉的条目把屏幕钉死 */
+        wlr_log(WLR_ERROR, "cannot track idle inhibitor, ignoring it");
         idle_refresh(idle);
         return;
     }

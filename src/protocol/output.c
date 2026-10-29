@@ -11,6 +11,7 @@
  */
 #include <stdlib.h>
 
+#include <wlr/backend.h>
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_output_management_v1.h>
@@ -84,50 +85,113 @@ static void output_handle_layout_change(struct wl_listener *listener,
     (void)data;
 }
 
-/* apply 与 test 的差别只有一条：test 不许落盘。 */
-static bool output_apply_config(struct woodland_proto_output *output,
-                                struct wlr_output_configuration_v1 *config,
-                                bool commit) {
-    struct woodland_server *server = output->server;
-    bool ok = true;
-    struct wlr_output_configuration_head_v1 *head;
-    wl_list_for_each(head, &config->heads, link) {
-        struct wlr_output *wlr_output = head->state.output;
-
-        if (commit) {
-            struct wlr_output_state state;
-            wlr_output_state_init(&state);
-            wlr_output_head_v1_state_apply(&head->state, &state);
-            if (!wlr_output_commit_state(wlr_output, &state)) {
-                wlr_log(WLR_ERROR, "output-management: commit failed for %s",
-                        wlr_output->name);
-                ok = false;
-            }
-            wlr_output_state_finish(&state);
-        }
-
-        /* 位置不在 output_state 里，得单独写回布局；
-         * 禁用时从布局摘除，否则 workarea 会留一块黑洞。 */
-        if (head->state.enabled) {
-            wlr_output_layout_add(server->output_layout, wlr_output,
-                                  head->state.x, head->state.y);
-        } else {
-            wlr_output_layout_remove(server->output_layout, wlr_output);
-        }
-    }
-    return ok;
+/*
+ * 一份 config 的 heads → backend 级 state 数组。
+ *
+ * 走 backend 而不是逐个 wlr_output_commit_state()，是因为 DRM 有 backend
+ * 级约束（同一 CRTC 资源、带宽预算）：逐输出提交时每个输出单独看都合理，
+ * 合起来不一定能成立。wlr_backend_test()/commit() 会把整组一起看。
+ *
+ * 调用方负责 states_finish()（每个 base 是 init 过的，含 buffer 引用）。
+ */
+static struct wlr_backend_output_state *config_build_states(
+        struct wlr_output_configuration_v1 *config, size_t *len) {
+    return wlr_output_configuration_v1_build_state(config, len);
 }
 
+static void states_finish(struct wlr_backend_output_state *states,
+                          size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        wlr_output_state_finish(&states[i].base);
+    }
+    free(states);
+}
+
+/* 布局不进 output_state：位置是合成器自己的概念，wlr_output_configuration_head_v1
+ * 的 x/y 只在合成器侧有效，所以 commit 成功之后单独写回。 */
+static void apply_layout(struct woodland_server *server,
+                         struct wlr_output_configuration_v1 *config) {
+    struct wlr_output_configuration_head_v1 *head;
+    wl_list_for_each(head, &config->heads, link) {
+        if (head->state.enabled) {
+            wlr_output_layout_add(server->output_layout, head->state.output,
+                                  head->state.x, head->state.y);
+        } else {
+            /* 禁用要从布局摘除，否则 workarea 会留一块黑洞 */
+            wlr_output_layout_remove(server->output_layout, head->state.output);
+        }
+    }
+}
+
+/*
+ * test 与 apply 的唯一差别：test 不许产生任何副作用。
+ *
+ * 所以 test 路径完全不碰 output_layout —— 早先的实现把"翻译成 state"和
+ * "写回布局"放在同一个循环里，`output_apply_config(commit=false)` 于是
+ * 真的挪动了输出位置、真的把输出从布局里摘掉（但 wlr_output->enabled 没变，
+ * 状态就此不一致），而且从不调用 wlr_output_test_state()，任何配置都报成功。
+ * 现在 test 只做 backend_test，布局一个字都不动。
+ */
+static void output_handle_test(struct wl_listener *listener, void *data) {
+    struct woodland_proto_output *output =
+        wl_container_of(listener, output, test);
+    struct wlr_output_configuration_v1 *config = data;
+
+    size_t len = 0;
+    struct wlr_backend_output_state *states =
+        config_build_states(config, &len);
+    /* 空配置（没有 head）当成无条件成功：calloc(0) 是否返回 NULL 依实现
+     * 而定，别让它决定一次 test 的结论 */
+    bool ok = len == 0
+        || (states != NULL
+            && wlr_backend_test(output->server->backend, states, len));
+    states_finish(states, len);
+
+    if (ok) {
+        wlr_output_configuration_v1_send_succeeded(config);
+    } else {
+        wlr_output_configuration_v1_send_failed(config);
+    }
+    wlr_output_configuration_v1_destroy(config);
+}
+
+/*
+ * apply：先整体 test、再整体 commit、最后才写布局。
+ *
+ * 顺序是刻意的。协议在 failed 事件里要求"撤销本次 apply 的修改"，而逐
+ * 输出 commit 一旦中途失败，前面的已经生效、后面的没有，撤销要靠给每个
+ * 输出拍快照再逐一恢复（mode、scale、buffer 都要），代价和出错面都很大。
+ * 把 test 提到前面，让"不支持"在零副作用时就被拦下；真正 commit 时
+ * backend 已经确认过整组可行，部分失败只剩驱动侧竞态。
+ *
+ * 布局放在 commit 成功之后：commit 失败时布局必须保持原样，否则会出现
+ * "布局说输出在 (0,0) 且启用，wlr_output 却说没启用"的错位。
+ */
 static void output_handle_apply(struct wl_listener *listener, void *data) {
     struct woodland_proto_output *output =
         wl_container_of(listener, output, apply);
     struct wlr_output_configuration_v1 *config = data;
+    struct woodland_server *server = output->server;
 
-    /* 压住广播：apply 过程中布局变化会触发 layout-change，
-     * 那时插一份新配置会让客户端分不清哪份是它要的结果 */
-    output->applying = true;
-    bool ok = output_apply_config(output, config, true);
-    output->applying = false;
+    size_t len = 0;
+    struct wlr_backend_output_state *states =
+        config_build_states(config, &len);
+
+    bool ok = len == 0;
+    if (len > 0 && states != NULL) {
+        /* 压住广播：test/commit 期间布局可能变化，中间插一份新配置
+         * 会让客户端分不清哪份是它要的结果 */
+        output->applying = true;
+        ok = wlr_backend_test(server->backend, states, len)
+             && wlr_backend_commit(server->backend, states, len);
+        output->applying = false;
+    }
+    if (!ok) {
+        wlr_log(WLR_ERROR, "output-management: apply rejected");
+    } else if (len > 0) {
+        apply_layout(server, config);
+    }
+    states_finish(states, len);
 
     if (ok) {
         wlr_output_configuration_v1_send_succeeded(config);
@@ -138,21 +202,6 @@ static void output_handle_apply(struct wl_listener *listener, void *data) {
 
     /* 落盘后再补一次广播，客户端拿到的才是真实生效的状态 */
     woodland_proto_output_broadcast(output->owner);
-}
-
-static void output_handle_test(struct wl_listener *listener, void *data) {
-    struct woodland_proto_output *output =
-        wl_container_of(listener, output, test);
-    struct wlr_output_configuration_v1 *config = data;
-
-    /* 没有副作用可验：把状态翻译一遍不报错就算通过 */
-    bool ok = output_apply_config(output, config, false);
-    if (ok) {
-        wlr_output_configuration_v1_send_succeeded(config);
-    } else {
-        wlr_output_configuration_v1_send_failed(config);
-    }
-    wlr_output_configuration_v1_destroy(config);
 }
 
 static void output_handle_power_set_mode(struct wl_listener *listener,
@@ -166,8 +215,17 @@ static void output_handle_power_set_mode(struct wl_listener *listener,
     wlr_output_state_set_enabled(&state,
         event->mode == ZWLR_OUTPUT_POWER_V1_MODE_ON);
     if (!wlr_output_commit_state(event->output, &state)) {
+        /* TODO: 协议要求失败时回 failed 事件，但 wlroots 的 set_mode 信号
+         * 只带 wlr_output，拿不到 wlr_output_power_v1 对象，没法回。
+         * 需要自己跟踪 power 对象（像 idle 那样挂 destroy 监听）才能补上，
+         * 暂时只记日志——别把这里当成已完整实现的反馈路径。 */
         wlr_log(WLR_ERROR, "output-power: failed to commit state for %s",
                 event->output->name);
+    } else {
+        /* DPMS 只改 enabled，不触发 layout change，所以布局驱动的广播
+         * 不会发；不主动补一次，output-management 客户端看到的 enabled
+         * 和 serial 会一直停在旧值 */
+        woodland_proto_output_broadcast(output->owner);
     }
     wlr_output_state_finish(&state);
 }
