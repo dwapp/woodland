@@ -49,6 +49,13 @@ struct woodland_server {
      * protocol init 之后才挂上去。
      */
     struct wl_listener new_output_broadcast;
+    /*
+     * 输出销毁通知：参数是即将消失的 wlr_output（struct woodland_output
+     * 已经从 server->outputs 摘掉并释放）。给协议层留的钩子——output 层
+     * 不能反向调用协议层，而输出销毁本身不一定触发 layout change（被
+     * --off 禁用的输出早已不在布局里），靠 layout change 驱动的广播补不上。
+     */
+    struct wl_signal output_removed;
     struct wlr_output_layout *output_layout;
     struct wlr_scene_output_layout *scene_layout;
 

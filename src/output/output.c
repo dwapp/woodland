@@ -33,6 +33,7 @@ static void handle_request_state(struct wl_listener *listener, void *data) {
 
 static void handle_destroy(struct wl_listener *listener, void *data) {
     struct woodland_output *output = wl_container_of(listener, output, destroy);
+    struct woodland_server *server = output->server;
     /* 先销毁各 layer surface（触发 node_destroy 链清理），再销毁 layer tree */
     for (int i = 0; i < 4; i++) {
         if (output->layer_tree[i]) {
@@ -58,6 +59,17 @@ static void handle_destroy(struct wl_listener *listener, void *data) {
     wl_list_remove(&output->frame.link);
     wl_list_remove(&output->request_state.link);
     wl_list_remove(&output->link);
+
+    /*
+     * 摘链之后才通知：协议层的广播会遍历 server->outputs，这里必须已经
+     * 看不到它。用 wlr_output 而不是 output 作参数，因为 output 马上就被
+     * 释放了，而在 wlr_output_finish() 期间它仍然有效。
+     *
+     * 这里走 server 的信号而不是直接调协议层，是为了不让 output 反过来
+     * 依赖 protocol（test_output 只链 output_lib）。
+     */
+    wl_signal_emit_mutable(&server->output_removed, output->wlr_output);
+
     free(output);
     (void)data;
 }
@@ -175,6 +187,7 @@ err_listeners:
 
 bool woodland_output_init(struct woodland_server *server) {
     wl_list_init(&server->outputs);
+    wl_signal_init(&server->output_removed);
 
     server->output_layout = wlr_output_layout_create(server->display);
     if (!server->output_layout) {
