@@ -89,6 +89,17 @@ commit 成功之后做。多输出要用 `wlr_backend_test()` + `wlr_backend_com
 不要逐个 `wlr_output_commit_state()` —— 后者中途失败没法撤销。
 回归测试：`meson test -C build smoke-output-mgmt`（`wlr-randr --dryrun` 挪位置后位置必须不变）。
 
+**4. apply 的 `succeeded` 必须先于新一轮 `configuration` + `done`。**
+协议在 `succeeded` 的描述里明说"若配置有变，变更事件跟在 succeeded 之后"。而
+`apply_layout()` 里的 `wlr_output_layout_add/remove` 会触发 layout change，广播就挂在
+那个信号上——所以 `server->proto->output->applying` 的抑制范围要一直盖到
+`wlr_output_configuration_v1_send_succeeded()` 之后，再统一补一次广播。只盖住
+test/commit、写布局时已放开，客户端就会先收到 configuration（wdisplays/kanshi 会把它
+当成另一轮配置变更）。同理：**输出拔除**也要补一份 configuration，被 `--off` 禁用的
+输出早已不在 layout 里，销毁它不会触发 layout change，只剩 `server->output_removed`
+这一条路（`src/output/output.c` 发，`src/protocol/output.c` 收）。
+回归测试：`meson test -C build smoke-output-mgmt-order`（旧顺序会 FAIL）。
+
 ## 项目规则
 
 - 只用 C（C11 起步）。不引入 C++/Qt/QML。

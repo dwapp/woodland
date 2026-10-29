@@ -79,6 +79,32 @@ if get_option('test').enabled()
          timeout: 60)
   endif
 
+  # output-management 的事件顺序回归（apply 的 succeeded 必须先于新一轮
+  # configuration + done）。协议 xml 属于 wlr-protocols（不在
+  # wayland-protocols 里），只认系统安装位置：wrap 内的 wlroots 属于嵌套
+  # 子项目，meson 不许跨子项目取文件。找不到就不注册这个测试。
+  fs = import('fs')
+  om_xml = '/usr/share/wlr-protocols/unstable/wlr-output-management-unstable-v1.xml'
+  if fs.exists(om_xml) and wayland_client_dep.found() and wayland_scanner.found()
+    om_probe_srcs = ['smoke/output_mgmt_probe.c',
+      custom_target('wlr-output-management-client-header',
+        input: om_xml, output: 'wlr-output-management-unstable-v1-client-protocol.h',
+        command: [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@']),
+      custom_target('wlr-output-management-client-code',
+        input: om_xml, output: 'wlr-output-management-unstable-v1-protocol.c',
+        command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@']),
+    ]
+    om_probe = executable('output_mgmt_probe', om_probe_srcs,
+                          dependencies: [wayland_client_dep])
+    test('smoke-output-mgmt-order',
+         find_program('sh'),
+         args: [meson.current_source_dir() / 'smoke' / 'run_output_mgmt_order_smoke.sh',
+                woodland_bin.full_path(),
+                om_probe.full_path()],
+         is_parallel: false,
+         timeout: 60)
+  endif
+
   if not is_disabler(xoverride_bin) and get_option('xwayland').allowed()
     test('smoke-xwayland',
          find_program('sh'),
