@@ -303,6 +303,7 @@ void woodland_view_destroy(struct woodland_view *view) {
     woodland_selfcheck_schedule(view->server, "destroy");
     free(view->title);
     free(view->app_id);
+    free(view->tag);
     free(view);
 }
 
@@ -623,6 +624,15 @@ void woodland_view_set_title(struct woodland_view *view, const char *title) {
     if (view->ssd) {
         woodland_ssd_update(view);
     }
+}
+
+void woodland_view_set_tag(struct woodland_view *view, const char *tag) {
+    char *copy = tag ? strdup(tag) : NULL;
+    if (tag && !copy) {
+        return;
+    }
+    free(view->tag);
+    view->tag = copy;
 }
 
 void woodland_view_set_app_id(struct woodland_view *view, const char *app_id) {

@@ -9,6 +9,7 @@
 #include <xkbcommon/xkbcommon.h>
 
 #include "focus.h"
+#include "protocol.h"
 #include "seat.h"
 #include "view.h"
 #include "workspace.h"
@@ -84,9 +85,18 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data) {
     int nsyms = xkb_state_key_get_syms(
         keyboard->wlr_keyboard->xkb_state, keycode, &syms);
 
+    /* 任何按键都算"人还在"，idle 计时从这里续 */
+    woodland_protocol_notify_activity(server);
+
     bool handled = false;
     uint32_t modifiers = wlr_keyboard_get_modifiers(keyboard->wlr_keyboard);
-    if ((modifiers & WLR_MODIFIER_ALT) &&
+    /*
+     * 焦点 surface 若持有 keyboard-shortcuts-inhibit，合成器键位要让路
+     * （游戏、远程桌面全屏抓键就靠这个）。抑制器随焦点走，切走即失效，
+     * 所以不存在"客户端把 Alt+Tab 永久吞掉"的死角。
+     */
+    bool inhibited = woodland_protocol_shortcuts_inhibited(server);
+    if (!inhibited && (modifiers & WLR_MODIFIER_ALT) &&
         event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
         for (int i = 0; i < nsyms; i++) {
             handled = handle_keybinding(server, syms[i], modifiers);
@@ -146,6 +156,8 @@ static void server_new_keyboard(struct woodland_server *server,
 static void server_new_pointer(struct woodland_server *server,
                                struct wlr_input_device *device) {
     wlr_cursor_attach_input_device(server->cursor, device);
+    /* 手势协议按设备挂监听，交给协议层自己管生命周期 */
+    woodland_protocol_attach_input(server, device);
 }
 
 static void server_new_input(struct wl_listener *listener, void *data) {

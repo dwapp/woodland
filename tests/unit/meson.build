@@ -19,7 +19,8 @@ test('cursor', test_cursor)
 test_seat = executable('test_seat', 'test_seat.c',
   dependencies: [wlroots, wayland_server],
   include_directories: woodland_inc,
-  link_with: [cursor_lib, output_lib, shell_lib, seat_lib, workspace_lib, layer_lib, ssd_lib])
+  # seat.c 现在会调 protocol 层的 idle / 快捷键抑制钩子
+  link_with: [cursor_lib, output_lib, shell_lib, seat_lib, workspace_lib, layer_lib, ssd_lib, protocol_lib])
 test('seat', test_seat)
 
 test_workspace = executable('test_workspace', 'test_workspace.c',

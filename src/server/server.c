@@ -21,6 +21,7 @@
 #include "ipc.h"
 #include "layer.h"
 #include "output.h"
+#include "protocol.h"
 #include "seat.h"
 #include "selfcheck.h"
 #include "server.h"
@@ -50,6 +51,10 @@ bool woodland_server_init(struct woodland_server *server) {
     /* ipc_fd 的 0 是 stdin：先置 -1，避免 finish 里误关标准输入 */
     server->ipc_fd = -1;
     wl_list_init(&server->ipc_clients);
+    /* 协议层的两个链表也在这一步建好：init 中途失败时 finish 仍会跑，
+     * 未初始化的链表头（next == NULL）在 wl_list_for_each 里会解引用空指针 */
+    wl_list_init(&server->gesture_pointers);
+    wl_list_init(&server->idle_inhibitors);
     woodland_selfcheck_init(server);
 
     server->display = wl_display_create();
@@ -150,6 +155,13 @@ bool woodland_server_init(struct woodland_server *server) {
         return false;
     }
 
+    /* 上游协议：依赖 cursor / seat / output_layout / shell 都已就位，
+     * 所以放在最后。内部只做接线，失败即整体失败（缺协议比半个协议好查）。 */
+    if (!woodland_protocol_init(server)) {
+        wlr_log(WLR_ERROR, "failed to init protocol layer");
+        return false;
+    }
+
     if (!woodland_capture_init(server)) {
         wlr_log(WLR_ERROR, "failed to init capture");
         return false;
@@ -241,6 +253,9 @@ void woodland_server_finish(struct woodland_server *server) {
 #endif
     woodland_selfcheck_finish(server);
     woodland_ipc_finish(server);
+    /* 协议层摘掉挂在 cursor/seat/output_layout 上的监听器，
+     * 必须早于这些对象被销毁 */
+    woodland_protocol_finish(server);
     woodland_capture_finish(server);
     woodland_shell_finish(server);
     woodland_layer_finish(server);

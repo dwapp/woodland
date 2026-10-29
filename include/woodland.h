@@ -29,6 +29,19 @@
 
 struct wlr_xwayland;
 struct wlr_compositor;
+/* 上游协议（src/protocol）：只持有指针，实现细节留在 protocol.c */
+struct wlr_viewporter;
+struct wlr_presentation;
+struct wlr_primary_selection_v1_device_manager;
+struct wlr_idle_notifier_v1;
+struct wlr_idle_inhibit_manager_v1;
+struct wlr_keyboard_shortcuts_inhibit_manager_v1;
+struct wlr_output_power_manager_v1;
+struct wlr_output_manager_v1;
+struct wlr_relative_pointer_manager_v1;
+struct wlr_pointer_gestures_v1;
+struct wlr_xdg_activation_v1;
+struct wlr_xdg_toplevel_tag_manager_v1;
 
 struct woodland_server {
     struct wl_display *display;
@@ -110,6 +123,40 @@ struct woodland_server {
     struct wlr_layer_shell_v1 *layer_shell;
     struct wl_listener new_layer_surface;
     struct wlr_layer_surface_v1 *focused_layer; // 当前持有键盘焦点的 layer surface
+
+    /* 上游协议（src/protocol） */
+    struct wlr_viewporter *viewporter;
+    struct wlr_presentation *presentation;
+    struct wlr_primary_selection_v1_device_manager *primary_selection;
+    struct wl_listener request_set_primary_selection;
+    struct wlr_idle_notifier_v1 *idle_notifier;
+    struct wlr_idle_inhibit_manager_v1 *idle_inhibit;
+    struct wl_listener new_idle_inhibitor;
+    struct wl_list idle_inhibitors;   // struct woodland_idle_inhibitor.link
+    struct wlr_keyboard_shortcuts_inhibit_manager_v1 *shortcuts_inhibit;
+    struct wl_listener new_shortcuts_inhibitor;
+    /* seat 的键盘焦点变化：抑制器激活态要跟着焦点走 */
+    struct wl_listener shortcuts_focus_change;
+    struct wlr_output_power_manager_v1 *output_power;
+    struct wl_listener output_power_set_mode;
+    struct wlr_output_manager_v1 *output_manager;
+    struct wl_listener output_manager_apply;
+    struct wl_listener output_manager_test;
+    struct wl_listener output_layout_change;   // output_layout->events.change
+    /* apply 期间压住配置广播，否则客户端分不清哪份是对自己请求的回应 */
+    bool output_applying;
+    struct wlr_relative_pointer_manager_v1 *relative_pointer;
+    struct wlr_pointer_gestures_v1 *pointer_gestures;
+    struct wl_list gesture_pointers;           // struct woodland_gesture_pointer.link
+    struct wlr_xdg_activation_v1 *xdg_activation;
+    struct wl_listener activation_request;
+    struct wlr_xdg_toplevel_tag_manager_v1 *toplevel_tag;
+    struct wl_listener toplevel_tag_set;
+    /* 光标事件上的协议钩子：相对指针与 idle 活动（shell.c 已有一组，不共用） */
+    struct wl_listener proto_cursor_motion;
+    struct wl_listener proto_cursor_motion_absolute;
+    struct wl_listener proto_cursor_button;
+    struct wl_listener proto_cursor_axis;
 
     /* 截图/录屏（src/capture） */
     struct wlr_screencopy_manager_v1 *screencopy_manager;

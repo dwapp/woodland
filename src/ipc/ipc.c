@@ -259,6 +259,8 @@ static void append_view_details(struct woodland_server *server,
     obj_int(&obj, "z", z);
     obj_str(&obj, "title", view->title);
     obj_str(&obj, "app_id", view->app_id);
+    /* xdg-toplevel-tag：协议层只记录不使用，靠这里才看得见 */
+    obj_str(&obj, "tag", view->tag);
     obj_str(&obj, "workspace", view->workspace ? view->workspace->name : NULL);
 
     const char *output = view_output_name(view);
