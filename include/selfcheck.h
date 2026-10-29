@@ -21,6 +21,15 @@ struct woodland_json;
 struct woodland_check {
     const char *name;
     bool ok;
+    /*
+     * 本条失败意味着"后面的检查不能跑"。
+     *
+     * 目前只有 views_list_intact 在链表不闭合时置位：其余检查都用
+     * wl_list_for_each 无界遍历，遇上环会死循环——自检把合成器挂住，
+     * 比它想报的那个 bug 更糟。普通的不自洽（比如已卸载的视图还留在
+     * 链表里）不算 fatal，后面照跑。
+     */
+    bool fatal;
     char expected[WOODLAND_SELFCHECK_TEXT];
     char actual[WOODLAND_SELFCHECK_TEXT];
 };

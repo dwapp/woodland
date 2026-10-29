@@ -58,6 +58,25 @@ struct woodland_view *woodland_focus_current(struct woodland_server *server) {
         server->seat->keyboard_state.focused_surface);
 }
 
+/*
+ * 取"已记录的焦点视图"，即使它当前已经不可聚焦。
+ *
+ * 典型场景：工作区切换已经改了 active_workspace，旧焦点视图因为不在
+ * 新工作区而 focusable 为假；headless 下又没有键盘设备，反查不到任何
+ * surface，woodland_focus_current() 于是返回 NULL。这时候如果按它来清
+ * 焦点，旧视图的 activated / SSD / foreign-toplevel 就永远留在激活态，
+ * 下一次聚焦会同时出现两个激活窗口。
+ *
+ * 清外观要看"我们记着谁"，不是"谁现在还能聚焦"。
+ */
+static struct woodland_view *focus_recorded(struct woodland_server *server) {
+    struct woodland_view *view = woodland_focus_current(server);
+    if (!view) {
+        view = server->focused_view;
+    }
+    return view;
+}
+
 static void ft_set_activated(struct woodland_view *view, bool activated) {
     if (view->toplevel_handle) {
         wlr_foreign_toplevel_handle_v1_set_activated(view->toplevel_handle,
@@ -171,7 +190,7 @@ void woodland_focus_view(struct woodland_view *view, bool raise) {
     }
 
     struct wlr_seat *seat = server->seat;
-    struct woodland_view *prev = woodland_focus_current(server);
+    struct woodland_view *prev = focus_recorded(server);
     bool already = (prev == view)
         && (seat->keyboard_state.focused_surface == surface);
 
@@ -206,7 +225,7 @@ void woodland_focus_none(struct woodland_server *server) {
     if (!server || !server->seat) {
         return;
     }
-    struct woodland_view *prev = woodland_focus_current(server);
+    struct woodland_view *prev = focus_recorded(server);
     if (prev) {
         view_set_focused_look(prev, false);
     }
@@ -220,7 +239,7 @@ void woodland_focus_yield_to_layer(struct woodland_server *server) {
     if (!server) {
         return;
     }
-    struct woodland_view *prev = woodland_focus_current(server);
+    struct woodland_view *prev = focus_recorded(server);
     if (prev) {
         view_set_focused_look(prev, false);
     }

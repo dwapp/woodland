@@ -106,10 +106,13 @@ static void check_views_list(struct woodland_server *server,
         pos = pos->next;
     }
     if (pos != &server->views) {
-        /* 超过上限还没回到表头：链表有环或被写坏 */
+        /* 超过上限还没回到表头：链表有环或被写坏。
+         * 后面的检查不再跑（见 collect），这里说清楚免得读者以为漏跑了 */
         set_text(check->actual, sizeof(check->actual),
-                 "list did not terminate within %d nodes", SELFCHECK_LIST_LIMIT);
+                 "list did not terminate within %d nodes; "
+                 "dependent checks skipped", SELFCHECK_LIST_LIMIT);
         check->ok = false;
+        check->fatal = true;
         set_text(check->expected, sizeof(check->expected),
                  "list terminates at sentinel");
         return;
@@ -472,6 +475,11 @@ int woodland_selfcheck_collect(struct woodland_server *server,
         check->name = checks[i].name;
         check->ok = true;
         checks[i].run(server, check);
+        if (check->fatal) {
+            /* 链表不闭合时立刻收手：后面的检查全靠 wl_list_for_each
+             * 无界遍历，遇上环就是死循环。 */
+            break;
+        }
     }
     return count;
 }

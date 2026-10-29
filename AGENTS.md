@@ -61,6 +61,11 @@ woodland 是 Wayland 合成器：主循环会**正常阻塞在 `ep_poll`** 等�
 4. **要排查崩溃**：用 ASan（`build-asan`）+ 崩溃时 ASan 会自动打印栈，或者给 wlr_log 加日志/读代码推理。**不要 attach gdb 到阻塞的事件循环上等它"出问题"**。
 5. **确需 gdb 时**：只对**已崩溃的 core dump** 做 `gdb ./woodland core`（事后分析，不是 `run`），或对纯函数（不跑事件循环）的单元测试用 gdb。
 
+**ASan 二进制在这台机器上要先关掉 ASLR。** 直接跑 `build-asan/` 下的程序有时会刷屏输出
+`AddressSanitizer:DEADLYSIGNAL` 然后卡住不返回（`--help` 都跑不完），看起来像崩溃循环，
+实际是 ASan 与该内核的高熵 ASLR 不兼容，和代码无关。用 `setarch $(uname -m) -R ./xxx` 关掉
+ASLR 就正常了。**别把这种 DEADLYSIGNAL 当成自己的 bug 去修**，先关 ASLR 复现一次再说。
+
 ## 项目规则
 
 - 只用 C（C11 起步）。不引入 C++/Qt/QML。

@@ -106,7 +106,9 @@ void woodland_view_set_activated(struct woodland_view *view, bool activated) {
         return;
     }
 #endif
-    wlr_xdg_toplevel_set_activated(view->xdg_toplevel, activated);
+    if (view->xdg_toplevel) {
+        wlr_xdg_toplevel_set_activated(view->xdg_toplevel, activated);
+    }
 }
 
 void woodland_view_close(struct woodland_view *view) {

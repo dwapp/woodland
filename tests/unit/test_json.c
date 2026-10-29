@@ -6,9 +6,25 @@
  * 没转义，整个响应就是坏 JSON，调试工具直接不可用。
  */
 #include <assert.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "util/json.h"
+
+/* 断言结果里恰好有 n 个 U+FFFD（EF BF BD），且没有其它内容 */
+static void assert_fffd(const struct woodland_json *j, int n) {
+    const char *data = woodland_json_data(j);
+    size_t len = strlen(data);
+    int count = 0;
+    for (const char *p = data; (p = strstr(p, "\xEF\xBF\xBD")) != NULL; p += 3) {
+        count++;
+    }
+    if (count != n || len != (size_t)(2 + 3 * n)) {
+        fprintf(stderr, "expected %d U+FFFD, got %d (len %zu): %s\n",
+                n, count, len, data);
+        assert(0);
+    }
+}
 
 int main(void) {
     /* ---------- 基本字符串与转义 ---------- */
@@ -56,6 +72,39 @@ int main(void) {
     /* 两个坏字节 → 两个 U+FFFD（EF BF BD） */
     assert(strcmp(data, "\"\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\"") == 0
            || strcmp(data, "\"\xEF\xBF\xBD\xEF\xBF\xBD\"") == 0);
+
+    woodland_json_finish(&j);
+    woodland_json_init(&j);
+
+    /*
+     * 结构合法但码点非法的序列也要拦下。
+     *
+     * 这些序列直接放过去的后果不是"显示成怪字符"，而是响应本身解析
+     * 失败：过长编码 0xC0 0x80 解出来是 0x00，写进 JSON 字符串就是裸
+     * NUL；代理对 0xED 0xA0 0x80 则是孤立半个字符。两者都会让 jq 报错，
+     * 和"清洗标题里脏字节"的初衷正好相反。
+     */
+    /* 过长编码的 NUL：两字节 → 2 个 U+FFFD */
+    woodland_json_string(&j, "\xC0\x80");
+    assert_fffd(&j, 2);
+    woodland_json_finish(&j);
+    woodland_json_init(&j);
+
+    /* UTF-16 代理区（U+D800）：三字节 → 3 个 U+FFFD */
+    woodland_json_string(&j, "\xED\xA0\x80");
+    assert_fffd(&j, 3);
+    woodland_json_finish(&j);
+    woodland_json_init(&j);
+
+    /* 超出 U+10FFFF（0xF5 开头）：四字节 → 4 个 U+FFFD */
+    woodland_json_string(&j, "\xF5\x80\x80\x80");
+    assert_fffd(&j, 4);
+    woodland_json_finish(&j);
+    woodland_json_init(&j);
+
+    /* 合法的四字节字符不能被误伤 */
+    woodland_json_string(&j, "\xF0\x9F\x98\x80");   /* U+1F600 */
+    assert(strcmp(woodland_json_data(&j), "\"\xF0\x9F\x98\x80\"") == 0);
 
     woodland_json_finish(&j);
     woodland_json_init(&j);

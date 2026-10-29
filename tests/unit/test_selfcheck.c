@@ -194,5 +194,28 @@ int main(void) {
     assert(strstr(text, "\"expected\"") == NULL);
     woodland_json_finish(&json);
 
+    /*
+     * ---------- 链表成环：报出来，而不是让自检把自己挂住 ----------
+     *
+     * 其余检查都用 wl_list_for_each 无界遍历，环一旦存在它们会死循环；
+     * 一个用来诊断问题的自检把合成器冻住，比它想报的 bug 更糟。
+     * 所以致命那条一失败就必须收手。
+     */
+    a.view.link.next = &a.view.link;   /* 自环：从表头出发永远回不到 sentinel */
+    n = run(&server, out);
+    assert(n == 1);          /* 只跑到 views_list_intact 就停 */
+    assert(strcmp(out[0].name, "views_list_intact") == 0);
+    assert(!out[0].ok);
+    assert(out[0].fatal);
+    assert(strstr(out[0].actual, "did not terminate"));
+    assert(strstr(out[0].actual, "dependent checks skipped"));
+
+    a.view.link.next = &server.views;    /* 还原成单链表 */
+    assert_all_ok(&server, "list repaired");
+
+    /* 释放场景树：不清的话 LeakSanitizer 会把测试自身当泄漏源，
+     * 真出问题时反而被这堆噪音埋掉 */
+    wlr_scene_node_destroy(&server.scene->tree.node);
+
     return 0;
 }
