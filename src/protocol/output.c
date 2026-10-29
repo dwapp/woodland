@@ -34,6 +34,7 @@ struct woodland_proto_output {
     struct wl_listener power_set_mode;
 
     struct wl_listener layout_change;
+    struct wl_listener output_removed;
 
     /* apply 期间压住配置广播，否则客户端分不清哪份是对自己请求的回应 */
     bool applying;
@@ -86,6 +87,22 @@ static void output_handle_layout_change(struct wl_listener *listener,
 }
 
 /*
+ * 输出拔除。
+ *
+ * 布局驱动的广播在这里不可靠：一个被 --off 禁用的输出早就从 output_layout
+ * 摘掉了，销毁它不会触发 layout change，于是不会有新配置发出去。wlroots
+ * 自己会发 head.finished，但那份 configuration 的 done 只有合成器能发——
+ * 少了它就是一份永远等不到 done 的半截配置，客户端停在旧状态上。
+ */
+static void output_handle_output_removed(struct wl_listener *listener,
+                                         void *data) {
+    struct woodland_proto_output *output =
+        wl_container_of(listener, output, output_removed);
+    woodland_proto_output_broadcast(output->owner);
+    (void)data;
+}
+
+/*
  * 一份 config 的 heads → backend 级 state 数组。
  *
  * 走 backend 而不是逐个 wlr_output_commit_state()，是因为 DRM 有 backend
@@ -101,6 +118,13 @@ static struct wlr_backend_output_state *config_build_states(
 
 static void states_finish(struct wlr_backend_output_state *states,
                           size_t len) {
+    /* wlr_output_configuration_v1_build_state() 先写 *len = head 数，再
+     * calloc；calloc 失败时返回 NULL 但 len 已经大于 0。不判空的话 OOM
+     * 路径会在这里解引用空指针——虽然只是 OOM，但那是唯一能走到 NULL
+     * 的一次，反而最难复现。 */
+    if (!states) {
+        return;
+    }
     for (size_t i = 0; i < len; i++) {
         wlr_output_state_finish(&states[i].base);
     }
@@ -178,13 +202,22 @@ static void output_handle_apply(struct wl_listener *listener, void *data) {
         config_build_states(config, &len);
 
     bool ok = len == 0;
+
+    /*
+     * 压住广播的范围必须一直盖到 send_succeeded() 之后，不能只盖住
+     * test/commit。apply_layout() 内部会 wlr_output_layout_add/remove，那会
+     * 触发 layout change，而 output_handle_layout_change() 也会广播——提前
+     * 放开 applying 就会出现「configuration + done」排在本次 apply 的
+     * succeeded 前面，客户端（wdisplays / kanshi）会把它当成另一轮配置变更。
+     *
+     * 所以整段 apply 是：抑制 → test/commit → 写布局 → 回 succeeded →
+     * 放开 → 统一补一次广播。
+     */
+    output->applying = true;
+
     if (len > 0 && states != NULL) {
-        /* 压住广播：test/commit 期间布局可能变化，中间插一份新配置
-         * 会让客户端分不清哪份是它要的结果 */
-        output->applying = true;
         ok = wlr_backend_test(server->backend, states, len)
              && wlr_backend_commit(server->backend, states, len);
-        output->applying = false;
     }
     if (!ok) {
         wlr_log(WLR_ERROR, "output-management: apply rejected");
@@ -199,6 +232,8 @@ static void output_handle_apply(struct wl_listener *listener, void *data) {
         wlr_output_configuration_v1_send_failed(config);
     }
     wlr_output_configuration_v1_destroy(config);
+
+    output->applying = false;
 
     /* 落盘后再补一次广播，客户端拿到的才是真实生效的状态 */
     woodland_proto_output_broadcast(output->owner);
@@ -264,6 +299,8 @@ bool woodland_proto_output_init(struct woodland_proto *proto) {
     wl_signal_add(&output->manager->events.test, &output->test);
     output->layout_change.notify = output_handle_layout_change;
     wl_signal_add(&server->output_layout->events.change, &output->layout_change);
+    output->output_removed.notify = output_handle_output_removed;
+    wl_signal_add(&server->output_removed, &output->output_removed);
 
     return true;
 }
@@ -284,6 +321,9 @@ void woodland_proto_output_finish(struct woodland_proto *proto) {
     }
     if (output->layout_change.link.prev) {
         wl_list_remove(&output->layout_change.link);
+    }
+    if (output->output_removed.link.prev) {
+        wl_list_remove(&output->output_removed.link);
     }
     free(output);
     proto->output = NULL;
