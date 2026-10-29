@@ -37,6 +37,48 @@ if get_option('test').enabled()
        is_parallel: false,
        timeout: 60)
 
+  # output-management：test 不许有副作用、apply 必须生效、多 head 必须可见。
+  # 依赖 wlr-randr（没有则脚本自己 skip）。
+  test('smoke-output-mgmt',
+       find_program('sh'),
+       args: [meson.current_source_dir() / 'smoke' / 'run_output_mgmt_smoke.sh',
+              woodland_bin.full_path()],
+       is_parallel: false,
+       timeout: 60)
+
+  # idle-inhibit 的聚合回归（"最后一个抑制器销毁后 idle 必须恢复"）。
+  # 需要 wayland-client 与 wayland-protocols 里的两份 xml：缺任何一样就
+  # 不构建探针、不注册测试，免得把构建搞挂。
+  wayland_client_dep = dependency('wayland-client', required: false)
+  wp_dep = dependency('wayland-protocols', required: false)
+  wayland_scanner = find_program('wayland-scanner', required: false)
+  if wayland_client_dep.found() and wp_dep.found() and wayland_scanner.found()
+    wp_datadir = wp_dep.get_variable(pkgconfig: 'pkgdatadir')
+    idle_inhibit_xml = wp_datadir / 'unstable' / 'idle-inhibit' / 'idle-inhibit-unstable-v1.xml'
+    idle_notify_xml = wp_datadir / 'staging' / 'ext-idle-notify' / 'ext-idle-notify-v1.xml'
+
+    idle_probe_srcs = ['smoke/idle_probe.c']
+    foreach p : [[idle_inhibit_xml, 'idle-inhibit-unstable-v1'],
+                 [idle_notify_xml, 'ext-idle-notify-v1']]
+      idle_probe_srcs += custom_target(p[1] + '-client-header',
+        input: p[0], output: p[1] + '-client-protocol.h',
+        command: [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@'])
+      idle_probe_srcs += custom_target(p[1] + '-client-code',
+        input: p[0], output: p[1] + '-protocol.c',
+        command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'])
+    endforeach
+
+    idle_probe = executable('idle_probe', idle_probe_srcs,
+                            dependencies: [wayland_client_dep])
+    test('smoke-idle-inhibit',
+         find_program('sh'),
+         args: [meson.current_source_dir() / 'smoke' / 'run_idle_smoke.sh',
+                woodland_bin.full_path(),
+                idle_probe.full_path()],
+         is_parallel: false,
+         timeout: 60)
+  endif
+
   if not is_disabler(xoverride_bin) and get_option('xwayland').allowed()
     test('smoke-xwayland',
          find_program('sh'),
