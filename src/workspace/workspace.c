@@ -116,6 +116,19 @@ void woodland_workspace_switch_focus(struct woodland_server *server,
     if (target == NULL || target == server->active_workspace) {
         return;
     }
+
+    /* 先清旧焦点，再切 active_workspace。
+     *
+     * 顺序反过来会漏掉清外观：切换之后旧焦点视图已经不在新工作区，
+     * focusable 为假，而 headless 下没有键盘设备可以反查，焦点就"找不到
+     * 是谁"了——它的 activated / SSD / foreign-toplevel 会一直亮着，
+     * 等调用方设上新焦点，就有两个窗口同时处于激活态。 */
+    if (!restore_focus && server->seat && server->focused_layer == NULL) {
+        /* 调用方马上要设焦点：先清掉旧工作区的键盘焦点，避免按键
+         * 继续发给已隐藏的窗口。 */
+        woodland_focus_none(server);
+    }
+
     wlr_scene_node_set_enabled(&server->active_workspace->tree->node, false);
     wlr_ext_workspace_handle_v1_set_active(
         server->active_workspace->ext_workspace, false);
@@ -127,10 +140,6 @@ void woodland_workspace_switch_focus(struct woodland_server *server,
         /* 焦点回退会挑新工作区 z 序最上的窗口；若焦点在常驻的 layer
          * surface 上则保持不动（见 woodland_focus_fallback）。 */
         woodland_focus_fallback(server);
-    } else if (server->seat && server->focused_layer == NULL) {
-        /* 调用方马上要设焦点：先清掉旧工作区的键盘焦点，避免按键
-         * 继续发给已隐藏的窗口。 */
-        woodland_focus_none(server);
     }
 }
 

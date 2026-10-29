@@ -98,8 +98,14 @@ void woodland_json_fmt(struct woodland_json *json, const char *fmt, ...) {
 /*
  * 按 UTF-8 解码一个字符，返回消耗的字节数；非法序列返回 0。
  *
- * 只看结构合法性（首字节长度前缀 + 续字节 10xxxxxx），不校验码点范围：
- * 目标是"让 jq 能解析"，过度校正反而会把合法但少见的字符吃掉。
+ * 除了结构（首字节长度前缀 + 续字节 10xxxxxx），还要校验码点范围：
+ *   - 过长编码（overlong）：0xC0 0x80 这类"用两个字节表示 NUL"，
+ *     结构上完全合法，但解码出来是 0x00，写进 JSON 字符串就是裸 NUL；
+ *   - 代理对 0xD800..0xDFFF：按 CESU 拆开的半个字符，不是合法 UTF-8；
+ *   - > U+10FFFF：4 字节只能覆盖到 U+10FFFF，超出的都是越界。
+ *
+ * 这三类放过去的后果不是"显示怪字符"，而是**响应本身解析失败**——
+ * 恰好和这个函数的初衷相反。所以一律按非法处理，让调用方替换成 U+FFFD。
  */
 static size_t utf8_decode(const unsigned char *s, uint32_t *out) {
     unsigned char c = s[0];
@@ -126,6 +132,12 @@ static size_t utf8_decode(const unsigned char *s, uint32_t *out) {
             return 0;
         }
         cp = (cp << 6) | (s[i] & 0x3F);
+    }
+    /* 每种长度都有各自的最小码点：短于它就是过长编码 */
+    static const uint32_t min_cp[5] = {0, 0, 0x80, 0x800, 0x10000};
+    if (cp < min_cp[len] || cp > 0x10FFFF
+        || (cp >= 0xD800 && cp <= 0xDFFF)) {
+        return 0;
     }
     *out = cp;
     return len;

@@ -122,6 +122,73 @@ echo "== multiple commands on one connection (nc) =="
 LINES="$(printf 'get_focus\nhelp\n' | nc -U -q1 "$SOCK" 2>/dev/null | wc -l)"
 [ "$LINES" -ge 2 ] || fail "expected 2 replies over one connection, got $LINES"
 
+# 一次灌进多条命令：服务端"发不完就先不解析下一条、等 WRITABLE 再续"
+# 这条状态机如果写错，表现就是回了前几条然后卡死
+echo "== pipelined commands =="
+PIPED="$(awk 'BEGIN{for(i=0;i<20;i++)print "ping"}' | nc -U -q1 "$SOCK" 2>/dev/null | wc -l)"
+[ "$PIPED" -ge 20 ] || fail "expected 20 pipelined replies, got $PIPED"
+
+echo "== wctl options =="
+"$WCTL" --help >/dev/null 2>&1 || fail "--help should exit 0"
+"$WCTL" -s "$SOCK" --timeout 2000 ping | jq -e '.ok' >/dev/null \
+    || fail "--timeout long option rejected"
+
+# 命令超长必须在 write 之前拒绝：snprintf 截断时返回的是"本来要写多少"，
+# 直接拿去 write 会从栈上读出去
+echo "== oversized command =="
+LONG="$(awk 'BEGIN{for(i=0;i<200;i++)printf "a"}')"
+if "$WCTL" -s "$SOCK" "$LONG" 2>&1 | grep -q "command too long"; then
+    :
+else
+    fail "oversized command was not rejected before write"
+fi
+
+if command -v python3 >/dev/null 2>&1; then
+    # 连上就不读的客户端不能把合成器冻住：写不动时排队等 WRITABLE，
+    # 事件循环必须照常转，别的连接还能拿到回应。
+    echo "== stalled client must not freeze the compositor =="
+    python3 - "$SOCK" <<'PY' &
+import socket, sys, time
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.connect(sys.argv[1])
+s.sendall(b"dump_scene\n" * 2000)   # 灌满后既不读也不关
+time.sleep(3)
+s.close()
+PY
+    stalled=$!
+    sleep 0.3
+    "$WCTL" -s "$SOCK" -t 1000 ping | jq -e '.ok' >/dev/null \
+        || fail "compositor stopped answering while a client refused to read"
+    kill "$stalled" 2>/dev/null || true
+    wait "$stalled" 2>/dev/null || true
+
+    # -t 要能约束 read：对端连上就不说话时不能一直等
+    echo "== -t bounds the read, not just the connect =="
+    SLOW="$XDG_RUNTIME_DIR/slow.sock"
+    python3 - "$SLOW" <<'PY' &
+import socket, sys, time
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.bind(sys.argv[1])
+s.listen(1)
+c, _ = s.accept()
+time.sleep(5)          # 连上，一个字也不回
+c.close()
+PY
+    slow_srv=$!
+    i=0
+    while [ ! -S "$SLOW" ] && [ "$i" -lt 100 ]; do
+        sleep 0.05; i=$((i+1))
+    done
+    started=$(date +%s)
+    if "$WCTL" -s "$SLOW" -t 400 ping >/dev/null 2>&1; then
+        fail "wctl should fail against a silent server"
+    fi
+    elapsed=$(( $(date +%s) - started ))
+    [ "$elapsed" -le 3 ] || fail "read timeout ignored (waited ${elapsed}s)"
+    kill "$slow_srv" 2>/dev/null || true
+    wait "$slow_srv" 2>/dev/null || true
+fi
+
 echo "== no self-check failures in the log =="
 if grep -q "self-check" "$LOG"; then
     grep "self-check" "$LOG" >&2

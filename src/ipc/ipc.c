@@ -8,13 +8,17 @@
  *
  * 实现上刻意"笨"：
  *   - 一行命令一行回应，没有长度头，`nc -U` 就能手敲；
- *   - 响应直接拼字符串（util/json.h），失败就回一行错误，不做流控；
- *   - 客户端 fd 用阻塞写：单条响应 < 64KB，远小于 socket 缓冲，
- *     写不动的极端情况（对端不读）由 EPIPE 兜底断开。
+ *   - 响应直接拼字符串（util/json.h），失败就回一行错误；
+ *   - 客户端 fd 是非阻塞的，发不完的部分排队等 WRITABLE。
+ *
+ * 最后一条是被逼的：dump_scene 上限 2000 个节点，一棵正常的树就能到几百 KB，
+ * 对端连上却不读时，阻塞写会**把事件循环连同输入和渲染一起冻住**——
+ * 调试工具反过来搞坏合成器，正是最不该发生的失败方式。
  */
 #include "config.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -48,6 +52,9 @@
 /* 场景树转储的递归深度与节点上限：防止一次 dump 输出几百 KB */
 #define SCENE_MAX_DEPTH 6
 #define SCENE_MAX_NODES 2000
+/* 单连接待发数据的硬上限。正常响应远小于它；超过说明对端连上就不读，
+ * 与其让队列无限涨，不如断开这个连接（调试接口丢一条连接是可接受的） */
+#define IPC_MAX_PENDING (4 * 1024 * 1024)
 
 #define IPC_COMMANDS "ping, get_tree, get_focus, dump_scene, self_check, help"
 
@@ -58,6 +65,11 @@ struct woodland_ipc_client {
     struct wl_event_source *source;
     size_t len;
     char buf[IPC_MAX_LINE];
+    /* 输出队列：out[out_off..out_len) 是还没发出去的字节 */
+    char *out;
+    size_t out_len;
+    size_t out_cap;
+    size_t out_off;
 };
 
 /* ==================== JSON 拼装小工具 ==================== */
@@ -566,19 +578,70 @@ bool woodland_ipc_dispatch(struct woodland_server *server, const char *line,
 
 /* ==================== socket 服务端 ==================== */
 
-static bool write_all(int fd, const char *data, size_t len) {
-    size_t off = 0;
-    while (off < len) {
-        ssize_t n = write(fd, data + off, len - off);
+/* 尽量把队列里的字节写出去。
+ * 返回 false 表示真错误（EPIPE/EBADF 之类），连接必须断开；
+ * EAGAIN 不算错误——对端只是暂时不收，等 WRITABLE 再来。 */
+static bool client_flush(struct woodland_ipc_client *client) {
+    while (client->out_off < client->out_len) {
+        ssize_t n = write(client->fd, client->out + client->out_off,
+                          client->out_len - client->out_off);
         if (n < 0) {
             if (errno == EINTR) {
                 continue;
             }
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                return true;
+            }
             return false;
         }
-        off += (size_t)n;
+        client->out_off += (size_t)n;
     }
+    /* 发完就复位，别让缓冲只涨不落 */
+    client->out_off = 0;
+    client->out_len = 0;
     return true;
+}
+
+/* 事件掩码二选一：有积压就只关心可写（顺带就是反压——不再读新命令），
+ * 队列空了才回去读。两个都挂着会让"读进来又发不出去"无限套娃。 */
+static void client_update_events(struct woodland_ipc_client *client) {
+    if (!client->source) {
+        return;
+    }
+    uint32_t mask = (client->out_off < client->out_len) ? WL_EVENT_WRITABLE
+                                                        : WL_EVENT_READABLE;
+    wl_event_source_fd_update(client->source, mask);
+}
+
+/* 排队并发出去。返回 false 表示连接必须断开。 */
+static bool client_send(struct woodland_ipc_client *client,
+                        const char *data, size_t len) {
+    /* 回收已经发掉的头部 */
+    if (client->out_off > 0) {
+        memmove(client->out, client->out + client->out_off,
+                client->out_len - client->out_off);
+        client->out_len -= client->out_off;
+        client->out_off = 0;
+    }
+    if (len > IPC_MAX_PENDING || client->out_len > IPC_MAX_PENDING - len) {
+        wlr_log(WLR_ERROR, "ipc client is not reading, dropping it");
+        return false;
+    }
+    if (client->out_len + len > client->out_cap) {
+        size_t cap = client->out_cap ? client->out_cap : 4096;
+        while (cap < client->out_len + len) {
+            cap *= 2;
+        }
+        char *grown = realloc(client->out, cap);
+        if (!grown) {
+            return false;
+        }
+        client->out = grown;
+        client->out_cap = cap;
+    }
+    memcpy(client->out + client->out_len, data, len);
+    client->out_len += len;
+    return client_flush(client);
 }
 
 static void client_destroy(struct woodland_ipc_client *client) {
@@ -594,6 +657,7 @@ static void client_destroy(struct woodland_ipc_client *client) {
         client->fd = -1;
     }
     wl_list_remove(&client->link);
+    free(client->out);
     free(client);
 }
 
@@ -622,13 +686,44 @@ static bool client_handle_line(struct woodland_ipc_client *client, char *line) {
         respond_error(&out, "", "out of memory");
     }
     woodland_json_raw(&out, "\n");
-    bool ok = write_all(client->fd, woodland_json_data(&out),
-                        woodland_json_len(&out));
+    bool ok = client_send(client, woodland_json_data(&out),
+                          woodland_json_len(&out));
     woodland_json_finish(&out);
     return ok;
 }
 
-static int client_readable(int fd, uint32_t mask, void *data) {
+/* 消费缓冲区里所有完整的行。返回 false 表示连接不可用。
+ * 发出积压时会提前收手，剩下的半截留在 buf 里等下一次。 */
+static bool client_process_lines(struct woodland_ipc_client *client) {
+    size_t consumed = 0;
+    while (consumed < client->len) {
+        char *nl = memchr(client->buf + consumed, '\n',
+                          client->len - consumed);
+        if (!nl) {
+            break;
+        }
+        *nl = '\0';
+        size_t line_off = consumed;
+        consumed = (size_t)(nl - client->buf) + 1;
+        if (!client_handle_line(client, client->buf + line_off)) {
+            return false;
+        }
+        if (client->out_off < client->out_len) {
+            /* 上一条回应还没发完，先别解析下一条：一次只压一条响应，
+             * 内存才有上界 */
+            break;
+        }
+    }
+
+    if (consumed > 0) {
+        memmove(client->buf, client->buf + consumed, client->len - consumed);
+        client->len -= consumed;
+        client->buf[client->len] = '\0';
+    }
+    return true;
+}
+
+static int client_event(int fd, uint32_t mask, void *data) {
     (void)fd;
     struct woodland_ipc_client *client = data;
 
@@ -636,6 +731,24 @@ static int client_readable(int fd, uint32_t mask, void *data) {
         client_destroy(client);
         return 0;
     }
+
+    if (mask & WL_EVENT_WRITABLE) {
+        if (!client_flush(client)) {
+            client_destroy(client);
+            return 0;
+        }
+        if (client->out_off < client->out_len) {
+            return 0;   /* 对端还是不收，继续等 */
+        }
+        /* 队列排空：把因为积压而中断的解析接上 */
+        if (!client_process_lines(client)) {
+            client_destroy(client);
+            return 0;
+        }
+        client_update_events(client);
+        return 0;
+    }
+
     if (!(mask & WL_EVENT_READABLE)) {
         return 0;
     }
@@ -652,39 +765,24 @@ static int client_readable(int fd, uint32_t mask, void *data) {
     client->len += (size_t)n;
     client->buf[client->len] = '\0';
 
-    size_t consumed = 0;
-    while (consumed < client->len) {
-        char *nl = memchr(client->buf + consumed, '\n',
-                          client->len - consumed);
-        if (!nl) {
-            break;
-        }
-        *nl = '\0';
-        size_t line_off = consumed;
-        consumed = (size_t)(nl - client->buf) + 1;
-        if (!client_handle_line(client, client->buf + line_off)) {
-            client_destroy(client);
-            return 0;
-        }
-    }
-
-    if (consumed > 0) {
-        memmove(client->buf, client->buf + consumed, client->len - consumed);
-        client->len -= consumed;
-        client->buf[client->len] = '\0';
+    if (!client_process_lines(client)) {
+        client_destroy(client);
+        return 0;
     }
 
     if (client->len >= sizeof(client->buf) - 1) {
         /* 一直没等到换行：丢掉这一行，别让半条命令无限攒着 */
         static const char too_long[] =
             "{\"ok\":false,\"error\":\"line too long\"}\n";
-        if (!write_all(client->fd, too_long, sizeof(too_long) - 1)) {
+        client->len = 0;
+        client->buf[0] = '\0';
+        if (!client_send(client, too_long, sizeof(too_long) - 1)) {
             client_destroy(client);
             return 0;
         }
-        client->len = 0;
-        client->buf[0] = '\0';
     }
+
+    client_update_events(client);
     return 0;
 }
 
@@ -701,6 +799,15 @@ static int ipc_accept(int fd, uint32_t mask, void *data) {
         return 0;
     }
 
+    /* 关键：accept 出来的 fd 不会继承监听 socket 的 O_NONBLOCK，
+     * 不显式设上就退化成阻塞写，对端不读时卡死事件循环 */
+    int flags = fcntl(client_fd, F_GETFL, 0);
+    if (flags < 0 || fcntl(client_fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+        wlr_log(WLR_ERROR, "ipc: cannot set O_NONBLOCK: %s", strerror(errno));
+        close(client_fd);
+        return 0;
+    }
+
     struct woodland_ipc_client *client = calloc(1, sizeof(*client));
     if (!client) {
         close(client_fd);
@@ -709,7 +816,7 @@ static int ipc_accept(int fd, uint32_t mask, void *data) {
     client->server = server;
     client->fd = client_fd;
     client->source = wl_event_loop_add_fd(server->event_loop, client_fd,
-                                         WL_EVENT_READABLE, client_readable,
+                                         WL_EVENT_READABLE, client_event,
                                          client);
     if (!client->source) {
         close(client_fd);
@@ -751,6 +858,14 @@ bool woodland_ipc_init(struct woodland_server *server,
     int fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (fd < 0) {
         wlr_log(WLR_ERROR, "ipc socket() failed: %s", strerror(errno));
+        return false;
+    }
+    /* 非阻塞监听：poll 报可读到真正 accept 之间连接可能已被对端 RST，
+     * 阻塞 accept 会在这个窗口里停住整个事件循环 */
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+        wlr_log(WLR_ERROR, "ipc: cannot set O_NONBLOCK: %s", strerror(errno));
+        close(fd);
         return false;
     }
 
