@@ -1,3 +1,8 @@
-protocol_lib = static_library('woodland-protocol', 'protocol.c',
+protocol_lib = static_library('woodland-protocol',
+  'protocol.c',
+  'idle.c',
+  'output.c',
+  'input.c',
+  'window.c',
   include_directories: woodland_inc,
   dependencies: [wlroots, wayland_server])

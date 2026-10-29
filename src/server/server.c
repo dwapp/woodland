@@ -51,10 +51,6 @@ bool woodland_server_init(struct woodland_server *server) {
     /* ipc_fd 的 0 是 stdin：先置 -1，避免 finish 里误关标准输入 */
     server->ipc_fd = -1;
     wl_list_init(&server->ipc_clients);
-    /* 协议层的两个链表也在这一步建好：init 中途失败时 finish 仍会跑，
-     * 未初始化的链表头（next == NULL）在 wl_list_for_each 里会解引用空指针 */
-    wl_list_init(&server->gesture_pointers);
-    wl_list_init(&server->idle_inhibitors);
     woodland_selfcheck_init(server);
 
     server->display = wl_display_create();
