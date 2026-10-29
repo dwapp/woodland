@@ -69,6 +69,12 @@ struct woodland_view {
     bool activated;
     char *title;
     char *app_id;
+    /*
+     * xdg-toplevel-tag 的 tag 字符串（客户端自报的窗口类别，如
+     * "org.gnome.Nautilus"）。目前只存不用：窗口规则还没做，但存下来
+     * 才能经 wctl 看见，也免得协议变成"绑得上但什么都不发生"。
+     */
+    char *tag;
     struct woodland_ssd *ssd;          // 服务端装饰（默认 SSD，见设计）
     bool deco_csd;                     // 客户端请求 CSD（map 后不建 SSD）
     bool deco_registered;              // 是否已注册 zxdg_decoration listener
@@ -172,6 +178,8 @@ void woodland_view_set_minimized(struct woodland_view *view, bool minimized);
 /** 更新标题/应用标识（内部拷一份，不接管入参所有权）。 */
 void woodland_view_set_title(struct woodland_view *view, const char *title);
 void woodland_view_set_app_id(struct woodland_view *view, const char *app_id);
+/** 记录 xdg-toplevel-tag（内部拷一份）。传 NULL 清空。 */
+void woodland_view_set_tag(struct woodland_view *view, const char *tag);
 
 /** 设置父视图（transient 对话框相对父窗口居中）。 */
 void woodland_view_set_parent(struct woodland_view *view,
