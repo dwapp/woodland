@@ -98,32 +98,23 @@ static void handle_new_output(struct wl_listener *listener, void *data) {
     output->destroy.notify = handle_destroy;
     wl_signal_add(&wlr_output->events.destroy, &output->destroy);
 
-    struct wlr_output_layout_output *layout_output =
-        wlr_output_layout_add_auto(server->output_layout, wlr_output);
-    if (!layout_output) {
-        wlr_log(WLR_ERROR, "failed to add output to layout");
-        wl_list_remove(&output->frame.link);
-        wl_list_remove(&output->request_state.link);
-        wl_list_remove(&output->destroy.link);
-        free(output);
-        return;
-    }
-
+    /*
+     * 顺序在这里很关键：layout_add_auto() 会立刻触发 layout change，而
+     * output-management 的广播正是挂在那个信号上。所以凡是广播里要读的
+     * 东西（链表成员、scene_output、layer tree）都必须先就位，否则客户端
+     * 收到的第一份配置里根本没有这个 head。
+     *
+     * 这个 bug 只在热插拔时暴露：headless 输出的 preferred_mode 是 NULL，
+     * 下面只提交 ENABLED，不会引起 layout 重算，也就没有第二次广播来纠正
+     * 第一份——wdisplays / kanshi 从此看不到这个输出。
+     */
     struct wlr_scene_output *scene_output =
         wlr_scene_output_create(server->scene, wlr_output);
     if (!scene_output) {
         wlr_log(WLR_ERROR, "failed to create scene output");
-        wl_list_remove(&output->frame.link);
-        wl_list_remove(&output->request_state.link);
-        wl_list_remove(&output->destroy.link);
-        wlr_output_layout_remove(server->output_layout, wlr_output);
-        free(output);
-        return;
+        goto err_listeners;
     }
     output->scene_output = scene_output;
-
-    wlr_scene_output_layout_add_output(server->scene_layout, layout_output,
-                                       scene_output);
 
     /* 创建 4 棵 layer tree，z-order 从下到上：
      * background → bottom → [工作区] → top → overlay。
@@ -139,6 +130,17 @@ static void handle_new_output(struct wl_listener *listener, void *data) {
 
     wl_list_insert(&server->outputs, &output->link);
 
+    struct wlr_output_layout_output *layout_output =
+        wlr_output_layout_add_auto(server->output_layout, wlr_output);
+    if (!layout_output) {
+        wlr_log(WLR_ERROR, "failed to add output to layout");
+        wl_list_remove(&output->link);
+        goto err_trees;
+    }
+
+    wlr_scene_output_layout_add_output(server->scene_layout, layout_output,
+                                       scene_output);
+
     struct wlr_output_state state;
     wlr_output_state_init(&state);
     wlr_output_state_set_enabled(&state, true);
@@ -151,7 +153,24 @@ static void handle_new_output(struct wl_listener *listener, void *data) {
     }
     wlr_output_state_finish(&state);
 
+    /* commit 之后还要再广播一次（enabled/mode 这时才是真值），
+     * 由 server.c 的 new_output 后置监听器负责：output 层不该反过来
+     * 依赖协议层 */
     wlr_output_create_global(wlr_output, server->display);
+    return;
+
+err_trees:
+    for (int i = 0; i < 4; i++) {
+        if (output->layer_tree[i]) {
+            wlr_scene_node_destroy(&output->layer_tree[i]->node);
+        }
+    }
+    wlr_scene_output_destroy(scene_output);
+err_listeners:
+    wl_list_remove(&output->frame.link);
+    wl_list_remove(&output->request_state.link);
+    wl_list_remove(&output->destroy.link);
+    free(output);
 }
 
 bool woodland_output_init(struct woodland_server *server) {

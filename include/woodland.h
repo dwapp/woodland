@@ -43,6 +43,12 @@ struct woodland_server {
     struct wlr_scene *scene;
     struct wl_list outputs;               // struct woodland_output.link 链表头
     struct wl_listener new_output;        // backend->events.new_output 监听器
+    /*
+     * 新输出的收尾广播：在 woodland_output 完全就位（含 commit）之后跑，
+     * 因为 output 层不该反过来依赖协议层。注册顺序决定执行顺序，所以在
+     * protocol init 之后才挂上去。
+     */
+    struct wl_listener new_output_broadcast;
     struct wlr_output_layout *output_layout;
     struct wlr_scene_output_layout *scene_layout;
 

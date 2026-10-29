@@ -113,6 +113,7 @@ static void gesture_swipe_begin(struct wl_listener *listener, void *data) {
         wl_container_of(listener, gp, swipe_begin);
     struct wlr_pointer_swipe_begin_event *event = data;
     struct woodland_proto_input *input = gp->input;
+    woodland_proto_idle_notify_activity(input->owner);
     if (input->gestures) {
         wlr_pointer_gestures_v1_send_swipe_begin(input->gestures,
             input->server->seat, event->time_msec, event->fingers);
@@ -124,6 +125,7 @@ static void gesture_swipe_update(struct wl_listener *listener, void *data) {
         wl_container_of(listener, gp, swipe_update);
     struct wlr_pointer_swipe_update_event *event = data;
     struct woodland_proto_input *input = gp->input;
+    woodland_proto_idle_notify_activity(input->owner);
     if (input->gestures) {
         wlr_pointer_gestures_v1_send_swipe_update(input->gestures,
             input->server->seat, event->time_msec, event->dx, event->dy);
@@ -135,6 +137,7 @@ static void gesture_swipe_end(struct wl_listener *listener, void *data) {
         wl_container_of(listener, gp, swipe_end);
     struct wlr_pointer_swipe_end_event *event = data;
     struct woodland_proto_input *input = gp->input;
+    woodland_proto_idle_notify_activity(input->owner);
     if (input->gestures) {
         wlr_pointer_gestures_v1_send_swipe_end(input->gestures,
             input->server->seat, event->time_msec, event->cancelled);
@@ -146,6 +149,7 @@ static void gesture_pinch_begin(struct wl_listener *listener, void *data) {
         wl_container_of(listener, gp, pinch_begin);
     struct wlr_pointer_pinch_begin_event *event = data;
     struct woodland_proto_input *input = gp->input;
+    woodland_proto_idle_notify_activity(input->owner);
     if (input->gestures) {
         wlr_pointer_gestures_v1_send_pinch_begin(input->gestures,
             input->server->seat, event->time_msec, event->fingers);
@@ -157,6 +161,7 @@ static void gesture_pinch_update(struct wl_listener *listener, void *data) {
         wl_container_of(listener, gp, pinch_update);
     struct wlr_pointer_pinch_update_event *event = data;
     struct woodland_proto_input *input = gp->input;
+    woodland_proto_idle_notify_activity(input->owner);
     if (input->gestures) {
         wlr_pointer_gestures_v1_send_pinch_update(input->gestures,
             input->server->seat, event->time_msec, event->dx, event->dy,
@@ -169,6 +174,7 @@ static void gesture_pinch_end(struct wl_listener *listener, void *data) {
         wl_container_of(listener, gp, pinch_end);
     struct wlr_pointer_pinch_end_event *event = data;
     struct woodland_proto_input *input = gp->input;
+    woodland_proto_idle_notify_activity(input->owner);
     if (input->gestures) {
         wlr_pointer_gestures_v1_send_pinch_end(input->gestures,
             input->server->seat, event->time_msec, event->cancelled);
@@ -180,6 +186,7 @@ static void gesture_hold_begin(struct wl_listener *listener, void *data) {
         wl_container_of(listener, gp, hold_begin);
     struct wlr_pointer_hold_begin_event *event = data;
     struct woodland_proto_input *input = gp->input;
+    woodland_proto_idle_notify_activity(input->owner);
     if (input->gestures) {
         wlr_pointer_gestures_v1_send_hold_begin(input->gestures,
             input->server->seat, event->time_msec, event->fingers);
@@ -191,6 +198,7 @@ static void gesture_hold_end(struct wl_listener *listener, void *data) {
         wl_container_of(listener, gp, hold_end);
     struct wlr_pointer_hold_end_event *event = data;
     struct woodland_proto_input *input = gp->input;
+    woodland_proto_idle_notify_activity(input->owner);
     if (input->gestures) {
         wlr_pointer_gestures_v1_send_hold_end(input->gestures,
             input->server->seat, event->time_msec, event->cancelled);

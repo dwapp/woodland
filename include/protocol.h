@@ -51,4 +51,13 @@ void woodland_protocol_notify_activity(struct woodland_server *server);
 /** 当前焦点 surface 是否持有生效中的快捷键抑制器（有则跳过合成器键位）。 */
 bool woodland_protocol_shortcuts_inhibited(struct woodland_server *server);
 
+/**
+ * 输出集合或状态变了，让协议层补一次 output-management 配置广播。
+ *
+ * 布局变化会自动触发广播（协议层监听 output_layout），但有些变化不经过
+ * 布局：DPMS 开关、以及 headless 输出 commit 时没有 preferred mode 可供
+ * 重算布局。这些路径需要显式通知一声。
+ */
+void woodland_protocol_output_changed(struct woodland_server *server);
+
 #endif

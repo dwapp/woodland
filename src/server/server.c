@@ -47,6 +47,25 @@ static void handle_request_set_shape(struct wl_listener *listener, void *data) {
     woodland_cursor_set(server, name);
 }
 
+/*
+ * 新输出的第二次配置广播。
+ *
+ * 第一次是 wlr_output_layout_add_auto() 内部触发的（layout change → 协议层
+ * 广播），那一刻输出刚进链表、还没 commit；而 headless 输出没有 preferred
+ * mode，commit 只设 ENABLED，不会引起布局重算，于是再也没有信号来纠正那
+ * 一份——wdisplays / kanshi 从此看不到这个输出。本监听器注册在
+ * handle_new_output 之后，跑的时候输出已经完全就位。
+ */
+static void handle_new_output_broadcast(struct wl_listener *listener,
+                                        void *data) {
+    struct woodland_server *server =
+        wl_container_of(listener, server, new_output_broadcast);
+    /* 协议层可能还没初始化（headless 的首个输出早于 protocol init），
+     * 那种情况由 woodland_protocol_init 末尾的补广播覆盖 */
+    woodland_protocol_output_changed(server);
+    (void)data;
+}
+
 bool woodland_server_init(struct woodland_server *server) {
     /* ipc_fd 的 0 是 stdin：先置 -1，避免 finish 里误关标准输入 */
     server->ipc_fd = -1;
@@ -151,6 +170,18 @@ bool woodland_server_init(struct woodland_server *server) {
         return false;
     }
 
+    /*
+     * 光标监听器必须**早于**协议层注册。
+     *
+     * wl_signal 的监听器按注册顺序调用，而协议层的 motion 回调要给
+     * relative-pointer 客户端发相对位移——它内部取的是
+     * seat->pointer_state.focused_client。shell 的回调会更新 pointer focus，
+     * 所以它必须排前面；否则跨 surface（或从桌面首次进入客户端）的那一帧，
+     * relative motion 会按旧焦点发送：首个 delta 要么被丢弃，要么发给刚
+     * 离开的客户端。
+     */
+    woodland_cursor_init_events(server);
+
     /* 上游协议：依赖 cursor / seat / output_layout / shell 都已就位，
      * 所以放在最后。内部只做接线，失败即整体失败（缺协议比半个协议好查）。 */
     if (!woodland_protocol_init(server)) {
@@ -158,12 +189,17 @@ bool woodland_server_init(struct woodland_server *server) {
         return false;
     }
 
+    /* 新输出的收尾广播。必须在 woodland_output_init 之后注册，才会排在
+     * handle_new_output 后面执行——那时输出已经进链表、已 commit，
+     * 广播里的 enabled/mode 才是真值。 */
+    server->new_output_broadcast.notify = handle_new_output_broadcast;
+    wl_signal_add(&server->backend->events.new_output,
+                  &server->new_output_broadcast);
+
     if (!woodland_capture_init(server)) {
         wlr_log(WLR_ERROR, "failed to init capture");
         return false;
     }
-
-    woodland_cursor_init_events(server);
 
     /* Xwayland：需要 compositor（surface 分配）与 seat（X 输入焦点），
      * 所以放在 seat/shell 之后。lazy 模式：首个 X 客户端连接才拉进程。 */
@@ -242,6 +278,9 @@ void woodland_server_finish(struct woodland_server *server) {
     }
     if (server->request_set_shape.link.prev) {
         wl_list_remove(&server->request_set_shape.link);
+    }
+    if (server->new_output_broadcast.link.prev) {
+        wl_list_remove(&server->new_output_broadcast.link);
     }
     woodland_cursor_finish_events(server);
 #if WOODLAND_HAVE_XWAYLAND
