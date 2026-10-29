@@ -68,3 +68,18 @@ test_capture = executable('test_capture', 'test_capture.c',
   include_directories: woodland_inc,
   link_with: [capture_lib])
 test('capture', test_capture)
+
+test_json = executable('test_json', 'test_json.c',
+  dependencies: [wlroots, wayland_server],
+  include_directories: woodland_inc,
+  link_with: util_lib)
+test('json', test_json)
+
+# selfcheck.c 编译在 shell_lib 里（和 focus/placement 同处），
+# 所以这里链 shell_lib 而不是单独的库
+test_selfcheck = executable('test_selfcheck', 'test_selfcheck.c',
+  dependencies: [wlroots, wayland_server],
+  include_directories: woodland_inc,
+  link_with: [output_lib, shell_lib, ssd_lib, workspace_lib, layer_lib,
+              capture_lib, util_lib])
+test('selfcheck', test_selfcheck)

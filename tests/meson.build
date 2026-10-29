@@ -21,6 +21,15 @@ if get_option('test').enabled()
        args: [meson.current_source_dir() / 'smoke' / 'run_protocol_smoke.sh',
               woodland_bin.full_path()],
        is_parallel: false)
+  # 调试接口（wctl）：只断言状态，不数像素
+  test('smoke-ipc',
+       find_program('sh'),
+       args: [meson.current_source_dir() / 'smoke' / 'run_ipc_smoke.sh',
+              woodland_bin.full_path(),
+              wctl_bin.full_path()],
+       is_parallel: false,
+       timeout: 60)
+
   test('smoke-capture',
        find_program('sh'),
        args: [meson.current_source_dir() / 'smoke' / 'run_capture_smoke.sh',

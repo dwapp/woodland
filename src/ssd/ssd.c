@@ -408,3 +408,27 @@ enum woodland_ssd_part woodland_ssd_at(struct woodland_view *view,
     double ry = ly - view->scene_tree->node.y;
     return ssd_hit_relative(ssd, rx, ry, resize_edges);
 }
+
+bool woodland_ssd_is_active(const struct woodland_view *view) {
+    return view && view->ssd && view->ssd->active;
+}
+
+bool woodland_ssd_content_size(const struct woodland_view *view,
+                               int *width, int *height) {
+    if (width) {
+        *width = 0;
+    }
+    if (height) {
+        *height = 0;
+    }
+    if (!view || !view->ssd) {
+        return false;
+    }
+    if (width) {
+        *width = view->ssd->width;
+    }
+    if (height) {
+        *height = view->ssd->height;
+    }
+    return true;
+}

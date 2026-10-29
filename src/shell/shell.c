@@ -15,6 +15,7 @@
 #include "capture.h"
 #include "layer.h"
 #include "output.h"
+#include "selfcheck.h"
 #include "ssd.h"
 #include "view.h"
 #include "workspace.h"
@@ -52,6 +53,11 @@ void woodland_view_content_box(const struct woodland_view *view,
         return;
     }
 #endif
+    /* xdg_toplevel 可能为空：X11 分支走到这里说明 type 标错了，
+     * 而单测里也常拿 {0} 的假 view 调这个接口 */
+    if (!view->xdg_toplevel) {
+        return;
+    }
     *box = view->xdg_toplevel->base->geometry;
 }
 
@@ -89,6 +95,9 @@ void woodland_view_set_activated(struct woodland_view *view, bool activated) {
     if (!view) {
         return;
     }
+    /* 记下我们要求的状态：X11 后端没有可回读的 activated 字段，
+     * 而三态同步与不变量检查都需要这个真值 */
+    view->activated = activated;
 #if WOODLAND_HAVE_XWAYLAND
     if (view->type == WOODLAND_VIEW_XWAYLAND) {
         if (view->xwayland_surface) {
@@ -201,6 +210,7 @@ void woodland_view_map(struct woodland_view *view) {
         woodland_view_place_initial(view);
     }
     woodland_focus_view(view, true);
+    woodland_selfcheck_schedule(server, "map");
 }
 
 void woodland_view_unmap(struct woodland_view *view) {
@@ -239,6 +249,7 @@ void woodland_view_unmap(struct woodland_view *view) {
     if (was_focused) {
         woodland_focus_fallback(view->server);
     }
+    woodland_selfcheck_schedule(view->server, "unmap");
 }
 
 void woodland_view_destroy(struct woodland_view *view) {
@@ -287,6 +298,7 @@ void woodland_view_destroy(struct woodland_view *view) {
     if (was_focused) {
         woodland_focus_fallback(view->server);
     }
+    woodland_selfcheck_schedule(view->server, "destroy");
     free(view->title);
     free(view->app_id);
     free(view);
@@ -1103,6 +1115,7 @@ static void server_new_xdg_toplevel(struct wl_listener *listener, void *data) {
         return;
     }
     view->server = server;
+    view->id = ++server->next_view_id;
     view->type = WOODLAND_VIEW_XDG;
     view->xdg_toplevel = xdg_toplevel;
     view->scene_tree =

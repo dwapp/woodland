@@ -80,4 +80,21 @@ enum woodland_ssd_part woodland_ssd_at(struct woodland_view *view,
                                        double lx, double ly,
                                        uint32_t *resize_edges);
 
+/**
+ * SSD 是否处于激活（标题栏激活色）状态；没有 SSD 时返回 false。
+ *
+ * 单独暴露是因为激活态分散在三处（客户端 activated、SSD 颜色、
+ * foreign-toplevel 位），不变量检查要逐处核对，不能靠看像素。
+ */
+bool woodland_ssd_is_active(const struct woodland_view *view);
+
+/**
+ * SSD 内部缓存的内容尺寸；没有 SSD 时返回 false。
+ *
+ * 与当前内容尺寸不一致说明 ssd_update() 少调了一次（窗口拉宽后按钮
+ * 还停在旧位置就是这么来的）。
+ */
+bool woodland_ssd_content_size(const struct woodland_view *view,
+                               int *width, int *height);
+
 #endif /* WOODLAND_SSD_H */

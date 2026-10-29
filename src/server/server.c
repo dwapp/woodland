@@ -18,9 +18,11 @@
 #include "capture.h"
 #include "config.h"
 #include "cursor.h"
+#include "ipc.h"
 #include "layer.h"
 #include "output.h"
 #include "seat.h"
+#include "selfcheck.h"
 #include "server.h"
 #include "view.h"
 #include "workspace.h"
@@ -45,6 +47,11 @@ static void handle_request_set_shape(struct wl_listener *listener, void *data) {
 }
 
 bool woodland_server_init(struct woodland_server *server) {
+    /* ipc_fd 的 0 是 stdin：先置 -1，避免 finish 里误关标准输入 */
+    server->ipc_fd = -1;
+    wl_list_init(&server->ipc_clients);
+    woodland_selfcheck_init(server);
+
     server->display = wl_display_create();
     if (!server->display) {
         wlr_log(WLR_ERROR, "failed to create wayland display");
@@ -186,6 +193,13 @@ bool woodland_server_start(struct woodland_server *server) {
     }
 
     setenv("WAYLAND_DISPLAY", socket, true);
+
+    /* 调试接口：路径按 wayland socket 名派生，并导出 WOODLAND_IPC。
+     * 起不来只记日志——调试面挂了不该影响合成器本身。 */
+    if (!woodland_ipc_init(server, socket)) {
+        wlr_log(WLR_ERROR, "debug IPC unavailable, continuing without it");
+    }
+
     /* X 客户端（以及 startup command 拉起的 X 程序）通过 DISPLAY 找 Xwayland */
     if (server->xwayland && server->xwayland->display_name) {
         setenv("DISPLAY", server->xwayland->display_name, true);
@@ -225,6 +239,8 @@ void woodland_server_finish(struct woodland_server *server) {
 #if WOODLAND_HAVE_XWAYLAND
     woodland_xwayland_finish(server);
 #endif
+    woodland_selfcheck_finish(server);
+    woodland_ipc_finish(server);
     woodland_capture_finish(server);
     woodland_shell_finish(server);
     woodland_layer_finish(server);

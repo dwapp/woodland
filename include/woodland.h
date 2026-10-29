@@ -2,6 +2,7 @@
 #ifndef WOODLAND_WOODLAND_H
 #define WOODLAND_WOODLAND_H
 
+#include <stdint.h>
 #include <wayland-server-core.h>
 #include <wlr/backend.h>
 #include <wlr/render/allocator.h>
@@ -125,6 +126,30 @@ struct woodland_server {
     struct wlr_scene_tree *xwayland_unmanaged_tree; // 浮在普通视图之上
     struct wl_listener new_xwayland_surface;
     struct wl_listener xwayland_ready;
+
+    /*
+     * 调试接口（src/ipc）：unix socket 上的行分隔 JSON。
+     *
+     * 路径在 start 阶段由 wayland socket 名推出，并导出到环境变量
+     * WOODLAND_IPC，脚本/测试不必自己拼。
+     */
+    char *ipc_path;
+    int ipc_fd;
+    struct wl_event_source *ipc_source;
+    struct wl_list ipc_clients;           // struct woodland_ipc_client.link
+
+    /*
+     * 不变量自检（src/selfcheck）。
+     *
+     * self_check 由 --self-check 打开；打开后每次状态变化都会在 idle 阶段
+     * 跑一遍断言，失败只记日志（不退出：调试期崩掉合成器比看到报警更糟）。
+     */
+    bool self_check;
+    struct wl_event_source *selfcheck_idle;
+    const char *selfcheck_reason;
+
+    /* 视图 id：调试接口里的稳定标识（指针每次运行都变，没法写断言） */
+    uint32_t next_view_id;
 
     const char *startup_cmd;              // -s 启动命令
 };

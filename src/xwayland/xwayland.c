@@ -370,6 +370,7 @@ static void xwl_new_surface(struct wl_listener *listener, void *data) {
         return;
     }
     view->server = server;
+    view->id = ++server->next_view_id;
     view->type = WOODLAND_VIEW_XWAYLAND;
     view->xwayland_surface = xsurface;
     view->scene_tree = wlr_scene_tree_create(&server->scene->tree);
