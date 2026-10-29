@@ -6,7 +6,6 @@
 
 struct woodland_server;
 struct wlr_input_device;
-struct woodland_view;
 
 /*
  * 上游协议接线（src/protocol）。
@@ -14,7 +13,14 @@ struct woodland_view;
  * 这一层的职责只有"把 wlroots 的 manager 挂上 display，并把事件接到
  * 已有的窗口管理逻辑上"——不实现协议本身，也不碰渲染与几何。
  *
- * 分成三档，档位决定了它是否真的改变行为：
+ * 内部按关注点分了四个文件，各自的取舍写在文件头：
+ *   idle.c    空闲与抑制：idle-notify / idle-inhibit / shortcuts-inhibit
+ *   output.c  输出管理：output-management / output-power-management
+ *   input.c   输入与选区：relative-pointer / pointer-gestures / primary-selection
+ *   window.c  窗口：xdg-activation / xdg-toplevel-tag
+ *   protocol.c 只管按序建立、逆序回收，以及下面这几个转发入口。
+ *
+ * 按语义完备程度分三档，档位决定了它是否真的改变行为：
  *
  *   语义完整：viewporter、presentation-time、primary-selection、
  *             idle-notify、idle-inhibit、keyboard-shortcuts-inhibit、
@@ -41,15 +47,6 @@ void woodland_protocol_attach_input(struct woodland_server *server,
 
 /** 有输入事件时调用，用来给 idle-notify 续命。 */
 void woodland_protocol_notify_activity(struct woodland_server *server);
-
-/**
- * 焦点变化后同步 keyboard-shortcuts-inhibit 的激活态。
- *
- * 协议规定：抑制器只在它所属 surface 拿到键盘焦点时生效。调用点只有
- * 协议层自己（挂在 seat 的 keyboard focus_change 上），对外公开是为了
- * 让将来引入别处焦点来源时有统一入口。
- */
-void woodland_protocol_sync_shortcuts(struct woodland_server *server);
 
 /** 当前焦点 surface 是否持有生效中的快捷键抑制器（有则跳过合成器键位）。 */
 bool woodland_protocol_shortcuts_inhibited(struct woodland_server *server);
