@@ -40,6 +40,11 @@ enum woodland_view_type {
 struct woodland_view {
     struct wl_list link;               // woodland_server.views
     struct woodland_server *server;
+    /*
+     * 稳定标识（进程内自增）。调试接口里用它指代窗口：指针每次运行都变，
+     * 没法写进断言脚本，而 id 单调递增、可读、也能在日志里对上。
+     */
+    uint32_t id;
     enum woodland_view_type type;
     struct wlr_xdg_toplevel *xdg_toplevel;         // type == XDG 时有效
     struct wlr_xwayland_surface *xwayland_surface; // type == XWAYLAND 时有效
@@ -54,6 +59,14 @@ struct woodland_view {
     bool minimized;
     bool maximized;
     bool fullscreen;
+    /*
+     * 我们下发给客户端/装饰的激活态。
+     *
+     * 单独记一份而不是每次去问后端：X11 的 wlr_xwayland_surface 根本没有
+     * activated 字段，而"三态同步"（客户端 activated、SSD 颜色、
+     * foreign-toplevel 位）需要一个共同的真值，不变量检查也靠它。
+     */
+    bool activated;
     char *title;
     char *app_id;
     struct woodland_ssd *ssd;          // 服务端装饰（默认 SSD，见设计）

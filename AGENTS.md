@@ -29,6 +29,24 @@ meson test -C build --print-errorlogs  # 跑全部测试
 - 特性开关经 `configure_file` 生成 `build/config.h`，用 `WOODLAND_HAVE_*` 宏。
 - 冒烟测试用 headless 后端：`tests/smoke/run_headless.sh` 内部以 `WLR_BACKENDS=headless WLR_RENDERER=pixman` 后台启动 + `kill -TERM` + 等退出码 0（M1 起追加 `WLR_HEADLESS_OUTPUTS=1`）。ASan 验证用 `meson setup build-asan -Db_sanitize=address,undefined -Dtest=enabled`。
 
+## 调试接口（wctl）
+
+合成器在 `$XDG_RUNTIME_DIR/woodland-<wayland socket>.sock` 上开一个**只读**调试 socket，路径同时导出到 `WOODLAND_IPC`。协议是「一行一条命令、一行一条 JSON 回应」，所以 `wctl` 和 `nc -U` 都能用：
+
+```bash
+wctl get_tree   | jq '.views[] | {id,title,focused,activated,outer,snapped}'
+wctl get_focus  | jq .        # 焦点在谁身上（recorded_view vs keyboard_view）
+wctl self_check | jq .        # 不变量断言；失败项带 expected / actual
+wctl dump_scene | jq '.nodes' # wlr_scene 树，排查「画了但看不见」
+wctl --help
+```
+
+`wctl` 找 socket 的顺序：`-s <path>` → `$WOODLAND_IPC` → 扫 `$XDG_RUNTIME_DIR` 里最新的 `woodland-*.sock`。`ok=false` 时退出码 1。
+
+**查状态优先用 `wctl get_tree` / `get_focus`，不要去数截图里的像素。** "非激活标题栏到底是 246 还是 247" 这类问题，`wctl get_tree | jq '[.views[] | select(.activated)] | length'` 一句话就说清了。
+
+`--self-check` 打开后，每次状态变化（map / unmap / destroy / 焦点切换）都会在 **idle** 阶段跑一遍不变量断言（视图链表完整、焦点可聚焦且与键盘 surface 一致、激活态唯一、SSD 颜色 / foreign-toplevel / xdg configure 与激活态一致、SSD 几何与内容尺寸一致），失败记 `self-check <name> failed after <reason>: expected .., got ..` 的 ERROR 日志。它不退出进程，但会让 `tests/smoke/run_ipc_smoke.sh` 失败——改完窗口状态相关的代码后跑一次 `--self-check` 是成本最低的回归。
+
 ## ⚠️ 调试陷阱（必读）
 
 **绝不要用 gdb/lldb 的 `run` 或 `r` 来调试 woodland。**
@@ -38,9 +56,10 @@ woodland 是 Wayland 合成器：主循环会**正常阻塞在 `ep_poll`** 等�
 **正确的验证/调试方式：**
 
 1. **功能验证靠测试**：`meson test -C build --print-errorlogs`（冒烟测试脚本自己会后台启动 + 发 SIGTERM + 收退出码，不需要你手动跑二进制）。
-2. **要看运行日志**：`WLR_BACKENDS=headless WLR_RENDERER=pixman ./build/src/woodland 2>&1` 直接看 wlr_log 输出（前台阻塞是正常的，看完 `Ctrl-C` 或另发 SIGTERM 即可）。
-3. **要排查崩溃**：用 ASan（`build-asan`）+ 崩溃时 ASan 会自动打印栈，或者给 wlr_log 加日志/读代码推理。**不要 attach gdb 到阻塞的事件循环上等它"出问题"**。
-4. **确需 gdb 时**：只对**已崩溃的 core dump** 做 `gdb ./woodland core`（事后分析，不是 `run`），或对纯函数（不跑事件循环）的单元测试用 gdb。
+2. **查运行时状态用 `wctl`**：`wctl get_tree` / `get_focus` / `self_check`（见上一节），比截图和推理都可靠。
+3. **要看运行日志**：`WLR_BACKENDS=headless WLR_RENDERER=pixman ./build/src/woodland 2>&1` 直接看 wlr_log 输出（前台阻塞是正常的，看完 `Ctrl-C` 或另发 SIGTERM 即可）。
+4. **要排查崩溃**：用 ASan（`build-asan`）+ 崩溃时 ASan 会自动打印栈，或者给 wlr_log 加日志/读代码推理。**不要 attach gdb 到阻塞的事件循环上等它"出问题"**。
+5. **确需 gdb 时**：只对**已崩溃的 core dump** 做 `gdb ./woodland core`（事后分析，不是 `run`），或对纯函数（不跑事件循环）的单元测试用 gdb。
 
 ## 项目规则
 

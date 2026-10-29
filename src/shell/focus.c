@@ -21,6 +21,7 @@
 #endif
 
 #include "focus.h"
+#include "selfcheck.h"
 #include "ssd.h"
 #include "view.h"
 #include "woodland.h"
@@ -198,6 +199,7 @@ void woodland_focus_view(struct woodland_view *view, bool raise) {
         wlr_seat_keyboard_notify_enter(seat, surface,
             keyboard->keycodes, keyboard->num_keycodes, &keyboard->modifiers);
     }
+    woodland_selfcheck_schedule(server, "focus");
 }
 
 void woodland_focus_none(struct woodland_server *server) {
@@ -211,6 +213,7 @@ void woodland_focus_none(struct woodland_server *server) {
     server->focused_view = NULL;
     server->focused_layer = NULL;
     wlr_seat_keyboard_notify_clear_focus(server->seat);
+    woodland_selfcheck_schedule(server, "focus_none");
 }
 
 void woodland_focus_yield_to_layer(struct woodland_server *server) {

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include <getopt.h>
+#include <stdbool.h>
 #include <stdio.h>
 
 #include "placement.h"
@@ -8,10 +9,15 @@
 #include "woodland.h"
 
 static void usage(const char *name) {
-    printf("Usage: %s [-s startup command] [-p placement policy]\n"
+    printf("Usage: %s [-s startup command] [-p placement policy] [--self-check]\n"
            "\n"
            "  -s  command run after the compositor is up\n"
-           "  -p  new window placement: cascade (default), center, cursor, autoplace\n",
+           "  -p  new window placement: cascade (default), center, cursor, autoplace\n"
+           "  --self-check  run invariant checks after every state change\n"
+           "                (failures are logged, not fatal)\n"
+           "\n"
+           "The debug socket path is exported as WOODLAND_IPC; query it with\n"
+           "`wctl get_tree | jq` or `nc -U $WOODLAND_IPC`.\n",
            name);
 }
 
@@ -19,10 +25,20 @@ int main(int argc, char *argv[]) {
     woodland_log_init(WLR_INFO);
 
     char *startup_cmd = NULL;
+    bool self_check = false;
     enum woodland_placement_policy placement = WOODLAND_PLACE_CASCADE;
 
+    enum {
+        OPT_SELF_CHECK = 256,
+    };
+    static const struct option long_options[] = {
+        {"self-check", no_argument, NULL, OPT_SELF_CHECK},
+        {"help", no_argument, NULL, 'h'},
+        {NULL, 0, NULL, 0},
+    };
+
     int c;
-    while ((c = getopt(argc, argv, "s:p:h")) != -1) {
+    while ((c = getopt_long(argc, argv, "s:p:h", long_options, NULL)) != -1) {
         switch (c) {
         case 's':
             startup_cmd = optarg;
@@ -33,6 +49,9 @@ int main(int argc, char *argv[]) {
                 usage(argv[0]);
                 return 1;
             }
+            break;
+        case OPT_SELF_CHECK:
+            self_check = true;
             break;
         default:
             usage(argv[0]);
@@ -47,6 +66,7 @@ int main(int argc, char *argv[]) {
     struct woodland_server server = {0};
     server.startup_cmd = startup_cmd;
     server.placement_policy = placement;
+    server.self_check = self_check;
     if (!woodland_server_init(&server)) {
         woodland_server_finish(&server);
         return 1;
