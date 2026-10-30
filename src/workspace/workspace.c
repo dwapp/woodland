@@ -8,6 +8,7 @@
 #include <wlr/util/log.h>
 
 #include "focus.h"
+#include "trace.h"
 #include "workspace.h"
 #include "woodland.h"
 
@@ -129,12 +130,16 @@ void woodland_workspace_switch_focus(struct woodland_server *server,
         woodland_focus_none(server);
     }
 
+    struct woodland_workspace *from = server->active_workspace;
     wlr_scene_node_set_enabled(&server->active_workspace->tree->node, false);
     wlr_ext_workspace_handle_v1_set_active(
         server->active_workspace->ext_workspace, false);
     wlr_scene_node_set_enabled(&target->tree->node, true);
     wlr_ext_workspace_handle_v1_set_active(target->ext_workspace, true);
     server->active_workspace = target;
+    woodland_trace_add("workspace", 0, "%s -> %s restore=%d",
+                       from ? from->name : "-", target->name,
+                       restore_focus ? 1 : 0);
 
     if (restore_focus) {
         /* 焦点回退会挑新工作区 z 序最上的窗口；若焦点在常驻的 layer

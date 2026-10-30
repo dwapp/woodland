@@ -20,6 +20,7 @@
 
 #include "output.h"
 #include "protocol_internal.h"
+#include "trace.h"
 #include "woodland.h"
 
 struct woodland_proto_output {
@@ -225,6 +226,7 @@ static void output_handle_apply(struct wl_listener *listener, void *data) {
         apply_layout(server, config);
     }
     states_finish(states, len);
+    woodland_trace_add("cfg_apply", 0, "outputs=%zu ok=%d", len, ok ? 1 : 0);
 
     if (ok) {
         wlr_output_configuration_v1_send_succeeded(config);

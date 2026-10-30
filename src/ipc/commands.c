@@ -26,6 +26,7 @@
 #include "placement.h"
 #include "selfcheck.h"
 #include "ssd.h"
+#include "trace.h"
 #include "util/json.h"
 #include "view.h"
 #include "woodland.h"
@@ -35,7 +36,8 @@
 #define SCENE_MAX_DEPTH 6
 #define SCENE_MAX_NODES 2000
 
-#define IPC_COMMANDS "ping, get_tree, get_focus, dump_scene, self_check, help"
+#define IPC_COMMANDS \
+    "ping, get_tree, get_focus, get_trace, dump_scene, self_check, help"
 
 /* ==================== JSON 拼装小工具 ==================== */
 
@@ -520,6 +522,12 @@ static bool dispatch(struct woodland_server *server, const char *line,
     }
     if (strcmp(cmd, "get_focus") == 0) {
         ipc_get_focus(server, out);
+        return true;
+    }
+    if (strcmp(cmd, "get_trace") == 0) {
+        /* 未开 --trace 时也回 200：是一份 enabled=false 的完整响应，
+         * 脚本不用为"有没有开"分叉 */
+        woodland_trace_dump(out);
         return true;
     }
     if (strcmp(cmd, "dump_scene") == 0) {

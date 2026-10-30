@@ -38,10 +38,29 @@ meson test -C build --print-errorlogs  # 跑全部测试
 ```bash
 wctl get_tree   | jq '.views[] | {id,title,focused,activated,outer,snapped}'
 wctl get_focus  | jq .        # 焦点在谁身上（recorded_view vs keyboard_view）
+wctl get_trace  | jq '.entries[] | "\(.seq) \(.what) \(.obj) \(.detail)"'
 wctl self_check | jq .        # 不变量断言；失败项带 expected / actual
 wctl dump_scene | jq '.nodes' # wlr_scene 树，排查「画了但看不见」
 wctl --help
 ```
+
+### 决策轨迹：`--trace` + `get_trace`
+
+`get_tree` 回答"现在是什么样"，**回答不了"为什么变成这样"**。加 `--trace` 启动后，合成器把最近 4096 次状态变更记进环缓冲（满了覆盖最旧的），`wctl get_trace` 按 `seq` 升序导出：
+
+```
+{"ok":true,"cmd":"get_trace","enabled":true,"capacity":4096,"count":4,"total":4,"dropped":0,
+ "entries":[{"seq":0,"ms":13,"obj":0,"what":"output_add","detail":"HEADLESS-1 1280x720 heads=1"},
+            {"seq":1,"ms":16,"obj":1,"what":"map","detail":"ws=1 parent=0"},
+            {"seq":2,"ms":31,"obj":1,"what":"place","detail":"policy=cascade 250x250 at 1,27"},
+            {"seq":3,"ms":31,"obj":1,"what":"focus","detail":"prev=0 raise=1"}]}
+```
+
+- `what` 是**稳定标签**（脚本会 grep），现有：`map` / `unmap` / `destroy` / `focus` / `focus_none` / `layer_focus` / `place` / `workspace` / `output_add` / `output_remove` / `cfg_apply`。加新标签先写进 `include/trace.h` 的清单。
+- `detail` 只写**决策依据**（走了哪个分支、策略名、抑制窗口），不要抄 `get_tree` 已有的数值。
+- 关闭时零分配零格式化；打开后也不分配（一次 calloc）。**它只依赖 `util/json`，不许反向依赖任何业务模块**——否则会成为依赖环的入口。
+- 环的语义：`seq` 全局单调，`total` 是累计条数，`dropped = total - count` 就是被覆盖掉的条数。第一个 entry 的 `seq` 一定等于 `dropped`。
+- 回归：`tests/unit/test_trace.c`（覆盖顺序、截断、开关），`smoke-ipc` 断言 `map → place → focus` 的因果顺序。
 
 `wctl` 找 socket 的顺序：`-s <path>` → `$WOODLAND_IPC` → 扫 `$XDG_RUNTIME_DIR` 里最新的 `woodland-*.sock`。`ok=false` 时退出码 1。
 
