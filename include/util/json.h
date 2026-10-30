@@ -65,4 +65,43 @@ void woodland_json_bool(struct woodland_json *json, bool value);
 void woodland_json_int_array(struct woodland_json *json, const int *values,
                              int count);
 
+/*
+ * 对象/数组写入器：自动处理元素间的分隔逗号。
+ *
+ * 手写 JSON 最容易错的就是逗号——首字段多一个、末字段少一个——这种错
+ * 只会在客户端解析时暴露。把"是否首个元素"记在结构里，调用方只关心
+ * 键值。结构体本身是公开的：需要接着半成品继续写（外面已经手写了
+ * `{"cmd":...` 这类前缀）时，用 {.json = out, .first = false} 直接
+ * 初始化即可，不必非要 obj_open 打头。
+ */
+struct woodland_json_obj {
+    struct woodland_json *json;
+    bool first;
+};
+
+/** 写 `{` 并从头开始计字段。 */
+void woodland_json_obj_open(struct woodland_json_obj *obj,
+                            struct woodland_json *json);
+/** 写 `}`。 */
+void woodland_json_obj_close(struct woodland_json_obj *obj);
+/** 写分隔符 + `"key":`；int/bool/str 是它的便利组合。 */
+void woodland_json_obj_key(struct woodland_json_obj *obj, const char *key);
+void woodland_json_obj_int(struct woodland_json_obj *obj, const char *key,
+                           long long value);
+void woodland_json_obj_bool(struct woodland_json_obj *obj, const char *key,
+                            bool value);
+void woodland_json_obj_str(struct woodland_json_obj *obj, const char *key,
+                           const char *value);
+
+/** 数组的同类设施：sep 在每个元素之前调用一次。 */
+struct woodland_json_arr {
+    struct woodland_json *json;
+    bool first;
+};
+
+void woodland_json_arr_open(struct woodland_json_arr *arr,
+                            struct woodland_json *json);
+void woodland_json_arr_close(struct woodland_json_arr *arr);
+void woodland_json_arr_sep(struct woodland_json_arr *arr);
+
 #endif

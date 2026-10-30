@@ -150,5 +150,55 @@ int main(void) {
     assert(strcmp(woodland_json_data(&j), "[]") == 0);
     woodland_json_finish(&j);
 
+    /* ---------- 对象/数组写入器：逗号自动管理 ---------- */
+    woodland_json_init(&j);
+
+    struct woodland_json_obj obj;
+    woodland_json_obj_open(&obj, &j);
+    woodland_json_obj_bool(&obj, "ok", true);
+    woodland_json_obj_str(&obj, "cmd", "ping");
+    woodland_json_obj_int(&obj, "pid", 42);
+    woodland_json_obj_key(&obj, "tags");
+    struct woodland_json_arr arr;
+    woodland_json_arr_open(&arr, &j);
+    woodland_json_arr_sep(&arr);
+    woodland_json_string(&j, "a");
+    woodland_json_arr_sep(&arr);
+    woodland_json_string(&j, "b");
+    woodland_json_arr_close(&arr);
+    woodland_json_obj_close(&obj);
+    /* 首字段无前置逗号、末字段无尾逗号、数组元素分隔恰好——
+     * 这三处任何一处错了，客户端 jq 解析直接失败 */
+    assert(strcmp(woodland_json_data(&j),
+                  "{\"ok\":true,\"cmd\":\"ping\",\"pid\":42,"
+                  "\"tags\":[\"a\",\"b\"]}") == 0);
+
+    woodland_json_finish(&j);
+    woodland_json_init(&j);
+
+    /* 空数组 / 空对象：sep 一次都没调时就是 [] / {} */
+    struct woodland_json_arr empty_arr;
+    woodland_json_arr_open(&empty_arr, &j);
+    woodland_json_arr_close(&empty_arr);
+    struct woodland_json_obj empty_obj;
+    woodland_json_obj_open(&empty_obj, &j);
+    woodland_json_obj_close(&empty_obj);
+    assert(strcmp(woodland_json_data(&j), "[]{}") == 0);
+
+    woodland_json_finish(&j);
+    woodland_json_init(&j);
+
+    /* first=false：接着手写前缀继续写（get_focus/self_check 的用法），
+     * 第一个字段要补前置逗号 */
+    woodland_json_raw(&j, "{\"cmd\":\"get_focus\"");
+    struct woodland_json_obj cont = {.json = &j, .first = false};
+    woodland_json_obj_bool(&cont, "seat", false);
+    woodland_json_obj_str(&cont, "title", NULL);
+    woodland_json_obj_close(&cont);
+    assert(strcmp(woodland_json_data(&j),
+                  "{\"cmd\":\"get_focus\",\"seat\":false,\"title\":null}") == 0);
+
+    woodland_json_finish(&j);
+
     return 0;
 }

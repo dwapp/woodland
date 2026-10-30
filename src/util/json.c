@@ -237,3 +237,60 @@ void woodland_json_int_array(struct woodland_json *json, const int *values,
     }
     json_append(json, "]", 1);
 }
+
+/* ==================== 对象/数组写入器 ==================== */
+
+void woodland_json_obj_open(struct woodland_json_obj *obj,
+                            struct woodland_json *json) {
+    obj->json = json;
+    obj->first = true;
+    woodland_json_raw(json, "{");
+}
+
+void woodland_json_obj_close(struct woodland_json_obj *obj) {
+    woodland_json_raw(obj->json, "}");
+}
+
+void woodland_json_obj_key(struct woodland_json_obj *obj, const char *key) {
+    if (!obj->first) {
+        woodland_json_raw(obj->json, ",");
+    }
+    obj->first = false;
+    woodland_json_key(obj->json, key);
+}
+
+void woodland_json_obj_int(struct woodland_json_obj *obj, const char *key,
+                           long long value) {
+    woodland_json_obj_key(obj, key);
+    woodland_json_int(obj->json, value);
+}
+
+void woodland_json_obj_bool(struct woodland_json_obj *obj, const char *key,
+                            bool value) {
+    woodland_json_obj_key(obj, key);
+    woodland_json_bool(obj->json, value);
+}
+
+void woodland_json_obj_str(struct woodland_json_obj *obj, const char *key,
+                           const char *value) {
+    woodland_json_obj_key(obj, key);
+    woodland_json_string(obj->json, value);
+}
+
+void woodland_json_arr_open(struct woodland_json_arr *arr,
+                            struct woodland_json *json) {
+    arr->json = json;
+    arr->first = true;
+    woodland_json_raw(json, "[");
+}
+
+void woodland_json_arr_close(struct woodland_json_arr *arr) {
+    woodland_json_raw(arr->json, "]");
+}
+
+void woodland_json_arr_sep(struct woodland_json_arr *arr) {
+    if (!arr->first) {
+        woodland_json_raw(arr->json, ",");
+    }
+    arr->first = false;
+}
