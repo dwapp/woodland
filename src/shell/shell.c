@@ -33,6 +33,7 @@
 #include "output.h"
 #include "selfcheck.h"
 #include "shell_internal.h"
+#include "trace.h"
 #include "ssd.h"
 #include "view.h"
 #include "workspace.h"
@@ -219,6 +220,9 @@ void woodland_view_map(struct woodland_view *view) {
     wlr_scene_node_reparent(&view->scene_tree->node,
                             view->workspace->tree);
     wl_list_insert(&server->views, &view->link);
+    woodland_trace_add("map", view->id, "ws=%s parent=%u",
+                       view->workspace ? view->workspace->name : "-",
+                       view->parent ? view->parent->id : 0);
     /* 首次 map 时创建 SSD（未 map 前不显示空装饰，同 labwc handle_map） */
     if (!view->ssd && !view->deco_csd) {
         woodland_ssd_create(view);
@@ -233,6 +237,9 @@ void woodland_view_map(struct woodland_view *view) {
 }
 
 void woodland_view_unmap(struct woodland_view *view) {
+    /* 记在函数开头：后面的 focus_none / fallback 也会各写一条，
+     * 顺序就是真实的因果顺序（先 unmap，再处理焦点） */
+    woodland_trace_add("unmap", view->id, "mapped=%d", view->mapped ? 1 : 0);
     if (view == view->server->grabbed_view) {
         woodland_cursor_reset_mode(view->server);
     }
@@ -272,6 +279,9 @@ void woodland_view_unmap(struct woodland_view *view) {
 }
 
 void woodland_view_destroy(struct woodland_view *view) {
+    woodland_trace_add("destroy", view->id, "type=%s mapped=%d",
+                       view->type == WOODLAND_VIEW_XWAYLAND ? "x11" : "xdg",
+                       view->mapped ? 1 : 0);
     /* 销毁中的视图不能作为回退目标，也不能被 focus_current 反查到：
      * 先清焦点（只改状态，不挑新目标），等视图摘出链表后再回退 */
     bool was_focused = (view->server->focused_view == view);

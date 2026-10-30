@@ -1,4 +1,6 @@
 subdir('util')
+# trace 只依赖 util，要排在所有会写轨迹的模块之前
+subdir('trace')
 subdir('output')
 subdir('cursor')
 subdir('capture')
@@ -23,4 +25,4 @@ woodland_bin = executable('woodland',
   'main.c',
   include_directories: woodland_inc,
   dependencies: [wlroots, wayland_server],
-  link_with: [server_lib, util_lib, output_lib, cursor_lib, shell_lib, seat_lib, workspace_lib, layer_lib, ssd_lib, capture_lib, ipc_lib, protocol_lib] + xwayland_libs)
+  link_with: [server_lib, util_lib, trace_lib, output_lib, cursor_lib, shell_lib, seat_lib, workspace_lib, layer_lib, ssd_lib, capture_lib, ipc_lib, protocol_lib] + xwayland_libs)

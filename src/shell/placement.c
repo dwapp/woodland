@@ -24,6 +24,7 @@
 
 #include "output.h"
 #include "placement.h"
+#include "trace.h"
 #include "ssd.h"
 #include "view.h"
 #include "woodland.h"
@@ -703,6 +704,17 @@ void woodland_view_place_initial(struct woodland_view *view) {
         }
     }
     wlr_scene_node_set_position(&view->scene_tree->node, geometry.x, geometry.y);
+    /* 只记"凭什么放这里"：几何本身 get_tree 里有，写进来是噪音 */
+    if (view->parent && view->parent->mapped) {
+        woodland_trace_add("place", view->id, "on parent=%u %dx%d at %d,%d",
+                           view->parent->id, content_w, content_h,
+                           geometry.x, geometry.y);
+    } else {
+        woodland_trace_add("place", view->id, "policy=%s %dx%d at %d,%d",
+                           woodland_placement_policy_name(
+                               server->placement_policy),
+                           content_w, content_h, geometry.x, geometry.y);
+    }
 }
 
 /* ==================== 外框几何应用与贴边 ==================== */

@@ -84,3 +84,10 @@ test_selfcheck = executable('test_selfcheck', 'test_selfcheck.c',
   link_with: [output_lib, shell_lib, ssd_lib, workspace_lib, layer_lib,
               capture_lib, util_lib])
 test('selfcheck', test_selfcheck)
+
+# trace 是叶子模块（只链 util），所以这里单独链它，不用把 shell/output 拖进来
+test_trace = executable('test_trace', 'test_trace.c',
+  dependencies: [wlroots, wayland_server],
+  include_directories: woodland_inc,
+  link_with: [trace_lib, util_lib])
+test('trace', test_trace)

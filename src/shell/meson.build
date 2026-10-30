@@ -5,4 +5,4 @@ shell_lib = static_library('woodland-shell',
    'focus.c', 'placement.c', 'selfcheck.c'],
   include_directories: woodland_inc,
   dependencies: [wlroots, wayland_server],
-  link_with: [capture_lib, util_lib])
+  link_with: [capture_lib, util_lib, trace_lib])

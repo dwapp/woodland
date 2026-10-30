@@ -11,6 +11,7 @@
 
 #include "layer.h"
 #include "output.h"
+#include "trace.h"
 #include "woodland.h"
 
 static void handle_frame(struct wl_listener *listener, void *data) {
@@ -69,6 +70,9 @@ static void handle_destroy(struct wl_listener *listener, void *data) {
      * 依赖 protocol（test_output 只链 output_lib）。
      */
     wl_signal_emit_mutable(&server->output_removed, output->wlr_output);
+    woodland_trace_add("output_remove", 0, "%s heads=%d",
+                       output->wlr_output->name,
+                       wl_list_length(&server->outputs));
 
     free(output);
     (void)data;
@@ -169,6 +173,9 @@ static void handle_new_output(struct wl_listener *listener, void *data) {
      * 由 server.c 的 new_output 后置监听器负责：output 层不该反过来
      * 依赖协议层 */
     wlr_output_create_global(wlr_output, server->display);
+    woodland_trace_add("output_add", 0, "%s %dx%d heads=%d", wlr_output->name,
+                       wlr_output->width, wlr_output->height,
+                       wl_list_length(&server->outputs));
     return;
 
 err_trees:

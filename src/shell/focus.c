@@ -23,6 +23,7 @@
 #include "focus.h"
 #include "selfcheck.h"
 #include "ssd.h"
+#include "trace.h"
 #include "view.h"
 #include "woodland.h"
 #include "workspace.h"
@@ -212,6 +213,8 @@ void woodland_focus_view(struct woodland_view *view, bool raise) {
         view_raise(view);
     }
     server->focused_view = view;
+    woodland_trace_add("focus", view->id, "prev=%u raise=%d",
+                       prev ? prev->id : 0, raise ? 1 : 0);
 
     struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(seat);
     if (keyboard != NULL) {
@@ -231,6 +234,8 @@ void woodland_focus_none(struct woodland_server *server) {
     }
     server->focused_view = NULL;
     server->focused_layer = NULL;
+    woodland_trace_add("focus_none", prev ? prev->id : 0, "was=%u",
+                       prev ? prev->id : 0);
     wlr_seat_keyboard_notify_clear_focus(server->seat);
     woodland_selfcheck_schedule(server, "focus_none");
 }
@@ -245,6 +250,8 @@ void woodland_focus_yield_to_layer(struct woodland_server *server) {
     }
     /* 注意力已经交给 layer，toplevel 不再算"焦点视图" */
     server->focused_view = NULL;
+    woodland_trace_add("layer_focus", prev ? prev->id : 0, "was=%u",
+                       prev ? prev->id : 0);
 }
 
 struct woodland_view *woodland_focus_topmost(struct woodland_server *server) {
