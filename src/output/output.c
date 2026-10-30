@@ -91,6 +91,7 @@ static void handle_new_output(struct wl_listener *listener, void *data) {
         }
     }
 
+    /* ---- 1. 建壳：分配 woodland_output 并接通渲染 ---- */
     output = calloc(1, sizeof(*output));
     if (!output) {
         wlr_log(WLR_ERROR, "failed to allocate woodland_output");
@@ -107,6 +108,7 @@ static void handle_new_output(struct wl_listener *listener, void *data) {
         return;
     }
 
+    /* ---- 2. 挂监听：frame / request_state / destroy ---- */
     output->frame.notify = handle_frame;
     wl_signal_add(&wlr_output->events.frame, &output->frame);
     output->request_state.notify = handle_request_state;
@@ -115,6 +117,8 @@ static void handle_new_output(struct wl_listener *listener, void *data) {
     wl_signal_add(&wlr_output->events.destroy, &output->destroy);
 
     /*
+     * ---- 3. 建 scene：scene_output + 4 棵 layer tree ----
+     *
      * 顺序在这里很关键：layout_add_auto() 会立刻触发 layout change，而
      * output-management 的广播正是挂在那个信号上。所以凡是广播里要读的
      * 东西（链表成员、scene_output、layer tree）都必须先就位，否则客户端
@@ -144,6 +148,7 @@ static void handle_new_output(struct wl_listener *listener, void *data) {
     wlr_scene_node_raise_to_top(&output->layer_tree[2]->node);
     wlr_scene_node_raise_to_top(&output->layer_tree[3]->node);
 
+    /* ---- 4. 入链 + 布局 + 提交 + 广播 ---- */
     wl_list_insert(&server->outputs, &output->link);
 
     struct wlr_output_layout_output *layout_output =
