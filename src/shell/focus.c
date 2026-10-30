@@ -234,8 +234,8 @@ void woodland_focus_none(struct woodland_server *server) {
     }
     server->focused_view = NULL;
     server->focused_layer = NULL;
-    woodland_trace_add("focus_none", prev ? prev->id : 0, "was=%u",
-                       prev ? prev->id : 0);
+    /* prev 的 id 已经在 obj 里；没有额外的决策依据，别在 detail 里重复一遍 */
+    woodland_trace_add("focus_none", prev ? prev->id : 0, NULL);
     wlr_seat_keyboard_notify_clear_focus(server->seat);
     woodland_selfcheck_schedule(server, "focus_none");
 }
@@ -250,8 +250,8 @@ void woodland_focus_yield_to_layer(struct woodland_server *server) {
     }
     /* 注意力已经交给 layer，toplevel 不再算"焦点视图" */
     server->focused_view = NULL;
-    woodland_trace_add("layer_focus", prev ? prev->id : 0, "was=%u",
-                       prev ? prev->id : 0);
+    /* obj 已经记了被让出焦点的视图，没有别的依据可写 */
+    woodland_trace_add("layer_focus", prev ? prev->id : 0, NULL);
 }
 
 struct woodland_view *woodland_focus_topmost(struct woodland_server *server) {

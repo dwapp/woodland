@@ -2,7 +2,8 @@
 /*
  * 决策轨迹：定长环形缓冲。
  *
- * 只在 --trace 下工作，写满覆盖最旧。不分配、不加锁、不去重：调用点要
+ * 只在 --trace 下工作，写满覆盖最旧。不分配、不去重、不加锁——不加锁
+ * 的前提是所有调用都发生在主事件循环（见 trace.h 的约束 4）。调用点要
  * 便宜到"随手加一行不心疼"，否则没人会在修 bug 之前就把它加对地方。
  *
  * 依赖方向：trace → util/json，一路向内。业务模块（shell/output/protocol/
@@ -20,7 +21,7 @@
 
 #include "util/json.h"
 
-/* 写满就覆盖最旧的。4096 × 136B ≈ 545KB，且只在 --trace 时才分配 */
+/* 写满就覆盖最旧的。4096 × 128B = 512KB，且只在 --trace 时才分配 */
 #define TRACE_CAPACITY 4096
 /* what 是短标签，超过这个长度说明用错了：轨迹不是日志 */
 #define TRACE_WHAT_MAX 16
@@ -34,6 +35,9 @@ struct trace_entry {
     char what[TRACE_WHAT_MAX];
     char detail[TRACE_DETAIL_MAX];
 };
+
+/* 上面的"512KB"就是按 128B 算的：字段一变这个断言就会提醒你改注释 */
+_Static_assert(sizeof(struct trace_entry) == 128, "trace entry size comment is stale");
 
 static struct {
     bool enabled;
