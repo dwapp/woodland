@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
+#include "util/listener.h"
 #include <stdlib.h>
 
 #include <wlr/types/wlr_cursor.h>
@@ -141,12 +142,12 @@ static void server_new_keyboard(struct woodland_server *server,
     xkb_context_unref(context);
     wlr_keyboard_set_repeat_info(wlr_keyboard, 25, 600);
 
-    keyboard->modifiers.notify = keyboard_handle_modifiers;
-    wl_signal_add(&wlr_keyboard->events.modifiers, &keyboard->modifiers);
-    keyboard->key.notify = keyboard_handle_key;
-    wl_signal_add(&wlr_keyboard->events.key, &keyboard->key);
-    keyboard->destroy.notify = keyboard_handle_destroy;
-    wl_signal_add(&device->events.destroy, &keyboard->destroy);
+    woodland_listener_connect(&keyboard->modifiers, &wlr_keyboard->events.modifiers,
+                          keyboard_handle_modifiers, "seat.modifiers");
+    woodland_listener_connect(&keyboard->key, &wlr_keyboard->events.key,
+                          keyboard_handle_key, "seat.key");
+    woodland_listener_connect(&keyboard->destroy, &device->events.destroy,
+                          keyboard_handle_destroy, "seat.destroy");
 
     wlr_seat_set_keyboard(server->seat, wlr_keyboard);
 
@@ -221,20 +222,17 @@ bool woodland_seat_init(struct woodland_server *server) {
         return false;
     }
 
-    server->new_input.notify = server_new_input;
-    wl_signal_add(&server->backend->events.new_input, &server->new_input);
+    woodland_listener_connect(&server->new_input, &server->backend->events.new_input,
+                          server_new_input, "seat.new_input");
 
-    server->request_cursor.notify = seat_request_cursor;
-    wl_signal_add(&server->seat->events.request_set_cursor,
-        &server->request_cursor);
+    woodland_listener_connect(&server->request_cursor, &server->seat->events.request_set_cursor,
+                          seat_request_cursor, "seat.request_set_cursor");
 
-    server->pointer_focus_change.notify = seat_pointer_focus_change;
-    wl_signal_add(&server->seat->pointer_state.events.focus_change,
-        &server->pointer_focus_change);
+    woodland_listener_connect(&server->pointer_focus_change, &server->seat->pointer_state.events.focus_change,
+                          seat_pointer_focus_change, "seat.focus_change");
 
-    server->request_set_selection.notify = seat_request_set_selection;
-    wl_signal_add(&server->seat->events.request_set_selection,
-        &server->request_set_selection);
+    woodland_listener_connect(&server->request_set_selection, &server->seat->events.request_set_selection,
+                          seat_request_set_selection, "seat.request_set_selection");
 
     return true;
 }

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
+#include "util/listener.h"
 #include <signal.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -192,9 +193,8 @@ bool woodland_server_init(struct woodland_server *server) {
     /* 新输出的收尾广播。必须在 woodland_output_init 之后注册，才会排在
      * handle_new_output 后面执行——那时输出已经进链表、已 commit，
      * 广播里的 enabled/mode 才是真值。 */
-    server->new_output_broadcast.notify = handle_new_output_broadcast;
-    wl_signal_add(&server->backend->events.new_output,
-                  &server->new_output_broadcast);
+    woodland_listener_connect(&server->new_output_broadcast, &server->backend->events.new_output,
+                          handle_new_output_broadcast, "server.new_output");
 
     if (!woodland_capture_init(server)) {
         wlr_log(WLR_ERROR, "failed to init capture");
@@ -217,9 +217,8 @@ bool woodland_server_init(struct woodland_server *server) {
         return false;
     }
 
-    server->request_set_shape.notify = handle_request_set_shape;
-    wl_signal_add(&server->cursor_shape_manager->events.request_set_shape,
-                  &server->request_set_shape);
+    woodland_listener_connect(&server->request_set_shape, &server->cursor_shape_manager->events.request_set_shape,
+                          handle_request_set_shape, "server.request_set_shape");
 
     return true;
 }

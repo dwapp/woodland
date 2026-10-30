@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
+#include "util/listener.h"
 #include <wlr/types/wlr_ext_image_capture_source_v1.h>
 #include <wlr/types/wlr_ext_image_copy_capture_v1.h>
 #include <wlr/types/wlr_screencopy_v1.h>
@@ -41,9 +42,8 @@ static void handle_toplevel_capture_request(struct wl_listener *listener, void *
             wlr_log(WLR_ERROR, "failed to create scene capture source");
             return;
         }
-        view->capture_source_destroy.notify = handle_capture_source_destroy;
-        wl_signal_add(&view->capture_source->events.destroy,
-                      &view->capture_source_destroy);
+        woodland_listener_connect(&view->capture_source_destroy, &view->capture_source->events.destroy,
+                          handle_capture_source_destroy, "capture.destroy");
     }
 
     if (!wlr_ext_foreign_toplevel_image_capture_source_manager_v1_request_accept(
@@ -84,9 +84,8 @@ bool woodland_capture_init(struct woodland_server *server) {
         return false;
     }
 
-    server->toplevel_capture_request.notify = handle_toplevel_capture_request;
-    wl_signal_add(&server->toplevel_capture_manager->events.new_request,
-                  &server->toplevel_capture_request);
+    woodland_listener_connect(&server->toplevel_capture_request, &server->toplevel_capture_manager->events.new_request,
+                          handle_toplevel_capture_request, "capture.new_request");
 
     return true;
 }

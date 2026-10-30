@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
+#include "util/listener.h"
 #include <stdlib.h>
 #include <time.h>
 
@@ -109,12 +110,12 @@ static void handle_new_output(struct wl_listener *listener, void *data) {
     }
 
     /* ---- 2. 挂监听：frame / request_state / destroy ---- */
-    output->frame.notify = handle_frame;
-    wl_signal_add(&wlr_output->events.frame, &output->frame);
-    output->request_state.notify = handle_request_state;
-    wl_signal_add(&wlr_output->events.request_state, &output->request_state);
-    output->destroy.notify = handle_destroy;
-    wl_signal_add(&wlr_output->events.destroy, &output->destroy);
+    woodland_listener_connect(&output->frame, &wlr_output->events.frame,
+                          handle_frame, "output.frame");
+    woodland_listener_connect(&output->request_state, &wlr_output->events.request_state,
+                          handle_request_state, "output.request_state");
+    woodland_listener_connect(&output->destroy, &wlr_output->events.destroy,
+                          handle_destroy, "output.destroy");
 
     /*
      * ---- 3. 建 scene：scene_output + 4 棵 layer tree ----
@@ -221,8 +222,8 @@ bool woodland_output_init(struct woodland_server *server) {
         return false;
     }
 
-    server->new_output.notify = handle_new_output;
-    wl_signal_add(&server->backend->events.new_output, &server->new_output);
+    woodland_listener_connect(&server->new_output, &server->backend->events.new_output,
+                          handle_new_output, "output.new_output");
 
     return true;
 }

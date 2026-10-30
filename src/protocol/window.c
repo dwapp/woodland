@@ -7,6 +7,7 @@
  * 一次焦点切换，tag 就是一次字段赋值。跟 shell.c 的关系是单向的——本文件
  * 调 shell 的公开接口，shell 不反过来依赖这里。
  */
+#include "util/listener.h"
 #include <stdlib.h>
 
 #include <wlr/types/wlr_xdg_activation_v1.h>
@@ -82,9 +83,8 @@ bool woodland_proto_window_init(struct woodland_proto *proto) {
         wlr_log(WLR_ERROR, "failed to create xdg-activation");
         return false;
     }
-    window->activate.notify = window_handle_activate;
-    wl_signal_add(&window->activation->events.request_activate,
-                  &window->activate);
+    woodland_listener_connect(&window->activate, &window->activation->events.request_activate,
+                          window_handle_activate, "window.request_activate");
 
     window->toplevel_tag = wlr_xdg_toplevel_tag_manager_v1_create(
         server->display, 1);
@@ -92,8 +92,8 @@ bool woodland_proto_window_init(struct woodland_proto *proto) {
         wlr_log(WLR_ERROR, "failed to create xdg-toplevel-tag");
         return false;
     }
-    window->set_tag.notify = window_handle_set_tag;
-    wl_signal_add(&window->toplevel_tag->events.set_tag, &window->set_tag);
+    woodland_listener_connect(&window->set_tag, &window->toplevel_tag->events.set_tag,
+                          window_handle_set_tag, "window.set_tag");
 
     return true;
 }
