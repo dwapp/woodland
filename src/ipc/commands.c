@@ -56,6 +56,9 @@ struct ipc_cmd_doc {
     size_t nfields;
 };
 
+/* 字段数从数组大小算，不手数——手数迟早数错 */
+#define IPC_FIELDS_LEN(arr) (sizeof(arr) / sizeof((arr)[0]))
+
 static const struct ipc_field_doc ping_fields[] = {
     {"pid", "int", "compositor process id"},
 };
@@ -116,18 +119,32 @@ static const struct ipc_field_doc help_fields[] = {
 };
 
 static const struct ipc_cmd_doc ipc_cmd_docs[] = {
-    {"ping", "liveness probe", ping_fields, 1},
-    {"get_tree", "full compositor state", get_tree_fields, 9},
+    {"ping", "liveness probe", ping_fields, IPC_FIELDS_LEN(ping_fields)},
+    {"get_tree", "full compositor state",
+     get_tree_fields, IPC_FIELDS_LEN(get_tree_fields)},
     {"get_focus", "who has focus and why (recorded vs keyboard)",
-     get_focus_fields_doc, 7},
+     get_focus_fields_doc, IPC_FIELDS_LEN(get_focus_fields_doc)},
     {"get_trace", "recent state-change decisions (needs --trace)",
-     get_trace_fields, 6},
+     get_trace_fields, IPC_FIELDS_LEN(get_trace_fields)},
     {"dump_scene", "wlr_scene graph as JSON (for drawn-but-invisible bugs)",
-     dump_scene_fields, 3},
+     dump_scene_fields, IPC_FIELDS_LEN(dump_scene_fields)},
     {"self_check", "invariant assertions (alias: self-check)",
-     self_check_fields, 3},
-    {"help", "this response", help_fields, 1},
+     self_check_fields, IPC_FIELDS_LEN(self_check_fields)},
+    {"help", "this response", help_fields, IPC_FIELDS_LEN(help_fields)},
 };
+
+/*
+ * 和 dispatch() 的同步哨兵。dispatch 是手写的 if-else 链，docs 是这张
+ * 表，两边没有编译期的绑定——加命令时只改 docs 不改 dispatch（或反之）
+ * 不会有任何报错。这行断言把命令数钉死在 IPC_CMD_COUNT：改了 docs 的
+ * 条目数而忘了碰计数（或反过来），编译立刻失败，逼着添加命令的人
+ * 把 dispatch、docs、计数三处一起过一遍。dispatch 单边新增依然没有
+ * 编译期防护——那条靠评审兜底。
+ */
+#define IPC_CMD_COUNT 7
+_Static_assert(sizeof(ipc_cmd_docs) / sizeof(ipc_cmd_docs[0]) == IPC_CMD_COUNT,
+               "ipc_cmd_docs changed: update dispatch() and IPC_CMD_COUNT "
+               "together (add one, bump the other)");
 
 /* ==================== JSON 拼装小工具 ==================== */
 
@@ -172,6 +189,8 @@ static void obj_snapped(struct woodland_json_obj *obj, uint32_t edges) {
         {WLR_EDGE_BOTTOM, "bottom"},
     };
     woodland_json_obj_key(obj, "snapped");
+    /* arr 和 obj 共享同一个底层 woodland_json：sep 写分隔符、
+     * string 写值，各自经自己的游标记状态，落点却是同一处 */
     struct woodland_json_arr arr;
     woodland_json_arr_open(&arr, obj->json);
     for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
