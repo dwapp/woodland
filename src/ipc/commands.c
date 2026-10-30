@@ -36,8 +36,98 @@
 #define SCENE_MAX_DEPTH 6
 #define SCENE_MAX_NODES 2000
 
-#define IPC_COMMANDS \
-    "ping, get_tree, get_focus, get_trace, dump_scene, self_check, help"
+/* ==================== 命令文档：help 的唯一事实源 ==================== */
+
+/*
+ * help 的自描述表。加新命令时在这里补一份字段清单，help 的输出就自动
+ * 跟上——调用方（脚本或 AI）不需要读 commands.c 就知道能问什么、
+ * 每个字段是什么类型。desc 用英文短句：它会被 grep/jq 消费。
+ */
+struct ipc_field_doc {
+    const char *name;
+    const char *type;
+    const char *desc;
+};
+
+struct ipc_cmd_doc {
+    const char *name;
+    const char *desc;
+    const struct ipc_field_doc *fields;
+    size_t nfields;
+};
+
+static const struct ipc_field_doc ping_fields[] = {
+    {"pid", "int", "compositor process id"},
+};
+
+static const struct ipc_field_doc get_tree_fields[] = {
+    {"pid", "int", "compositor process id"},
+    {"ipc", "str", "debug socket path"},
+    {"placement_policy", "str", "cascade | center | cursor | autoplace"},
+    {"self_check", "bool", "--self-check was given at startup"},
+    {"outputs", "obj[]", "name, enabled, box[x,y,w,h], workarea, width, "
+                         "height, scale (per-mille)"},
+    {"workspace", "obj", "current: str, all: str[]"},
+    {"focus", "obj", "same fields as get_focus"},
+    {"views", "obj[]", "per view: id, kind, z, title, app_id, tag, workspace, "
+                       "output, mapped, placed, minimized, maximized, "
+                       "fullscreen, override_redirect, csd, focused, "
+                       "activated, focusable, scene_visible, parent, "
+                       "outer[x,y,w,h], content[x,y,w,h], "
+                       "ssd{present,active,margins}, limits, snapped[]"},
+    {"count", "int", "number of views"},
+};
+
+static const struct ipc_field_doc get_focus_fields_doc[] = {
+    {"view", "int|null", "focused view id (recorded focus)"},
+    {"recorded_view", "int|null", "id the compositor tracks as focused"},
+    {"keyboard_view", "int|null", "view holding real keyboard focus"},
+    {"keyboard_focused", "bool", "some surface has keyboard focus"},
+    {"layer", "str|null", "namespace of focused layer-shell surface"},
+    {"seat", "bool", "a seat exists"},
+    {"title", "str|null", "title of the focused view"},
+};
+
+static const struct ipc_field_doc get_trace_fields[] = {
+    {"enabled", "bool", "false unless started with --trace"},
+    {"capacity", "int", "ring size"},
+    {"count", "int", "entries still in the ring"},
+    {"total", "int", "entries ever written"},
+    {"dropped", "int", "total - count: overwritten before you asked"},
+    {"entries", "obj[]", "seq, ms, obj, what, detail — what/why of each "
+                         "state-change decision, oldest first"},
+};
+
+static const struct ipc_field_doc dump_scene_fields[] = {
+    {"tree", "obj", "scene graph: type, enabled, x, y, w, h, "
+                    "rgba|opacity+has_buffer, children[], truncated"},
+    {"nodes", "int", "nodes emitted (caps at 2000, depth 6)"},
+    {"error", "str", "set instead of tree when no scene exists"},
+};
+
+static const struct ipc_field_doc self_check_fields[] = {
+    {"ok", "bool", "true when every invariant held"},
+    {"failures", "int", "number of failed checks"},
+    {"checks", "obj[]", "name, ok, and expected/actual on failure"},
+};
+
+static const struct ipc_field_doc help_fields[] = {
+    {"commands", "obj[]", "this list: name, desc, fields[{name,type,desc}]"},
+};
+
+static const struct ipc_cmd_doc ipc_cmd_docs[] = {
+    {"ping", "liveness probe", ping_fields, 1},
+    {"get_tree", "full compositor state", get_tree_fields, 9},
+    {"get_focus", "who has focus and why (recorded vs keyboard)",
+     get_focus_fields_doc, 7},
+    {"get_trace", "recent state-change decisions (needs --trace)",
+     get_trace_fields, 6},
+    {"dump_scene", "wlr_scene graph as JSON (for drawn-but-invisible bugs)",
+     dump_scene_fields, 3},
+    {"self_check", "invariant assertions (alias: self-check)",
+     self_check_fields, 3},
+    {"help", "this response", help_fields, 1},
+};
 
 /* ==================== JSON 拼装小工具 ==================== */
 
@@ -410,6 +500,45 @@ static void ipc_dump_scene(struct woodland_server *server,
 
 /* ==================== 分发 ==================== */
 
+/* help 的输出从 ipc_cmd_docs 生成：表是唯一事实源，不会和实现漂移 */
+static void ipc_help(struct woodland_json *out) {
+    struct woodland_json_obj obj;
+    woodland_json_obj_open(&obj, out);
+    woodland_json_obj_bool(&obj, "ok", true);
+    woodland_json_obj_str(&obj, "cmd", "help");
+
+    woodland_json_obj_key(&obj, "commands");
+    struct woodland_json_arr cmds;
+    woodland_json_arr_open(&cmds, out);
+    for (size_t i = 0; i < sizeof(ipc_cmd_docs) / sizeof(ipc_cmd_docs[0]);
+         i++) {
+        const struct ipc_cmd_doc *doc = &ipc_cmd_docs[i];
+        woodland_json_arr_sep(&cmds);
+
+        struct woodland_json_obj cmd_obj;
+        woodland_json_obj_open(&cmd_obj, out);
+        woodland_json_obj_str(&cmd_obj, "name", doc->name);
+        woodland_json_obj_str(&cmd_obj, "desc", doc->desc);
+
+        woodland_json_obj_key(&cmd_obj, "fields");
+        struct woodland_json_arr fields;
+        woodland_json_arr_open(&fields, out);
+        for (size_t f = 0; f < doc->nfields; f++) {
+            woodland_json_arr_sep(&fields);
+            struct woodland_json_obj field;
+            woodland_json_obj_open(&field, out);
+            woodland_json_obj_str(&field, "name", doc->fields[f].name);
+            woodland_json_obj_str(&field, "type", doc->fields[f].type);
+            woodland_json_obj_str(&field, "desc", doc->fields[f].desc);
+            woodland_json_obj_close(&field);
+        }
+        woodland_json_arr_close(&fields);
+        woodland_json_obj_close(&cmd_obj);
+    }
+    woodland_json_arr_close(&cmds);
+    woodland_json_obj_close(&obj);
+}
+
 static void respond_error(struct woodland_json *out, const char *cmd,
                           const char *message) {
     struct woodland_json_obj obj;
@@ -418,10 +547,6 @@ static void respond_error(struct woodland_json *out, const char *cmd,
     woodland_json_obj_str(&obj, "cmd", cmd);
     woodland_json_obj_str(&obj, "error", message);
     woodland_json_obj_close(&obj);
-}
-
-const char *woodland_ipc_commands(void) {
-    return IPC_COMMANDS;
 }
 
 static bool dispatch(struct woodland_server *server, const char *line,
@@ -444,13 +569,7 @@ static bool dispatch(struct woodland_server *server, const char *line,
         return false;
     }
     if (strcmp(cmd, "help") == 0) {
-        struct woodland_json_obj obj;
-        woodland_json_obj_open(&obj, out);
-        woodland_json_obj_bool(&obj, "ok", true);
-        woodland_json_obj_str(&obj, "cmd", "help");
-        woodland_json_obj_key(&obj, "commands");
-        woodland_json_string(out, IPC_COMMANDS);
-        woodland_json_obj_close(&obj);
+        ipc_help(out);
         return true;
     }
     if (strcmp(cmd, "ping") == 0) {

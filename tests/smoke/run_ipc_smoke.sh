@@ -144,6 +144,17 @@ echo "$TRACE" | jq -e '[.entries[] | select(.what=="place")][0].detail | startsw
 echo "$TRACE" | jq -e '[.entries[] | select(.what=="focus")][0].obj == 1' >/dev/null \
     || smoke_fail "focus event should carry the view id"
 
+echo "== help =="
+# help 是自描述的：字段名+类型都在响应里，调用方不用读 commands.c。
+# 断言形状而不是内容细节：每个命令都要有 desc，每个字段都要有 type。
+HELP="$("$WCTL" -s "$SOCK" help)" || smoke_fail "help exited non-zero"
+echo "$HELP" | jq -e '.ok and (.commands | length >= 7)' >/dev/null \
+    || smoke_fail "help should list every command"
+echo "$HELP" | jq -e '[.commands[] | has("desc") and (.fields|length > 0)] | all' >/dev/null \
+    || smoke_fail "every help entry needs a desc and at least one field"
+echo "$HELP" | jq -e '[.commands[].fields[] | has("type")] | all' >/dev/null \
+    || smoke_fail "every help field needs a type"
+
 echo "== unknown command =="
 if "$WCTL" -s "$SOCK" bogus >/dev/null 2>&1; then
     smoke_fail "unknown command should exit non-zero"
