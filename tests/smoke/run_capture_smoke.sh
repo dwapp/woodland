@@ -7,6 +7,9 @@
 # 用法: sh run_capture_smoke.sh <woodland 二进制路径>
 set -eu
 
+. "$(dirname "$0")/lib.sh"
+smoke_init capture
+
 BIN="${1:-./build/src/woodland}"
 [ -x "$BIN" ] || { echo "binary not found: $BIN" >&2; exit 125; }
 
@@ -24,7 +27,7 @@ WORK="$(mktemp -d)"
 comp_pid=""
 client_pid=""
 
-cleanup() {
+smoke_cleanup() {
     [ -n "$client_pid" ] && kill -TERM "$client_pid" 2>/dev/null || true
     if [ -n "$comp_pid" ]; then
         kill -TERM "$comp_pid" 2>/dev/null || true
@@ -37,9 +40,10 @@ cleanup() {
     fi
     rm -rf "$XDG_RUNTIME_DIR" "$WORK"
 }
-trap cleanup EXIT INT TERM
 
-WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_HEADLESS_OUTPUTS=1 "$BIN" &
+SMOKE_LOG="$XDG_RUNTIME_DIR/woodland.log"
+WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_HEADLESS_OUTPUTS=1 "$BIN" \
+    >"$SMOKE_LOG" 2>&1 &
 comp_pid=$!
 
 i=0

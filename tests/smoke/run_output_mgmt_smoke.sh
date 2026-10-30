@@ -9,6 +9,9 @@
 #   wlr-randr ...          发 apply 请求
 set -eu
 
+. "$(dirname "$0")/lib.sh"
+smoke_init output-mgmt
+
 BIN="${1:-./build/src/woodland}"
 [ -x "$BIN" ] || { echo "binary not found: $BIN" >&2; exit 125; }
 
@@ -21,14 +24,14 @@ unset WAYLAND_DISPLAY
 export XDG_RUNTIME_DIR="$(mktemp -d)"
 export WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_HEADLESS_OUTPUTS=2
 
-"$BIN" >"$XDG_RUNTIME_DIR/log" 2>&1 &
+SMOKE_LOG="$XDG_RUNTIME_DIR/log"
+"$BIN" >"$SMOKE_LOG" 2>&1 &
 pid=$!
-cleanup() {
+smoke_cleanup() {
     kill -TERM "$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true
     rm -rf "$XDG_RUNTIME_DIR"
 }
-trap cleanup EXIT INT TERM
 
 i=0
 while [ "$(ls "$XDG_RUNTIME_DIR/" 2>/dev/null | grep -c '^wayland-')" -eq 0 ] \
@@ -42,13 +45,11 @@ if [ -z "$socket_name" ]; then
 fi
 export WAYLAND_DISPLAY="$socket_name"
 
+# 比通用版多一条：失败时把 wlr-randr 看到的东西也打出来
 fail() {
-    echo "FAIL: $1" >&2
     echo "--- wlr-randr 输出:" >&2
-    wlr-randr >&2 2>&1 || true
-    echo "--- 合成器日志:" >&2
-    cat "$XDG_RUNTIME_DIR/log" >&2 || true
-    exit 1
+    wlr-randr >&2 2>&1 || :
+    smoke_fail "$1"
 }
 
 # 取某个 head 的 Position 行

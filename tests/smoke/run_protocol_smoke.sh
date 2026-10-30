@@ -3,6 +3,9 @@
 # 用法: sh run_protocol_smoke.sh <woodland 二进制路径>
 set -eu
 
+. "$(dirname "$0")/lib.sh"
+smoke_init protocol
+
 BIN="${1:-./build/src/woodland}"
 [ -x "$BIN" ] || { echo "binary not found: $BIN" >&2; exit 125; }
 
@@ -15,8 +18,22 @@ command -v wayland-info >/dev/null 2>&1 || {
 unset WAYLAND_DISPLAY
 export XDG_RUNTIME_DIR="$(mktemp -d)"
 
-WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_HEADLESS_OUTPUTS=1 "$BIN" &
+SMOKE_LOG="$XDG_RUNTIME_DIR/woodland.log"
+WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_HEADLESS_OUTPUTS=1 "$BIN" \
+    >"$SMOKE_LOG" 2>&1 &
 pid=$!
+
+# 这个脚本原来没有收尾：跑完把合成器留在后台了。接上 lib 之后由它负责。
+smoke_cleanup() {
+    kill -TERM "$pid" 2>/dev/null || :
+    i=0
+    while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 50 ]; do
+        sleep 0.1; i=$((i+1))
+    done
+    kill -KILL "$pid" 2>/dev/null || :
+    wait "$pid" 2>/dev/null || :
+    rm -rf "$XDG_RUNTIME_DIR"
+}
 
 # 等待 socket 就绪（wl_display_add_socket_auto 命名 wayland-N）
 i=0

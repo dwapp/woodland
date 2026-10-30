@@ -7,6 +7,10 @@
 # 用法: sh run_ipc_smoke.sh <woodland 二进制> <wctl 二进制>
 set -eu
 
+# 公共壳：失败时把日志 + 状态快照 + 决策轨迹落到 meson-logs/smoke/ipc/
+. "$(dirname "$0")/lib.sh"
+smoke_init ipc
+
 BIN="${1:-./build/src/woodland}"
 WCTL="${2:-./build/src/wctl/wctl}"
 [ -x "$BIN" ] || { echo "binary not found: $BIN" >&2; exit 125; }
@@ -23,10 +27,10 @@ unset WAYLAND_DISPLAY
 export XDG_RUNTIME_DIR="$(mktemp -d)"
 export WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_HEADLESS_OUTPUTS=1
 
-LOG="$XDG_RUNTIME_DIR/woodland.log"
+SMOKE_LOG="$XDG_RUNTIME_DIR/woodland.log"
 comp_pid=""
 
-cleanup() {
+smoke_cleanup() {
     if [ -n "$comp_pid" ]; then
         kill -TERM "$comp_pid" 2>/dev/null || true
         i=0
@@ -38,16 +42,9 @@ cleanup() {
     fi
     rm -rf "$XDG_RUNTIME_DIR"
 }
-trap cleanup EXIT INT TERM
 
-fail() {
-    echo "FAIL: $*" >&2
-    echo "--- compositor log ---" >&2
-    tail -30 "$LOG" >&2 || true
-    exit 1
-}
-
-"$BIN" --self-check -s "weston-simple-shm" >"$LOG" 2>&1 &
+SMOKE_FLAGS="--self-check --trace"
+"$BIN" --self-check --trace -s "weston-simple-shm" >"$SMOKE_LOG" 2>&1 &
 comp_pid=$!
 
 # 等调试 socket 出现
@@ -60,7 +57,7 @@ while [ "$i" -lt 100 ]; do
     [ -n "$SOCK" ] && break
     sleep 0.05; i=$((i+1))
 done
-[ -n "$SOCK" ] || fail "debug socket never appeared"
+[ -n "$SOCK" ] || smoke_fail "debug socket never appeared"
 
 # 等窗口 map 上来（get_tree 里出现 1 个视图）
 i=0
@@ -73,49 +70,83 @@ done
 
 echo "== ping =="
 "$WCTL" -s "$SOCK" ping | jq -e '.ok == true and .pid > 0' >/dev/null \
-    || fail "ping"
+    || smoke_fail "ping"
 
 echo "== get_tree =="
-TREE="$("$WCTL" -s "$SOCK" get_tree)" || fail "get_tree exited non-zero"
-echo "$TREE" | jq -e '.ok == true' >/dev/null || fail "get_tree ok=false"
-echo "$TREE" | jq -e '.count == 1' >/dev/null || fail "expected exactly 1 view"
+TREE="$("$WCTL" -s "$SOCK" get_tree)" || smoke_fail "get_tree exited non-zero"
+echo "$TREE" | jq -e '.ok == true' >/dev/null || smoke_fail "get_tree ok=false"
+echo "$TREE" | jq -e '.count == 1' >/dev/null || smoke_fail "expected exactly 1 view"
 echo "$TREE" | jq -e '.views[0] | .mapped and .focused and .activated' >/dev/null \
-    || fail "the only view should be mapped, focused and activated"
-echo "$TREE" | jq -e '.views[0].z == 0' >/dev/null || fail "z order: expected 0"
+    || smoke_fail "the only view should be mapped, focused and activated"
+echo "$TREE" | jq -e '.views[0].z == 0' >/dev/null || smoke_fail "z order: expected 0"
 echo "$TREE" | jq -e '.views[0].workspace == .workspace.current' >/dev/null \
-    || fail "view workspace should be the active one"
+    || smoke_fail "view workspace should be the active one"
 echo "$TREE" | jq -e '.views[0] | (.outer[2] > 0) and (.outer[3] > 0)' >/dev/null \
-    || fail "outer box is empty"
+    || smoke_fail "outer box is empty"
 echo "$TREE" | jq -e '.views[0].ssd.present and .views[0].ssd.active' >/dev/null \
-    || fail "SSD should exist and be active for the focused view"
+    || smoke_fail "SSD should exist and be active for the focused view"
 echo "$TREE" | jq -e '.views[0].ssd.margins[1] == 27' >/dev/null \
-    || fail "expected a 27px titlebar margin"
+    || smoke_fail "expected a 27px titlebar margin"
 # 内容框必须落在外框之内（标题栏 27px 不能盖住内容）
 echo "$TREE" | jq -e '.views[0] | (.content[1] == .outer[1] + 27)' >/dev/null \
-    || fail "content should start one titlebar below the outer box"
+    || smoke_fail "content should start one titlebar below the outer box"
 echo "$TREE" | jq -e '.outputs[0].workarea[2] == 1280 and .outputs[0].workarea[3] == 720' >/dev/null \
-    || fail "unexpected headless workarea"
+    || smoke_fail "unexpected headless workarea"
 echo "$TREE" | jq -e '.placement_policy == "cascade"' >/dev/null \
-    || fail "default placement policy should be cascade"
+    || smoke_fail "default placement policy should be cascade"
 
 echo "== get_focus =="
 "$WCTL" -s "$SOCK" get_focus | jq -e '.ok and .view == 1 and .recorded_view == 1' >/dev/null \
-    || fail "get_focus did not report view 1"
+    || smoke_fail "get_focus did not report view 1"
 
 echo "== self_check =="
-CHECK="$("$WCTL" -s "$SOCK" self_check)" || fail "self_check reported failures"
+CHECK="$("$WCTL" -s "$SOCK" self_check)" || smoke_fail "self_check reported failures"
 echo "$CHECK" | jq -e '.ok == true and .failures == 0' >/dev/null \
-    || fail "self_check not clean: $CHECK"
+    || smoke_fail "self_check not clean: $CHECK"
 echo "$CHECK" | jq -e '[.checks[].name] | index("activated_unique") != null' >/dev/null \
-    || fail "activated_unique check missing"
+    || smoke_fail "activated_unique check missing"
 
 echo "== dump_scene =="
 "$WCTL" -s "$SOCK" dump_scene | jq -e '.ok and .tree.type == "tree" and .nodes > 0' >/dev/null \
-    || fail "dump_scene"
+    || smoke_fail "dump_scene"
+
+echo "== get_trace =="
+# 决策轨迹：不只是"有内容"，还要顺序对、对象对、没绕圈。
+# 一个窗口从创建到有焦点，因果顺序固定是 map → place → focus。
+TRACE="$("$WCTL" -s "$SOCK" get_trace)" || smoke_fail "get_trace exited non-zero"
+echo "$TRACE" | jq -e '.ok and .enabled == true' >/dev/null \
+    || smoke_fail "trace should be enabled (started with --trace)"
+echo "$TRACE" | jq -e '.capacity > 0 and .dropped == 0' >/dev/null \
+    || smoke_fail "unexpected ring state: $TRACE"
+echo "$TRACE" | jq -e '.count == .total' >/dev/null \
+    || smoke_fail "count should equal total while the ring is not full"
+# seq 必须从 0 开始且严格递增——顺序错了，轨迹就只能当噪声
+echo "$TRACE" | jq -e '[.entries[].seq] == ([.entries[].seq] | sort) and .entries[0].seq == 0' >/dev/null \
+    || smoke_fail "trace entries are not in seq order"
+echo "$TRACE" | jq -e '[.entries[].what] | index("map") != null' >/dev/null \
+    || smoke_fail "no map event in the trace"
+echo "$TRACE" | jq -e '[.entries[].what] | index("place") != null' >/dev/null \
+    || smoke_fail "no place decision in the trace"
+echo "$TRACE" | jq -e '[.entries[].what] | index("focus") != null' >/dev/null \
+    || smoke_fail "no focus event in the trace"
+echo "$TRACE" | jq -e '[.entries[].what] | index("output_add") != null' >/dev/null \
+    || smoke_fail "no output_add event in the trace"
+# 因果顺序：map 必须早于 place，place 早于 focus
+echo "$TRACE" | jq -e '
+    ([.entries[] | select(.what=="map")][0].seq) as $m
+  | ([.entries[] | select(.what=="place")][0].seq) as $p
+  | ([.entries[] | select(.what=="focus")][0].seq) as $f
+  | $m < $p and $p < $f' >/dev/null \
+    || smoke_fail "trace order is wrong: map/place/focus must be sequential"
+# place 的 detail 要写出依据（策略名），否则这条记录等于没用
+echo "$TRACE" | jq -e '[.entries[] | select(.what=="place")][0].detail | startswith("policy=")' >/dev/null \
+    || smoke_fail "place detail should name the policy"
+echo "$TRACE" | jq -e '[.entries[] | select(.what=="focus")][0].obj == 1' >/dev/null \
+    || smoke_fail "focus event should carry the view id"
 
 echo "== unknown command =="
 if "$WCTL" -s "$SOCK" bogus >/dev/null 2>&1; then
-    fail "unknown command should exit non-zero"
+    smoke_fail "unknown command should exit non-zero"
 fi
 
 # nc 只用于下面两条「一个连接多条命令」的传输测试，缺了不影响其余断言，
@@ -124,21 +155,21 @@ fi
 if command -v nc >/dev/null 2>&1; then
     echo "== multiple commands on one connection (nc) =="
     LINES="$(printf 'get_focus\nhelp\n' | nc -U -q1 "$SOCK" 2>/dev/null | wc -l)"
-    [ "$LINES" -ge 2 ] || fail "expected 2 replies over one connection, got $LINES"
+    [ "$LINES" -ge 2 ] || smoke_fail "expected 2 replies over one connection, got $LINES"
 
     # 一次灌进多条命令：服务端"发不完就先不解析下一条、等 WRITABLE 再续"
     # 这条状态机如果写错，表现就是回了前几条然后卡死
     echo "== pipelined commands =="
     PIPED="$(awk 'BEGIN{for(i=0;i<20;i++)print "ping"}' | nc -U -q1 "$SOCK" 2>/dev/null | wc -l)"
-    [ "$PIPED" -ge 20 ] || fail "expected 20 pipelined replies, got $PIPED"
+    [ "$PIPED" -ge 20 ] || smoke_fail "expected 20 pipelined replies, got $PIPED"
 else
     echo "== nc not found, skipping the pipelined transport checks =="
 fi
 
 echo "== wctl options =="
-"$WCTL" --help >/dev/null 2>&1 || fail "--help should exit 0"
+"$WCTL" --help >/dev/null 2>&1 || smoke_fail "--help should exit 0"
 "$WCTL" -s "$SOCK" --timeout 2000 ping | jq -e '.ok' >/dev/null \
-    || fail "--timeout long option rejected"
+    || smoke_fail "--timeout long option rejected"
 
 # 命令超长必须在 write 之前拒绝：snprintf 截断时返回的是"本来要写多少"，
 # 直接拿去 write 会从栈上读出去
@@ -147,7 +178,7 @@ LONG="$(awk 'BEGIN{for(i=0;i<200;i++)printf "a"}')"
 if "$WCTL" -s "$SOCK" "$LONG" 2>&1 | grep -q "command too long"; then
     :
 else
-    fail "oversized command was not rejected before write"
+    smoke_fail "oversized command was not rejected before write"
 fi
 
 if command -v python3 >/dev/null 2>&1; then
@@ -165,7 +196,7 @@ PY
     stalled=$!
     sleep 0.3
     "$WCTL" -s "$SOCK" -t 1000 ping | jq -e '.ok' >/dev/null \
-        || fail "compositor stopped answering while a client refused to read"
+        || smoke_fail "compositor stopped answering while a client refused to read"
     kill "$stalled" 2>/dev/null || true
     wait "$stalled" 2>/dev/null || true
 
@@ -188,18 +219,18 @@ PY
     done
     started=$(date +%s)
     if "$WCTL" -s "$SLOW" -t 400 ping >/dev/null 2>&1; then
-        fail "wctl should fail against a silent server"
+        smoke_fail "wctl should fail against a silent server"
     fi
     elapsed=$(( $(date +%s) - started ))
-    [ "$elapsed" -le 3 ] || fail "read timeout ignored (waited ${elapsed}s)"
+    [ "$elapsed" -le 3 ] || smoke_fail "read timeout ignored (waited ${elapsed}s)"
     kill "$slow_srv" 2>/dev/null || true
     wait "$slow_srv" 2>/dev/null || true
 fi
 
 echo "== no self-check failures in the log =="
-if grep -q "self-check" "$LOG"; then
-    grep "self-check" "$LOG" >&2
-    fail "self-check logged a failure"
+if grep -q "self-check" "$SMOKE_LOG"; then
+    grep "self-check" "$SMOKE_LOG" >&2
+    smoke_fail "self-check logged a failure"
 fi
 
 # 正常退出后 socket 必须被清掉，否则下次 bind 会被残留文件挡住（虽然会被 unlink）
@@ -209,6 +240,6 @@ while kill -0 "$comp_pid" 2>/dev/null && [ "$i" -lt 50 ]; do
     sleep 0.1; i=$((i+1))
 done
 comp_pid=""
-[ -e "$SOCK" ] && fail "socket left behind: $SOCK"
+[ -e "$SOCK" ] && smoke_fail "socket left behind: $SOCK"
 
 echo "ipc smoke OK"
