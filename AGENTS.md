@@ -28,6 +28,7 @@ meson test -C build --print-errorlogs  # 跑全部测试
 - 特性开关在 `meson_options.txt`：`effects`（默认 false）、`tiling-layout`（默认 false）、`xwayland`（默认 true）、`test`（默认 false，跑测试要开）。
 - 特性开关经 `configure_file` 生成 `build/config.h`，用 `WOODLAND_HAVE_*` 宏。
 - 冒烟测试用 headless 后端：`tests/smoke/run_headless.sh` 内部以 `WLR_BACKENDS=headless WLR_RENDERER=pixman` 后台启动 + `kill -TERM` + 等退出码 0（M1 起追加 `WLR_HEADLESS_OUTPUTS=1`）。ASan 验证用 `meson setup build-asan -Db_sanitize=address,undefined -Dtest=enabled`。
+- **冒烟脚本一律先 `. tests/smoke/lib.sh` 再 `smoke_init <名字>`。** 失败时它把现场落到 `build/meson-logs/smoke/<名字>/`：`compositor.log`、`meta.txt`（参数 / socket / 退出码），有 `WCTL` 和 `SOCK` 时还会抓 `get_tree` / `get_focus` / `self_check` / `get_trace` / `dump_scene` 的 JSON 和一张 `screenshot.png`。脚本自己的收尾写成 `smoke_cleanup()`（dump 之后才调用），断言失败用 `smoke_fail "..."`。**不要再用 `cat 日志; exit 1`**——那正是"只有一行结论、没有现场"的老写法。
 - **CI 跑在 `archlinux:base-devel`，不要换回 `debian:stable`。** wlroots 0.20 要 wayland >= 1.24、libdrm >= 2.4.129、xkbcommon >= 1.8、pixman >= 0.43，bookworm 一个都不满足，meson 会退到 wrap 里逐个编 fallback，链条断在第一个 wayland 子项目（`Dependency "expat" not found`）。缺 expat 只是表象，补它只会把失败推到下一个依赖。
 - **顶层 `meson.build` 里给 `wlroots` 包的那层 `declare_dependency` 别删。** wlroots 作为子项目构建时，`wayland-scanner` 生成的协议头落在 `build/subprojects/wlroots/protocol/`，而它自己只导出 `include/`，于是 `wlr/types/wlr_layer_shell_v1.h` 里 `#include "wlr-layer-shell-unstable-v1-protocol.h"` 直接编译失败。系统装过 wlroots 的机器上 `/usr/include` 有这个头，问题会被掩盖——**本地能编不代表能编**。
 

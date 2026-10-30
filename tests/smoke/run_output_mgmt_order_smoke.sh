@@ -5,6 +5,9 @@
 # 用法: sh run_output_mgmt_order_smoke.sh <woodland 二进制> <output_mgmt_probe>
 set -eu
 
+. "$(dirname "$0")/lib.sh"
+smoke_init output-mgmt-order
+
 BIN="${1:-./build/src/woodland}"
 PROBE="${2:-./build/tests/output_mgmt_probe}"
 [ -x "$BIN" ] || { echo "binary not found: $BIN" >&2; exit 125; }
@@ -14,14 +17,14 @@ unset WAYLAND_DISPLAY
 export XDG_RUNTIME_DIR="$(mktemp -d)"
 export WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_HEADLESS_OUTPUTS=1
 
-"$BIN" >"$XDG_RUNTIME_DIR/log" 2>&1 &
+SMOKE_LOG="$XDG_RUNTIME_DIR/log"
+"$BIN" >"$SMOKE_LOG" 2>&1 &
 pid=$!
-cleanup() {
+smoke_cleanup() {
     kill -TERM "$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true
     rm -rf "$XDG_RUNTIME_DIR"
 }
-trap cleanup EXIT INT TERM
 
 i=0
 while [ "$(ls "$XDG_RUNTIME_DIR/" 2>/dev/null | grep -c '^wayland-')" -eq 0 ] \
@@ -41,7 +44,7 @@ rc=$?
 set -e
 if [ "$rc" -ne 0 ]; then
     echo "--- 合成器日志:" >&2
-    cat "$XDG_RUNTIME_DIR/log" >&2 || true
+    cat "$SMOKE_LOG" >&2 || true
     exit "$rc"
 fi
 
