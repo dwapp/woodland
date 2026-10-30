@@ -45,7 +45,4 @@ const char *woodland_ipc_path(const struct woodland_server *server);
 bool woodland_ipc_dispatch(struct woodland_server *server, const char *line,
                            struct woodland_json *out);
 
-/** 支持的命令（用于 help 与报错提示）。 */
-const char *woodland_ipc_commands(void);
-
 #endif

@@ -45,6 +45,8 @@ wctl dump_scene | jq '.nodes' # wlr_scene 树，排查「画了但看不见」
 wctl --help
 ```
 
+**每个命令的完整字段清单（名字+类型+说明）在 `wctl help` 的响应里**，加新命令时同步更新 `src/ipc/commands.c` 顶部的 `ipc_cmd_docs` 表——它是唯一事实源，help 输出由它生成。
+
 ### 决策轨迹：`--trace` + `get_trace`
 
 `get_tree` 回答"现在是什么样"，**回答不了"为什么变成这样"**。加 `--trace` 启动后，合成器把最近 4096 次状态变更记进环缓冲（满了覆盖最旧的），`wctl get_trace` 按 `seq` 升序导出：

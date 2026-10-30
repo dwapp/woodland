@@ -370,8 +370,9 @@ bool woodland_ipc_init(struct woodland_server *server,
     }
 
     setenv("WOODLAND_IPC", path, true);
-    wlr_log(WLR_INFO, "debug IPC listening on %s (%s)", path,
-            woodland_ipc_commands());
+    /* 命令清单不再硬编码在这条日志里：socket 上问一句 help 就是全量文档 */
+    wlr_log(WLR_INFO, "debug IPC listening on %s (send 'help' for the "
+                      "command list)", path);
     return true;
 }
 
