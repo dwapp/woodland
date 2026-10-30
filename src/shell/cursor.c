@@ -160,6 +160,9 @@ void woodland_cursor_process_motion(struct woodland_server *server, uint32_t tim
 /* ==================== wlr_cursor 监听器 ==================== */
 
 static void server_cursor_motion(struct wl_listener *listener, void *data) {
+    /* 手动计数的示例：已经在改这个回调、又想知道"它跑了吗/跑了多少次"
+     * 时，开头插这一行就够。想零回调侵入见 connect_verbose（output.frame） */
+    woodland_listener_count(listener);
     struct woodland_server *server =
         wl_container_of(listener, server, cursor_motion);
     struct wlr_pointer_motion_event *event = data;

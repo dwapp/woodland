@@ -9,12 +9,16 @@
 
 #include <string.h>
 
+#include <wlr/util/log.h>
+
 #include "util/json.h"
 
 struct listener_slot {
     struct wl_listener *listener;
     const char *name;
     uint64_t emits;
+    /* verbose 注册时存真实回调：listener->notify 换成了 thunk，真函数在这里 */
+    wl_notify_func_t notify;
 };
 
 static struct {
@@ -37,17 +41,51 @@ void woodland_listener_connect(struct wl_listener *listener,
     slot->listener = listener;
     slot->name = name;
     slot->emits = 0;
+    slot->notify = notify;
+}
+
+/*
+ * verbose 注册的 thunk：emit 时先计数再转调真实回调。
+ * listener 指针原样传递，回调里的 wl_container_of 不受影响。
+ * 查表失败（不该发生，除非调用方绕过 API 改了 notify）就只剩一行错误日志，
+ * 不能比"计数失败"更响——诊断工具不许把宿主拖垮。
+ */
+static void listener_thunk(struct wl_listener *listener, void *data) {
+    for (uint32_t i = ledger.count; i > 0; i--) {
+        struct listener_slot *slot = &ledger.slots[i - 1];
+        if (slot->listener == listener && slot->notify && listener->notify == listener_thunk) {
+            slot->emits++;
+            slot->notify(listener, data);
+            return;
+        }
+    }
+    wlr_log(WLR_ERROR, "listener: thunk has no ledger entry, dropping event");
+}
+
+void woodland_listener_connect_verbose(struct wl_listener *listener,
+                                       struct wl_signal *signal,
+                                       wl_notify_func_t notify,
+                                       const char *name) {
+    woodland_listener_connect(listener, signal, listener_thunk, name);
+    /* connect 已把 thunk 写进 notify，真实回调换到 slot 里。
+     * 表满时 slot 没建成——verbose 退化成普通注册，别让计数功能
+     * 改变"还能不能收到事件"这件事 */
+    if (ledger.count > 0 && ledger.slots[ledger.count - 1].listener == listener) {
+        ledger.slots[ledger.count - 1].notify = notify;
+    }
 }
 
 void woodland_listener_count(struct wl_listener *listener) {
     if (!listener) {
         return;
     }
-    /* 线性查找：emit 是高频路径……但只在排障时才插 WL_COUNT，
-     * 常规构建里没有任何调用点，别为不存在的路径做哈希表 */
-    for (uint32_t i = 0; i < ledger.count; i++) {
-        if (ledger.slots[i].listener == listener) {
-            ledger.slots[i].emits++;
+    /* 从表尾往前找：emit 是高频路径……但只在排障时才插 count，
+     * 常规构建里没有任何调用点，别为不存在的路径做哈希表。
+     * 倒序是为了地址复用（旧 view 释放、新 view 恰好同址）时
+     * 计数归最新的槽——旧槽已经是死账 */
+    for (uint32_t i = ledger.count; i > 0; i--) {
+        if (ledger.slots[i - 1].listener == listener) {
+            ledger.slots[i - 1].emits++;
             return;
         }
     }
