@@ -158,8 +158,12 @@ echo "$LST" | jq -e '
   | ([.listeners[] | select(.name=="input.motion")][0].seq) as $i
   | $c < $i' >/dev/null \
     || smoke_fail "cursor.motion must be registered before input.motion (stale-focus pitfall)"
-# emit 计数在跑：事件循环里 frame 之类一直在触发（没插 WL_COUNT 的为 0 也正常，
-# 这里只断言账本里存在带名字的条目）
+# emit 计数在跑：server.new_output 用 connect_verbose 注册（thunk 自动计数），
+# 启动建输出时必发一次——这条断言证明计账链路是活的，也证明坑 2 的
+# 补广播监听器真的执行过
+echo "$LST" | jq -e '[.listeners[] | select(.name=="server.new_output")][0].emits >= 1' >/dev/null \
+    || smoke_fail "server.new_output should have counted at least one emit (verbose registration)"
+# 手动计数的示例在 server_cursor_motion：headless 没有输入事件，emits 为 0 属正常
 echo "$LST" | jq -e '[.listeners[] | .name | length > 0] | all' >/dev/null \
     || smoke_fail "every listener entry needs a name"
 

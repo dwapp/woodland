@@ -110,6 +110,9 @@ static void handle_new_output(struct wl_listener *listener, void *data) {
     }
 
     /* ---- 2. 挂监听：frame / request_state / destroy ---- */
+    /* frame 不用 verbose：headless 静态场景没有帧事件（无 damage 不
+     * commit），而且它是高频路径，每次 emit 都付一次账本线性查找不
+     * 划算。verbose 的活体示例见 server.c 的 new_output_broadcast */
     woodland_listener_connect(&output->frame, &wlr_output->events.frame,
                           handle_frame, "output.frame");
     woodland_listener_connect(&output->request_state, &wlr_output->events.request_state,

@@ -192,9 +192,14 @@ bool woodland_server_init(struct woodland_server *server) {
 
     /* 新输出的收尾广播。必须在 woodland_output_init 之后注册，才会排在
      * handle_new_output 后面执行——那时输出已经进链表、已 commit，
-     * 广播里的 enabled/mode 才是真值。 */
-    woodland_listener_connect(&server->new_output_broadcast, &server->backend->events.new_output,
-                          handle_new_output_broadcast, "server.new_output");
+     * 广播里的 enabled/mode 才是真值。
+     *
+     * verbose 注册（emit 自动计数）：它是 connect_verbose 的活体示例，
+     * 选它是因为启动必发一次——smoke 拿"emits >= 1"断言计账链路是活的；
+     * 同时它自己就是坑 2 的契约现场，跑没跑一眼可查 */
+    woodland_listener_connect_verbose(
+        &server->new_output_broadcast, &server->backend->events.new_output,
+        handle_new_output_broadcast, "server.new_output");
 
     if (!woodland_capture_init(server)) {
         wlr_log(WLR_ERROR, "failed to init capture");
