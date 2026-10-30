@@ -121,46 +121,36 @@ uint32_t woodland_trace_total(void) {
 void woodland_trace_dump(struct woodland_json *out) {
     uint32_t count = woodland_trace_count();
 
-    woodland_json_raw(out, "{\"ok\":true,\"cmd\":\"get_trace\",\"enabled\":");
-    woodland_json_bool(out, trace.enabled);
-    woodland_json_raw(out, ",");
-    woodland_json_key(out, "capacity");
-    woodland_json_int(out, TRACE_CAPACITY);
-    woodland_json_raw(out, ",");
-    woodland_json_key(out, "count");
-    woodland_json_int(out, count);
-    woodland_json_raw(out, ",");
-    woodland_json_key(out, "total");
-    woodland_json_int(out, trace.total);
-    woodland_json_raw(out, ",");
+    struct woodland_json_obj obj;
+    woodland_json_obj_open(&obj, out);
+    woodland_json_obj_bool(&obj, "ok", true);
+    woodland_json_obj_str(&obj, "cmd", "get_trace");
+    woodland_json_obj_bool(&obj, "enabled", trace.enabled);
+    woodland_json_obj_int(&obj, "capacity", TRACE_CAPACITY);
+    woodland_json_obj_int(&obj, "count", count);
+    woodland_json_obj_int(&obj, "total", trace.total);
     /* 被覆盖掉的条数：total 减缓冲里还剩的，就是"你来得太晚"那些 */
-    woodland_json_key(out, "dropped");
-    woodland_json_int(out, trace.total - count);
-    woodland_json_raw(out, ",\"entries\":[");
+    woodland_json_obj_int(&obj, "dropped", trace.total - count);
+
+    woodland_json_obj_key(&obj, "entries");
+    struct woodland_json_arr arr;
+    woodland_json_arr_open(&arr, out);
 
     /* 缓冲里最旧的一条：还没绕圈时是 0，绕圈后就是 next（下一步要覆盖的槽） */
     uint32_t oldest = trace.total < TRACE_CAPACITY ? 0 : trace.next;
     for (uint32_t i = 0; i < count; i++) {
         const struct trace_entry *entry =
             &trace.entries[(oldest + i) % TRACE_CAPACITY];
-        if (i > 0) {
-            woodland_json_raw(out, ",");
-        }
-        woodland_json_raw(out, "{\"seq\":");
-        woodland_json_int(out, entry->seq);
-        woodland_json_raw(out, ",");
-        woodland_json_key(out, "ms");
-        woodland_json_int(out, entry->ms);
-        woodland_json_raw(out, ",");
-        woodland_json_key(out, "obj");
-        woodland_json_int(out, entry->obj);
-        woodland_json_raw(out, ",");
-        woodland_json_key(out, "what");
-        woodland_json_string(out, entry->what);
-        woodland_json_raw(out, ",");
-        woodland_json_key(out, "detail");
-        woodland_json_string(out, entry->detail);
-        woodland_json_raw(out, "}");
+        woodland_json_arr_sep(&arr);
+        struct woodland_json_obj entry_obj;
+        woodland_json_obj_open(&entry_obj, out);
+        woodland_json_obj_int(&entry_obj, "seq", entry->seq);
+        woodland_json_obj_int(&entry_obj, "ms", entry->ms);
+        woodland_json_obj_int(&entry_obj, "obj", entry->obj);
+        woodland_json_obj_str(&entry_obj, "what", entry->what);
+        woodland_json_obj_str(&entry_obj, "detail", entry->detail);
+        woodland_json_obj_close(&entry_obj);
     }
-    woodland_json_raw(out, "]}");
+    woodland_json_arr_close(&arr);
+    woodland_json_obj_close(&obj);
 }

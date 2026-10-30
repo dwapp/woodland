@@ -485,10 +485,9 @@ int woodland_selfcheck_collect(struct woodland_server *server,
 }
 
 /* JSON 字符串里 name/expected/actual 都可能是空串，用 "" 而不是 null */
-static void append_text(struct woodland_json *out, const char *key,
+static void append_text(struct woodland_json_obj *obj, const char *key,
                         const char *value) {
-    woodland_json_key(out, key);
-    woodland_json_string(out, value && value[0] ? value : "-");
+    woodland_json_obj_str(obj, key, value && value[0] ? value : "-");
 }
 
 int woodland_selfcheck_run(struct woodland_server *server,
@@ -502,33 +501,27 @@ int woodland_selfcheck_run(struct woodland_server *server,
         }
     }
 
-    woodland_json_key(out, "ok");
-    woodland_json_bool(out, failures == 0);
-    woodland_json_raw(out, ",");
-    woodland_json_key(out, "failures");
-    woodland_json_int(out, failures);
-    woodland_json_raw(out, ",");
-    woodland_json_key(out, "checks");
-    woodland_json_raw(out, "[");
+    /* first=false：调用方已经手写了 {"cmd":"self_check" 前缀 */
+    struct woodland_json_obj obj = {.json = out, .first = false};
+    woodland_json_obj_bool(&obj, "ok", failures == 0);
+    woodland_json_obj_int(&obj, "failures", failures);
+
+    woodland_json_obj_key(&obj, "checks");
+    struct woodland_json_arr arr;
+    woodland_json_arr_open(&arr, out);
     for (int i = 0; i < n; i++) {
-        if (i > 0) {
-            woodland_json_raw(out, ",");
-        }
-        woodland_json_raw(out, "{");
-        woodland_json_key(out, "name");
-        woodland_json_string(out, checks[i].name);
-        woodland_json_raw(out, ",");
-        woodland_json_key(out, "ok");
-        woodland_json_bool(out, checks[i].ok);
+        woodland_json_arr_sep(&arr);
+        struct woodland_json_obj check;
+        woodland_json_obj_open(&check, out);
+        woodland_json_obj_str(&check, "name", checks[i].name);
+        woodland_json_obj_bool(&check, "ok", checks[i].ok);
         if (!checks[i].ok) {
-            woodland_json_raw(out, ",");
-            append_text(out, "expected", checks[i].expected);
-            woodland_json_raw(out, ",");
-            append_text(out, "actual", checks[i].actual);
+            append_text(&check, "expected", checks[i].expected);
+            append_text(&check, "actual", checks[i].actual);
         }
-        woodland_json_raw(out, "}");
+        woodland_json_obj_close(&check);
     }
-    woodland_json_raw(out, "]");
+    woodland_json_arr_close(&arr);
     return failures;
 }
 
