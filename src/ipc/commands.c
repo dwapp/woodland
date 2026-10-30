@@ -28,6 +28,7 @@
 #include "ssd.h"
 #include "trace.h"
 #include "util/json.h"
+#include "util/listener.h"
 #include "view.h"
 #include "woodland.h"
 #include "workspace.h"
@@ -101,6 +102,14 @@ static const struct ipc_field_doc get_trace_fields[] = {
                          "state-change decision, oldest first"},
 };
 
+static const struct ipc_field_doc get_listeners_fields[] = {
+    {"count", "int", "listeners registered right now"},
+    {"overflow", "int", "non-zero means registrations the table could not "
+                        "record: a leak, not a dump problem"},
+    {"listeners", "obj[]", "seq (registration order — listeners fire in "
+                           "this order), name, emits"},
+};
+
 static const struct ipc_field_doc dump_scene_fields[] = {
     {"tree", "obj", "scene graph: type, enabled, x, y, w, h, "
                     "rgba|opacity+has_buffer, children[], truncated"},
@@ -126,6 +135,9 @@ static const struct ipc_cmd_doc ipc_cmd_docs[] = {
      get_focus_fields_doc, IPC_FIELDS_LEN(get_focus_fields_doc)},
     {"get_trace", "recent state-change decisions (needs --trace)",
      get_trace_fields, IPC_FIELDS_LEN(get_trace_fields)},
+    {"get_listeners", "wl_listener registry: registration order is "
+                      "call order (see AGENTS.md pitfall 2)",
+     get_listeners_fields, IPC_FIELDS_LEN(get_listeners_fields)},
     {"dump_scene", "wlr_scene graph as JSON (for drawn-but-invisible bugs)",
      dump_scene_fields, IPC_FIELDS_LEN(dump_scene_fields)},
     {"self_check", "invariant assertions (alias: self-check)",
@@ -141,7 +153,7 @@ static const struct ipc_cmd_doc ipc_cmd_docs[] = {
  * 把 dispatch、docs、计数三处一起过一遍。dispatch 单边新增依然没有
  * 编译期防护——那条靠评审兜底。
  */
-#define IPC_CMD_COUNT 7
+#define IPC_CMD_COUNT 8
 _Static_assert(sizeof(ipc_cmd_docs) / sizeof(ipc_cmd_docs[0]) == IPC_CMD_COUNT,
                "ipc_cmd_docs changed: update dispatch() and IPC_CMD_COUNT "
                "together (add one, bump the other)");
@@ -612,6 +624,11 @@ static bool dispatch(struct woodland_server *server, const char *line,
         /* 未开 --trace 时也回 200：是一份 enabled=false 的完整响应，
          * 脚本不用为"有没有开"分叉 */
         woodland_trace_dump(out);
+        return true;
+    }
+    if (strcmp(cmd, "get_listeners") == 0) {
+        /* 注册序号即调用顺序：一眼看出漏注册/顺序反了 */
+        woodland_listener_dump(out);
         return true;
     }
     if (strcmp(cmd, "dump_scene") == 0) {

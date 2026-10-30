@@ -7,67 +7,63 @@ test('log', test_log)
 test_output = executable('test_output', 'test_output.c',
   dependencies: [wlroots, wayland_server],
   include_directories: woodland_inc,
-  link_with: output_lib)
+  link_with: [output_lib, util_lib])
 test('output', test_output)
 
 test_cursor = executable('test_cursor', 'test_cursor.c',
   dependencies: [wlroots, wayland_server],
   include_directories: woodland_inc,
-  link_with: cursor_lib)
+  link_with: [cursor_lib, util_lib])
 test('cursor', test_cursor)
 
 test_seat = executable('test_seat', 'test_seat.c',
   dependencies: [wlroots, wayland_server],
   include_directories: woodland_inc,
   # seat.c 现在会调 protocol 层的 idle / 快捷键抑制钩子
-  link_with: [cursor_lib, output_lib, shell_lib, seat_lib, workspace_lib, layer_lib, ssd_lib, protocol_lib])
+  link_with: [cursor_lib, output_lib, shell_lib, seat_lib, workspace_lib, layer_lib, ssd_lib, protocol_lib, util_lib])
 test('seat', test_seat)
 
 test_workspace = executable('test_workspace', 'test_workspace.c',
   dependencies: [wlroots, wayland_server],
   include_directories: woodland_inc,
   # workspace 切换会回调焦点回退（focus.c 在 shell_lib 里）
-  link_with: [output_lib, shell_lib, workspace_lib, ssd_lib, layer_lib, seat_lib, capture_lib])
+  link_with: [output_lib, shell_lib, workspace_lib, ssd_lib, layer_lib, seat_lib, capture_lib, util_lib])
 test('workspace', test_workspace)
 
 test_view = executable('test_view', 'test_view.c',
   dependencies: [wlroots, wayland_server],
   include_directories: woodland_inc,
-  link_with: [output_lib, shell_lib, layer_lib, ssd_lib, workspace_lib,
-              capture_lib])
+  link_with: [output_lib, shell_lib, layer_lib, ssd_lib, workspace_lib, capture_lib, util_lib])
 test('view', test_view)
 
 test_layer = executable('test_layer', 'test_layer.c',
   dependencies: [wlroots, wayland_server],
   include_directories: woodland_inc,
-  link_with: [output_lib, layer_lib, shell_lib, seat_lib, workspace_lib, ssd_lib])
+  link_with: [output_lib, layer_lib, shell_lib, seat_lib, workspace_lib, ssd_lib, util_lib])
 test('layer', test_layer)
 
 test_ssd = executable('test_ssd', 'test_ssd.c',
   dependencies: [wlroots, wayland_server],
   include_directories: woodland_inc,
-  link_with: [ssd_lib, shell_lib, output_lib, layer_lib, workspace_lib,
-              capture_lib])
+  link_with: [ssd_lib, shell_lib, output_lib, layer_lib, workspace_lib, capture_lib, util_lib])
 test('ssd', test_ssd)
 
 test_placement = executable('test_placement', 'test_placement.c',
   dependencies: [wlroots, wayland_server],
   include_directories: woodland_inc,
-  link_with: [output_lib, shell_lib, ssd_lib, workspace_lib, layer_lib,
-              capture_lib])
+  link_with: [output_lib, shell_lib, ssd_lib, workspace_lib, layer_lib, capture_lib, util_lib])
 test('placement', test_placement)
 
 test_focus = executable('test_focus', 'test_focus.c',
   dependencies: [wlroots, wayland_server],
   include_directories: woodland_inc,
-  link_with: [output_lib, shell_lib, ssd_lib, workspace_lib, layer_lib,
-              capture_lib])
+  link_with: [output_lib, shell_lib, ssd_lib, workspace_lib, layer_lib, capture_lib, util_lib])
 test('focus', test_focus)
 
 test_capture = executable('test_capture', 'test_capture.c',
   dependencies: [wlroots, wayland_server],
   include_directories: woodland_inc,
-  link_with: [capture_lib])
+  link_with: [capture_lib, util_lib])
 test('capture', test_capture)
 
 test_json = executable('test_json', 'test_json.c',
@@ -91,3 +87,10 @@ test_trace = executable('test_trace', 'test_trace.c',
   include_directories: woodland_inc,
   link_with: [trace_lib, util_lib])
 test('trace', test_trace)
+
+# listener 同样是 util 叶子模块
+test_listener = executable('test_listener', 'test_listener.c',
+  dependencies: [wlroots, wayland_server],
+  include_directories: woodland_inc,
+  link_with: util_lib)
+test('listener', test_listener)

@@ -105,7 +105,11 @@ ASLR 就正常了。**别把这种 DEADLYSIGNAL 当成自己的 bug 去修**，�
 focus）各挂一个回调。协议层先注册就会用**旧焦点**发相对位移：跨 surface 的第一帧
 delta 被丢弃或发给刚离开的客户端。所以 `woodland_cursor_init_events()` 必须早于
 `woodland_protocol_init()`（见 `src/server/server.c`）。同理，新输出的补广播监听器
-必须注册在 `handle_new_output` 之后。
+必须注册在 `handle_new_output` 之后。注册顺序现在可以从运行时查证：
+`wctl get_listeners` 按 seq 列出全部监听器（seq 即调用顺序），smoke-ipc 断言了
+`cursor.motion` 早于 `input.motion`。**新注册一律用 `woodland_listener_connect()`
+（`util/listener.h`），不要再手写 `notify` 赋值 + `wl_signal_add`**——名字和注册
+序号进账本，漏注册/顺序反了一眼看出。
 
 **3. `output-management` 的 test 请求不许有副作用。**
 协议要求 test 只验证、不应用；布局变更（`wlr_output_layout_add/remove`）必须在

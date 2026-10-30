@@ -11,6 +11,7 @@
  * 时序（与 labwc 一致）：new_surface → map_request（拿得到尺寸，可放置并
  * configure）→ associate（wlr_surface 可用，挂 surface 事件）→ map（真正上屏）。
  */
+#include "util/listener.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -57,10 +58,10 @@ static void unmanaged_attach_surface(struct woodland_unmanaged *unmanaged,
     }
     unmanaged->scene_surface = wlr_scene_surface_create(unmanaged->scene_tree,
                                                         surface);
-    unmanaged->map.notify = unmanaged_map;
-    wl_signal_add(&surface->events.map, &unmanaged->map);
-    unmanaged->unmap.notify = unmanaged_unmap;
-    wl_signal_add(&surface->events.unmap, &unmanaged->unmap);
+    woodland_listener_connect(&unmanaged->map, &surface->events.map,
+                          unmanaged_map, "xwayland.map");
+    woodland_listener_connect(&unmanaged->unmap, &surface->events.unmap,
+                          unmanaged_unmap, "xwayland.unmap");
     unmanaged_set_geometry(unmanaged);
 }
 
@@ -136,14 +137,14 @@ static void xwl_new_unmanaged(struct woodland_server *server,
     unmanaged->scene_tree =
         wlr_scene_tree_create(server->xwayland_unmanaged_tree);
 
-    unmanaged->associate.notify = unmanaged_associate;
-    wl_signal_add(&xsurface->events.associate, &unmanaged->associate);
-    unmanaged->dissociate.notify = unmanaged_dissociate;
-    wl_signal_add(&xsurface->events.dissociate, &unmanaged->dissociate);
-    unmanaged->destroy.notify = unmanaged_destroy;
-    wl_signal_add(&xsurface->events.destroy, &unmanaged->destroy);
-    unmanaged->set_geometry.notify = unmanaged_set_geometry_event;
-    wl_signal_add(&xsurface->events.set_geometry, &unmanaged->set_geometry);
+    woodland_listener_connect(&unmanaged->associate, &xsurface->events.associate,
+                          unmanaged_associate, "xwayland.associate");
+    woodland_listener_connect(&unmanaged->dissociate, &xsurface->events.dissociate,
+                          unmanaged_dissociate, "xwayland.dissociate");
+    woodland_listener_connect(&unmanaged->destroy, &xsurface->events.destroy,
+                          unmanaged_destroy, "xwayland.destroy");
+    woodland_listener_connect(&unmanaged->set_geometry, &xsurface->events.set_geometry,
+                          unmanaged_set_geometry_event, "xwayland.set_geometry");
 
     wl_list_insert(&server->xwayland_unmanaged, &unmanaged->link);
 
@@ -203,12 +204,12 @@ static void xwl_associate(struct wl_listener *listener, void *data) {
     view->scene_surface = wlr_scene_surface_create(view->scene_tree,
                                                    xsurface->surface);
 
-    view->map.notify = xwl_map;
-    wl_signal_add(&xsurface->surface->events.map, &view->map);
-    view->unmap.notify = xwl_unmap;
-    wl_signal_add(&xsurface->surface->events.unmap, &view->unmap);
-    view->commit.notify = xwl_commit;
-    wl_signal_add(&xsurface->surface->events.commit, &view->commit);
+    woodland_listener_connect(&view->map, &xsurface->surface->events.map,
+                          xwl_map, "xwayland.map");
+    woodland_listener_connect(&view->unmap, &xsurface->surface->events.unmap,
+                          xwl_unmap, "xwayland.unmap");
+    woodland_listener_connect(&view->commit, &xsurface->surface->events.commit,
+                          xwl_commit, "xwayland.commit");
 
     /* 属性在 map_request 之后才读完，这里定下装饰策略：
      * _MOTIF_WM_HINTS 请求无边框的窗口不画 SSD（同 labwc want_deco） */
@@ -382,41 +383,39 @@ static void xwl_new_surface(struct wl_listener *listener, void *data) {
     view->scene_tree->node.data = view;
     xsurface->data = view;
 
-    view->associate.notify = xwl_associate;
-    wl_signal_add(&xsurface->events.associate, &view->associate);
-    view->dissociate.notify = xwl_dissociate;
-    wl_signal_add(&xsurface->events.dissociate, &view->dissociate);
-    view->destroy.notify = xwl_destroy;
-    wl_signal_add(&xsurface->events.destroy, &view->destroy);
+    woodland_listener_connect(&view->associate, &xsurface->events.associate,
+                          xwl_associate, "xwayland.associate");
+    woodland_listener_connect(&view->dissociate, &xsurface->events.dissociate,
+                          xwl_dissociate, "xwayland.dissociate");
+    woodland_listener_connect(&view->destroy, &xsurface->events.destroy,
+                          xwl_destroy, "xwayland.destroy");
 
-    view->map_request.notify = xwl_map_request;
-    wl_signal_add(&xsurface->events.map_request, &view->map_request);
-    view->request_configure.notify = xwl_request_configure;
-    wl_signal_add(&xsurface->events.request_configure,
-                  &view->request_configure);
-    view->request_move.notify = xwl_request_move;
-    wl_signal_add(&xsurface->events.request_move, &view->request_move);
-    view->request_resize.notify = xwl_request_resize;
-    wl_signal_add(&xsurface->events.request_resize, &view->request_resize);
-    view->request_maximize.notify = xwl_request_maximize;
-    wl_signal_add(&xsurface->events.request_maximize, &view->request_maximize);
-    view->request_fullscreen.notify = xwl_request_fullscreen;
-    wl_signal_add(&xsurface->events.request_fullscreen,
-                  &view->request_fullscreen);
-    view->request_minimize.notify = xwl_request_minimize;
-    wl_signal_add(&xsurface->events.request_minimize, &view->request_minimize);
-    view->request_activate.notify = xwl_request_activate;
-    wl_signal_add(&xsurface->events.request_activate, &view->request_activate);
-    view->request_close.notify = xwl_request_close;
-    wl_signal_add(&xsurface->events.request_close, &view->request_close);
-    view->set_title.notify = xwl_set_title;
-    wl_signal_add(&xsurface->events.set_title, &view->set_title);
-    view->set_class.notify = xwl_set_class;
-    wl_signal_add(&xsurface->events.set_class, &view->set_class);
-    view->set_parent.notify = xwl_set_parent;
-    wl_signal_add(&xsurface->events.set_parent, &view->set_parent);
-    view->set_geometry.notify = xwl_set_geometry;
-    wl_signal_add(&xsurface->events.set_geometry, &view->set_geometry);
+    woodland_listener_connect(&view->map_request, &xsurface->events.map_request,
+                          xwl_map_request, "xwayland.map_request");
+    woodland_listener_connect(&view->request_configure, &xsurface->events.request_configure,
+                          xwl_request_configure, "xwayland.request_configure");
+    woodland_listener_connect(&view->request_move, &xsurface->events.request_move,
+                          xwl_request_move, "xwayland.request_move");
+    woodland_listener_connect(&view->request_resize, &xsurface->events.request_resize,
+                          xwl_request_resize, "xwayland.request_resize");
+    woodland_listener_connect(&view->request_maximize, &xsurface->events.request_maximize,
+                          xwl_request_maximize, "xwayland.request_maximize");
+    woodland_listener_connect(&view->request_fullscreen, &xsurface->events.request_fullscreen,
+                          xwl_request_fullscreen, "xwayland.request_fullscreen");
+    woodland_listener_connect(&view->request_minimize, &xsurface->events.request_minimize,
+                          xwl_request_minimize, "xwayland.request_minimize");
+    woodland_listener_connect(&view->request_activate, &xsurface->events.request_activate,
+                          xwl_request_activate, "xwayland.request_activate");
+    woodland_listener_connect(&view->request_close, &xsurface->events.request_close,
+                          xwl_request_close, "xwayland.request_close");
+    woodland_listener_connect(&view->set_title, &xsurface->events.set_title,
+                          xwl_set_title, "xwayland.set_title");
+    woodland_listener_connect(&view->set_class, &xsurface->events.set_class,
+                          xwl_set_class, "xwayland.set_class");
+    woodland_listener_connect(&view->set_parent, &xsurface->events.set_parent,
+                          xwl_set_parent, "xwayland.set_parent");
+    woodland_listener_connect(&view->set_geometry, &xsurface->events.set_geometry,
+                          xwl_set_geometry, "xwayland.set_geometry");
 
     woodland_view_init_handles(view);
     woodland_view_set_title(view, xsurface->title);
@@ -450,12 +449,11 @@ bool woodland_xwayland_init(struct woodland_server *server) {
     server->xwayland_unmanaged_tree =
         wlr_scene_tree_create(&server->scene->tree);
 
-    server->new_xwayland_surface.notify = xwl_new_surface;
-    wl_signal_add(&server->xwayland->events.new_surface,
-                  &server->new_xwayland_surface);
+    woodland_listener_connect(&server->new_xwayland_surface, &server->xwayland->events.new_surface,
+                          xwl_new_surface, "xwayland.new_surface");
 
-    server->xwayland_ready.notify = xwl_ready;
-    wl_signal_add(&server->xwayland->events.ready, &server->xwayland_ready);
+    woodland_listener_connect(&server->xwayland_ready, &server->xwayland->events.ready,
+                          xwl_ready, "xwayland.ready");
 
     wlr_log(WLR_INFO, "xwayland initialised, DISPLAY=%s",
             server->xwayland->display_name);

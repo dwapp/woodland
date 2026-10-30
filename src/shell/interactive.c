@@ -11,6 +11,7 @@
  * 吸附的**判定**在 placement.c（纯几何、可单测），这里只负责"拖动过程中
  * 累积候选边"和"松手后执行"，所以两处不会各算一套。
  */
+#include "util/listener.h"
 #include <stdlib.h>
 
 #include <wlr/types/wlr_foreign_toplevel_management_v1.h>
@@ -325,9 +326,8 @@ void woodland_cursor_reset_mode(struct woodland_server *server) {
 }
 
 void shell_interactive_attach(struct woodland_view *view) {
-    view->request_move.notify = xdg_toplevel_request_move;
-    wl_signal_add(&view->xdg_toplevel->events.request_move, &view->request_move);
-    view->request_resize.notify = xdg_toplevel_request_resize;
-    wl_signal_add(&view->xdg_toplevel->events.request_resize,
-                  &view->request_resize);
+    woodland_listener_connect(&view->request_move, &view->xdg_toplevel->events.request_move,
+                          xdg_toplevel_request_move, "interactive.request_move");
+    woodland_listener_connect(&view->request_resize, &view->xdg_toplevel->events.request_resize,
+                          xdg_toplevel_request_resize, "interactive.request_resize");
 }

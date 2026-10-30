@@ -11,6 +11,7 @@
  * 手势的监听器按设备分配，设备销毁时跟着释放；finish 时兜底清理剩下的，
  * 否则 backend 销毁时的回调会打到已释放的 server 上。
  */
+#include "util/listener.h"
 #include <stdlib.h>
 
 #include <wlr/types/wlr_cursor.h>
@@ -244,26 +245,25 @@ void woodland_proto_input_attach_device(struct woodland_proto *proto,
     }
     gp->input = input;
 
-    gp->swipe_begin.notify = gesture_swipe_begin;
-    gp->swipe_update.notify = gesture_swipe_update;
-    gp->swipe_end.notify = gesture_swipe_end;
-    gp->pinch_begin.notify = gesture_pinch_begin;
-    gp->pinch_update.notify = gesture_pinch_update;
-    gp->pinch_end.notify = gesture_pinch_end;
-    gp->hold_begin.notify = gesture_hold_begin;
-    gp->hold_end.notify = gesture_hold_end;
+    woodland_listener_connect(&gp->swipe_begin, &pointer->events.swipe_begin,
+                              gesture_swipe_begin, "input.swipe_begin");
+    woodland_listener_connect(&gp->swipe_update, &pointer->events.swipe_update,
+                              gesture_swipe_update, "input.swipe_update");
+    woodland_listener_connect(&gp->swipe_end, &pointer->events.swipe_end,
+                              gesture_swipe_end, "input.swipe_end");
+    woodland_listener_connect(&gp->pinch_begin, &pointer->events.pinch_begin,
+                              gesture_pinch_begin, "input.pinch_begin");
+    woodland_listener_connect(&gp->pinch_update, &pointer->events.pinch_update,
+                              gesture_pinch_update, "input.pinch_update");
+    woodland_listener_connect(&gp->pinch_end, &pointer->events.pinch_end,
+                              gesture_pinch_end, "input.pinch_end");
+    woodland_listener_connect(&gp->hold_begin, &pointer->events.hold_begin,
+                              gesture_hold_begin, "input.hold_begin");
+    woodland_listener_connect(&gp->hold_end, &pointer->events.hold_end,
+                              gesture_hold_end, "input.hold_end");
 
-    wl_signal_add(&pointer->events.swipe_begin, &gp->swipe_begin);
-    wl_signal_add(&pointer->events.swipe_update, &gp->swipe_update);
-    wl_signal_add(&pointer->events.swipe_end, &gp->swipe_end);
-    wl_signal_add(&pointer->events.pinch_begin, &gp->pinch_begin);
-    wl_signal_add(&pointer->events.pinch_update, &gp->pinch_update);
-    wl_signal_add(&pointer->events.pinch_end, &gp->pinch_end);
-    wl_signal_add(&pointer->events.hold_begin, &gp->hold_begin);
-    wl_signal_add(&pointer->events.hold_end, &gp->hold_end);
-
-    gp->destroy.notify = gesture_handle_destroy;
-    wl_signal_add(&device->events.destroy, &gp->destroy);
+    woodland_listener_connect(&gp->destroy, &device->events.destroy,
+                          gesture_handle_destroy, "input.destroy");
 
     wl_list_insert(&input->pointers, &gp->link);
 }
@@ -314,19 +314,17 @@ bool woodland_proto_input_init(struct woodland_proto *proto) {
         wlr_log(WLR_ERROR, "failed to create primary-selection");
         return false;
     }
-    input->request_set_selection.notify = input_handle_request_selection;
-    wl_signal_add(&server->seat->events.request_set_primary_selection,
-                  &input->request_set_selection);
+    woodland_listener_connect(&input->request_set_selection, &server->seat->events.request_set_primary_selection,
+                          input_handle_request_selection, "input.request_set_primary_selection");
 
-    input->cursor_motion.notify = input_handle_cursor_motion;
-    wl_signal_add(&server->cursor->events.motion, &input->cursor_motion);
-    input->cursor_motion_absolute.notify = input_handle_cursor_motion_absolute;
-    wl_signal_add(&server->cursor->events.motion_absolute,
-                  &input->cursor_motion_absolute);
-    input->cursor_button.notify = input_handle_cursor_button;
-    wl_signal_add(&server->cursor->events.button, &input->cursor_button);
-    input->cursor_axis.notify = input_handle_cursor_axis;
-    wl_signal_add(&server->cursor->events.axis, &input->cursor_axis);
+    woodland_listener_connect(&input->cursor_motion, &server->cursor->events.motion,
+                          input_handle_cursor_motion, "input.motion");
+    woodland_listener_connect(&input->cursor_motion_absolute, &server->cursor->events.motion_absolute,
+                          input_handle_cursor_motion_absolute, "input.motion_absolute");
+    woodland_listener_connect(&input->cursor_button, &server->cursor->events.button,
+                          input_handle_cursor_button, "input.button");
+    woodland_listener_connect(&input->cursor_axis, &server->cursor->events.axis,
+                          input_handle_cursor_axis, "input.axis");
 
     return true;
 }

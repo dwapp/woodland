@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
+#include "util/listener.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -93,9 +94,8 @@ bool woodland_workspace_init(struct woodland_server *server) {
     first = wl_container_of(server->workspaces.next, first, link);
     server->active_workspace = first;
 
-    server->ext_workspace_commit.notify = handle_ext_workspace_commit;
-    wl_signal_add(&server->ext_workspace_manager->events.commit,
-                  &server->ext_workspace_commit);
+    woodland_listener_connect(&server->ext_workspace_commit, &server->ext_workspace_manager->events.commit,
+                          handle_ext_workspace_commit, "workspace.commit");
 
     return true;
 }

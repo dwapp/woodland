@@ -9,6 +9,7 @@
  * 位置不在 wlr_output_state 里，得单独写回布局——这是本文件最容易踩
  * 的一处，详见 output_apply_config()。
  */
+#include "util/listener.h"
 #include <stdlib.h>
 
 #include <wlr/backend.h>
@@ -286,8 +287,8 @@ bool woodland_proto_output_init(struct woodland_proto *proto) {
         wlr_log(WLR_ERROR, "failed to create output-power-management");
         return false;
     }
-    output->power_set_mode.notify = output_handle_power_set_mode;
-    wl_signal_add(&output->power->events.set_mode, &output->power_set_mode);
+    woodland_listener_connect(&output->power_set_mode, &output->power->events.set_mode,
+                          output_handle_power_set_mode, "output.set_mode");
 
     /* 输出配置：wdisplays / kanshi 这类工具靠它读写显示器设置 */
     output->manager = wlr_output_manager_v1_create(server->display);
@@ -295,14 +296,14 @@ bool woodland_proto_output_init(struct woodland_proto *proto) {
         wlr_log(WLR_ERROR, "failed to create output-management");
         return false;
     }
-    output->apply.notify = output_handle_apply;
-    wl_signal_add(&output->manager->events.apply, &output->apply);
-    output->test.notify = output_handle_test;
-    wl_signal_add(&output->manager->events.test, &output->test);
-    output->layout_change.notify = output_handle_layout_change;
-    wl_signal_add(&server->output_layout->events.change, &output->layout_change);
-    output->output_removed.notify = output_handle_output_removed;
-    wl_signal_add(&server->output_removed, &output->output_removed);
+    woodland_listener_connect(&output->apply, &output->manager->events.apply,
+                          output_handle_apply, "output.apply");
+    woodland_listener_connect(&output->test, &output->manager->events.test,
+                          output_handle_test, "output.test");
+    woodland_listener_connect(&output->layout_change, &server->output_layout->events.change,
+                          output_handle_layout_change, "output.change");
+    woodland_listener_connect(&output->output_removed, &server->output_removed,
+                          output_handle_output_removed, "output.output_removed");
 
     return true;
 }

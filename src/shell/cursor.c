@@ -8,6 +8,7 @@
  * 窗口几何。SSD 按钮的 hover/pressed 是纯指针状态，跟着这里走，因为它
  * 唯一的更新时机就是 motion 与 button。
  */
+#include "util/listener.h"
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_scene.h>
 #include <wlr/types/wlr_seat.h>
@@ -268,17 +269,16 @@ static void server_cursor_frame(struct wl_listener *listener, void *data) {
 }
 
 void woodland_cursor_init_events(struct woodland_server *server) {
-    server->cursor_motion.notify = server_cursor_motion;
-    wl_signal_add(&server->cursor->events.motion, &server->cursor_motion);
-    server->cursor_motion_absolute.notify = server_cursor_motion_absolute;
-    wl_signal_add(&server->cursor->events.motion_absolute,
-        &server->cursor_motion_absolute);
-    server->cursor_button.notify = server_cursor_button;
-    wl_signal_add(&server->cursor->events.button, &server->cursor_button);
-    server->cursor_axis.notify = server_cursor_axis;
-    wl_signal_add(&server->cursor->events.axis, &server->cursor_axis);
-    server->cursor_frame.notify = server_cursor_frame;
-    wl_signal_add(&server->cursor->events.frame, &server->cursor_frame);
+    woodland_listener_connect(&server->cursor_motion, &server->cursor->events.motion,
+                          server_cursor_motion, "cursor.motion");
+    woodland_listener_connect(&server->cursor_motion_absolute, &server->cursor->events.motion_absolute,
+                          server_cursor_motion_absolute, "cursor.motion_absolute");
+    woodland_listener_connect(&server->cursor_button, &server->cursor->events.button,
+                          server_cursor_button, "cursor.button");
+    woodland_listener_connect(&server->cursor_axis, &server->cursor->events.axis,
+                          server_cursor_axis, "cursor.axis");
+    woodland_listener_connect(&server->cursor_frame, &server->cursor->events.frame,
+                          server_cursor_frame, "cursor.frame");
 }
 
 void woodland_cursor_finish_events(struct woodland_server *server) {

@@ -11,6 +11,7 @@
  *
  * 几何只从 placement.c 取（最大化框、全屏框），这里负责落位与状态广播。
  */
+#include "util/listener.h"
 #include <stdlib.h>
 
 #include <wlr/types/wlr_ext_foreign_toplevel_list_v1.h>
@@ -356,21 +357,16 @@ void woodland_view_init_handles(struct woodland_view *view) {
             server->foreign_toplevel_manager);
         if (view->toplevel_handle) {
             view->toplevel_handle->data = view;
-            view->ft_request_activate.notify = ft_request_activate;
-            wl_signal_add(&view->toplevel_handle->events.request_activate,
-                          &view->ft_request_activate);
-            view->ft_request_maximize.notify = ft_request_maximize;
-            wl_signal_add(&view->toplevel_handle->events.request_maximize,
-                          &view->ft_request_maximize);
-            view->ft_request_fullscreen.notify = ft_request_fullscreen;
-            wl_signal_add(&view->toplevel_handle->events.request_fullscreen,
-                          &view->ft_request_fullscreen);
-            view->ft_request_minimize.notify = ft_request_minimize;
-            wl_signal_add(&view->toplevel_handle->events.request_minimize,
-                          &view->ft_request_minimize);
-            view->ft_request_close.notify = ft_request_close;
-            wl_signal_add(&view->toplevel_handle->events.request_close,
-                          &view->ft_request_close);
+            woodland_listener_connect(&view->ft_request_activate, &view->toplevel_handle->events.request_activate,
+                          ft_request_activate, "toplevel_state.request_activate");
+            woodland_listener_connect(&view->ft_request_maximize, &view->toplevel_handle->events.request_maximize,
+                          ft_request_maximize, "toplevel_state.request_maximize");
+            woodland_listener_connect(&view->ft_request_fullscreen, &view->toplevel_handle->events.request_fullscreen,
+                          ft_request_fullscreen, "toplevel_state.request_fullscreen");
+            woodland_listener_connect(&view->ft_request_minimize, &view->toplevel_handle->events.request_minimize,
+                          ft_request_minimize, "toplevel_state.request_minimize");
+            woodland_listener_connect(&view->ft_request_close, &view->toplevel_handle->events.request_close,
+                          ft_request_close, "toplevel_state.request_close");
         }
     }
 
@@ -385,9 +381,8 @@ void woodland_view_init_handles(struct woodland_view *view) {
             server->ext_toplevel_list, &state);
         if (view->ext_toplevel_handle) {
             view->ext_toplevel_handle->data = view;
-            view->ext_handle_destroy.notify = ext_toplevel_handle_destroy;
-            wl_signal_add(&view->ext_toplevel_handle->events.destroy,
-                          &view->ext_handle_destroy);
+            woodland_listener_connect(&view->ext_handle_destroy, &view->ext_toplevel_handle->events.destroy,
+                          ext_toplevel_handle_destroy, "toplevel_state.destroy");
         }
     }
 }
@@ -395,19 +390,16 @@ void woodland_view_init_handles(struct woodland_view *view) {
 /* ==================== 监听器注册 ==================== */
 
 void shell_toplevel_state_attach(struct woodland_view *view) {
-    view->request_maximize.notify = xdg_toplevel_request_maximize;
-    wl_signal_add(&view->xdg_toplevel->events.request_maximize,
-                  &view->request_maximize);
-    view->request_fullscreen.notify = xdg_toplevel_request_fullscreen;
-    wl_signal_add(&view->xdg_toplevel->events.request_fullscreen,
-                  &view->request_fullscreen);
-    view->request_minimize.notify = xdg_toplevel_request_minimize;
-    wl_signal_add(&view->xdg_toplevel->events.request_minimize,
-                  &view->request_minimize);
-    view->set_title.notify = xdg_toplevel_set_title;
-    wl_signal_add(&view->xdg_toplevel->events.set_title, &view->set_title);
-    view->set_app_id.notify = xdg_toplevel_set_app_id;
-    wl_signal_add(&view->xdg_toplevel->events.set_app_id, &view->set_app_id);
-    view->set_parent.notify = xdg_toplevel_set_parent;
-    wl_signal_add(&view->xdg_toplevel->events.set_parent, &view->set_parent);
+    woodland_listener_connect(&view->request_maximize, &view->xdg_toplevel->events.request_maximize,
+                          xdg_toplevel_request_maximize, "toplevel_state.request_maximize");
+    woodland_listener_connect(&view->request_fullscreen, &view->xdg_toplevel->events.request_fullscreen,
+                          xdg_toplevel_request_fullscreen, "toplevel_state.request_fullscreen");
+    woodland_listener_connect(&view->request_minimize, &view->xdg_toplevel->events.request_minimize,
+                          xdg_toplevel_request_minimize, "toplevel_state.request_minimize");
+    woodland_listener_connect(&view->set_title, &view->xdg_toplevel->events.set_title,
+                          xdg_toplevel_set_title, "toplevel_state.set_title");
+    woodland_listener_connect(&view->set_app_id, &view->xdg_toplevel->events.set_app_id,
+                          xdg_toplevel_set_app_id, "toplevel_state.set_app_id");
+    woodland_listener_connect(&view->set_parent, &view->xdg_toplevel->events.set_parent,
+                          xdg_toplevel_set_parent, "toplevel_state.set_parent");
 }

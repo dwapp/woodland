@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
+#include "util/listener.h"
 #include <stdlib.h>
 
 #include <wlr/types/wlr_layer_shell_v1.h>
@@ -246,10 +247,10 @@ static void handle_new_popup(struct wl_listener *listener, void *data) {
         return;
     }
 
-    popup->commit.notify = handle_popup_commit;
-    wl_signal_add(&xdg_popup->base->surface->events.commit, &popup->commit);
-    popup->destroy.notify = handle_popup_destroy;
-    wl_signal_add(&xdg_popup->events.destroy, &popup->destroy);
+    woodland_listener_connect(&popup->commit, &xdg_popup->base->surface->events.commit,
+                          handle_popup_commit, "layer.commit");
+    woodland_listener_connect(&popup->destroy, &xdg_popup->events.destroy,
+                          handle_popup_destroy, "layer.destroy");
 }
 
 /* ==================== new_surface ==================== */
@@ -295,19 +296,18 @@ static void handle_new_layer_surface(struct wl_listener *listener, void *data) {
     /* node data 存 layer surface，供 arrange_one_layer 反查 */
     layer->scene_layer_surface->tree->node.data = layer;
 
-    layer->surface_commit.notify = handle_surface_commit;
-    wl_signal_add(&layer_surface->surface->events.commit, &layer->surface_commit);
-    layer->map.notify = handle_map;
-    wl_signal_add(&layer_surface->surface->events.map, &layer->map);
-    layer->unmap.notify = handle_unmap;
-    wl_signal_add(&layer_surface->surface->events.unmap, &layer->unmap);
-    layer->new_popup.notify = handle_new_popup;
-    wl_signal_add(&layer_surface->events.new_popup, &layer->new_popup);
-    layer->output_destroy.notify = handle_output_destroy;
-    wl_signal_add(&layer_surface->output->events.destroy, &layer->output_destroy);
-    layer->node_destroy.notify = handle_node_destroy;
-    wl_signal_add(&layer->scene_layer_surface->tree->node.events.destroy,
-                  &layer->node_destroy);
+    woodland_listener_connect(&layer->surface_commit, &layer_surface->surface->events.commit,
+                          handle_surface_commit, "layer.commit");
+    woodland_listener_connect(&layer->map, &layer_surface->surface->events.map,
+                          handle_map, "layer.map");
+    woodland_listener_connect(&layer->unmap, &layer_surface->surface->events.unmap,
+                          handle_unmap, "layer.unmap");
+    woodland_listener_connect(&layer->new_popup, &layer_surface->events.new_popup,
+                          handle_new_popup, "layer.new_popup");
+    woodland_listener_connect(&layer->output_destroy, &layer_surface->output->events.destroy,
+                          handle_output_destroy, "layer.destroy");
+    woodland_listener_connect(&layer->node_destroy, &layer->scene_layer_surface->tree->node.events.destroy,
+                          handle_node_destroy, "layer.destroy");
 }
 
 /* ==================== init/finish ==================== */
@@ -320,9 +320,8 @@ bool woodland_layer_init(struct woodland_server *server) {
         return false;
     }
 
-    server->new_layer_surface.notify = handle_new_layer_surface;
-    wl_signal_add(&server->layer_shell->events.new_surface,
-                  &server->new_layer_surface);
+    woodland_listener_connect(&server->new_layer_surface, &server->layer_shell->events.new_surface,
+                          handle_new_layer_surface, "layer.new_surface");
     return true;
 }
 

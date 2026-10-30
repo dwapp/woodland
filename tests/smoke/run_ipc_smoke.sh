@@ -144,6 +144,25 @@ echo "$TRACE" | jq -e '[.entries[] | select(.what=="place")][0].detail | startsw
 echo "$TRACE" | jq -e '[.entries[] | select(.what=="focus")][0].obj == 1' >/dev/null \
     || smoke_fail "focus event should carry the view id"
 
+echo "== get_listeners =="
+# 监听器账本：注册顺序就是调用顺序（AGENTS.md 坑 2）。这里断言的正是
+# 那个坑的现场：cursor.motion 必须排在 input.cursor_motion 前面——
+# 反过来的话协议层会用旧焦点发相对位移。以前这条契约只活在注释里。
+LST="$("$WCTL" -s "$SOCK" get_listeners)" || smoke_fail "get_listeners exited non-zero"
+echo "$LST" | jq -e '.ok and .overflow == 0 and .count > 0' >/dev/null \
+    || smoke_fail "listener ledger should be non-empty with no overflow: $LST"
+echo "$LST" | jq -e '[.listeners[].seq] == ([.listeners[].seq] | sort)' >/dev/null \
+    || smoke_fail "listener dump must be sorted by registration seq"
+echo "$LST" | jq -e '
+    ([.listeners[] | select(.name=="cursor.motion")][0].seq) as $c
+  | ([.listeners[] | select(.name=="input.motion")][0].seq) as $i
+  | $c < $i' >/dev/null \
+    || smoke_fail "cursor.motion must be registered before input.motion (stale-focus pitfall)"
+# emit 计数在跑：事件循环里 frame 之类一直在触发（没插 WL_COUNT 的为 0 也正常，
+# 这里只断言账本里存在带名字的条目）
+echo "$LST" | jq -e '[.listeners[] | .name | length > 0] | all' >/dev/null \
+    || smoke_fail "every listener entry needs a name"
+
 echo "== help =="
 # help 是自描述的：字段名+类型都在响应里，调用方不用读 commands.c。
 # 断言形状而不是内容细节：每个命令都要有 desc，每个字段都要有 type。

@@ -9,6 +9,7 @@
  * 这里不实现协议：抑制器对象归 wlroots 持有，本文件只跟踪它们的生命
  * 周期，并把状态翻译成合成器行为。
  */
+#include "util/listener.h"
 #include <stdlib.h>
 
 #include <wlr/types/wlr_idle_inhibit_v1.h>
@@ -95,8 +96,8 @@ static void idle_handle_new_inhibitor(struct wl_listener *listener,
         return;
     }
     inhibitor->idle = idle;
-    inhibitor->destroy.notify = idle_inhibitor_handle_destroy;
-    wl_signal_add(&wlr_inhibitor->events.destroy, &inhibitor->destroy);
+    woodland_listener_connect(&inhibitor->destroy, &wlr_inhibitor->events.destroy,
+                          idle_inhibitor_handle_destroy, "idle.destroy");
     wl_list_insert(&idle->inhibitors, &inhibitor->link);
     idle_refresh(idle);
 }
@@ -191,19 +192,18 @@ bool woodland_proto_idle_init(struct woodland_proto *proto) {
         wlr_log(WLR_ERROR, "failed to create idle protocols");
         return false;
     }
-    idle->new_inhibitor.notify = idle_handle_new_inhibitor;
-    wl_signal_add(&idle->inhibit->events.new_inhibitor, &idle->new_inhibitor);
+    woodland_listener_connect(&idle->new_inhibitor, &idle->inhibit->events.new_inhibitor,
+                          idle_handle_new_inhibitor, "idle.new_inhibitor");
 
     idle->shortcuts = wlr_keyboard_shortcuts_inhibit_v1_create(server->display);
     if (!idle->shortcuts) {
         wlr_log(WLR_ERROR, "failed to create keyboard-shortcuts-inhibit");
         return false;
     }
-    idle->new_shortcut.notify = shortcuts_handle_new_inhibitor;
-    wl_signal_add(&idle->shortcuts->events.new_inhibitor, &idle->new_shortcut);
-    idle->focus_change.notify = shortcuts_handle_focus_change;
-    wl_signal_add(&server->seat->keyboard_state.events.focus_change,
-                  &idle->focus_change);
+    woodland_listener_connect(&idle->new_shortcut, &idle->shortcuts->events.new_inhibitor,
+                          shortcuts_handle_new_inhibitor, "idle.new_inhibitor");
+    woodland_listener_connect(&idle->focus_change, &server->seat->keyboard_state.events.focus_change,
+                          shortcuts_handle_focus_change, "idle.focus_change");
 
     return true;
 }

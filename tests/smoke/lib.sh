@@ -91,7 +91,8 @@ smoke_dump() {
     # 状态快照：只读命令，对已经"半坏"的合成器也安全（失败就留个 .err）
     if [ -n "${WCTL:-}" ] && [ -x "${WCTL:-}" ] && [ -n "${SOCK:-}" ] \
             && [ -S "$SOCK" ]; then
-        for _cmd in get_tree get_focus self_check get_trace dump_scene; do
+        for _cmd in get_tree get_focus self_check get_trace get_listeners \
+            dump_scene; do
             "$WCTL" -s "$SOCK" -t 1000 "$_cmd" \
                 >"$SMOKE_DIR/$_cmd.json" 2>"$SMOKE_DIR/$_cmd.err" || :
         done

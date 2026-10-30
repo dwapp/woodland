@@ -15,6 +15,7 @@
  *
  * 分工的边界是"谁拥有状态、谁只读它"，不是按行数切。
  */
+#include "util/listener.h"
 #include <stdlib.h>
 
 #include <wlr/types/wlr_ext_foreign_toplevel_list_v1.h>
@@ -408,14 +409,14 @@ static void server_new_xdg_toplevel(struct wl_listener *listener, void *data) {
     xdg_toplevel->base->data = view->scene_tree;
 
     /* 生命周期：出现/消失由本文件管 */
-    view->map.notify = xdg_toplevel_map;
-    wl_signal_add(&xdg_toplevel->base->surface->events.map, &view->map);
-    view->unmap.notify = xdg_toplevel_unmap;
-    wl_signal_add(&xdg_toplevel->base->surface->events.unmap, &view->unmap);
-    view->commit.notify = xdg_toplevel_commit;
-    wl_signal_add(&xdg_toplevel->base->surface->events.commit, &view->commit);
-    view->destroy.notify = xdg_toplevel_destroy;
-    wl_signal_add(&xdg_toplevel->events.destroy, &view->destroy);
+    woodland_listener_connect(&view->map, &xdg_toplevel->base->surface->events.map,
+                          xdg_toplevel_map, "shell.map");
+    woodland_listener_connect(&view->unmap, &xdg_toplevel->base->surface->events.unmap,
+                          xdg_toplevel_unmap, "shell.unmap");
+    woodland_listener_connect(&view->commit, &xdg_toplevel->base->surface->events.commit,
+                          xdg_toplevel_commit, "shell.commit");
+    woodland_listener_connect(&view->destroy, &xdg_toplevel->events.destroy,
+                          xdg_toplevel_destroy, "shell.destroy");
 
     /* 状态与交互：各自的文件负责注册自己那几个监听器 */
     shell_interactive_attach(view);
@@ -476,10 +477,10 @@ static void server_new_xdg_popup(struct wl_listener *listener, void *data) {
     struct wlr_scene_tree *parent_tree = parent->data;
     xdg_popup->base->data = wlr_scene_xdg_surface_create(parent_tree, xdg_popup->base);
 
-    popup->commit.notify = xdg_popup_commit;
-    wl_signal_add(&xdg_popup->base->surface->events.commit, &popup->commit);
-    popup->destroy.notify = xdg_popup_destroy;
-    wl_signal_add(&xdg_popup->events.destroy, &popup->destroy);
+    woodland_listener_connect(&popup->commit, &xdg_popup->base->surface->events.commit,
+                          xdg_popup_commit, "shell.commit");
+    woodland_listener_connect(&popup->destroy, &xdg_popup->events.destroy,
+                          xdg_popup_destroy, "shell.destroy");
 }
 
 /* ==================== zxdg_decoration ==================== */
@@ -553,10 +554,10 @@ static void server_new_toplevel_decoration(struct wl_listener *listener, void *d
 
     /* 注册 mode 请求与销毁监听 */
     view->deco = deco;
-    view->deco_request_mode.notify = deco_request_mode;
-    wl_signal_add(&deco->events.request_mode, &view->deco_request_mode);
-    view->deco_destroy.notify = deco_destroy;
-    wl_signal_add(&deco->events.destroy, &view->deco_destroy);
+    woodland_listener_connect(&view->deco_request_mode, &deco->events.request_mode,
+                          deco_request_mode, "shell.request_mode");
+    woodland_listener_connect(&view->deco_destroy, &deco->events.destroy,
+                          deco_destroy, "shell.destroy");
     view->deco_registered = true;
 
     /* 立即按客户端当前请求模式调整（未 initialized 时 set_mode 延迟到 initial commit） */
@@ -593,14 +594,13 @@ bool woodland_shell_init(struct woodland_server *server) {
     server->xdg_dialog_manager =
         wlr_xdg_wm_dialog_v1_create(server->display, 1);
 
-    server->new_xdg_toplevel.notify = server_new_xdg_toplevel;
-    wl_signal_add(&server->xdg_shell->events.new_toplevel, &server->new_xdg_toplevel);
-    server->new_xdg_popup.notify = server_new_xdg_popup;
-    wl_signal_add(&server->xdg_shell->events.new_popup, &server->new_xdg_popup);
+    woodland_listener_connect(&server->new_xdg_toplevel, &server->xdg_shell->events.new_toplevel,
+                          server_new_xdg_toplevel, "shell.new_toplevel");
+    woodland_listener_connect(&server->new_xdg_popup, &server->xdg_shell->events.new_popup,
+                          server_new_xdg_popup, "shell.new_popup");
     if (server->xdg_decoration_manager) {
-        server->new_toplevel_decoration.notify = server_new_toplevel_decoration;
-        wl_signal_add(&server->xdg_decoration_manager->events.new_toplevel_decoration,
-                      &server->new_toplevel_decoration);
+        woodland_listener_connect(&server->new_toplevel_decoration, &server->xdg_decoration_manager->events.new_toplevel_decoration,
+                          server_new_toplevel_decoration, "shell.new_toplevel_decoration");
     }
 
     return true;
