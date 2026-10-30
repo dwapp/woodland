@@ -20,10 +20,22 @@ scenefx = dependency('scenefx-0.5', fallback: 'scenefx',
 
 # wlroots（锁定 0.20.x）
 wlroots_version = ['>=0.20.0', '<0.21.0']
-subproject('wlroots', default_options: ['examples=false'],
-           required: false, version: wlroots_version)
+wlroots_sub = subproject('wlroots', default_options: ['examples=false'],
+                         required: false, version: wlroots_version)
 wlroots = dependency('wlroots-0.20', version: wlroots_version,
                      fallback: 'wlroots')
+
+# wlroots 作为子项目构建时，wayland-scanner 生成的协议头落在
+# build/subprojects/wlroots/protocol/，而它的 declare_dependency 只导出
+# include/ —— wlr/types/wlr_layer_shell_v1.h 里是 #include "wlr-layer-
+# shell-unstable-v1-protocol.h"，靠同目录/-I 找不到就编译失败。
+# 系统安装的 wlroots 把协议头装进 /usr/include，所以只有 fallback 才需要补。
+if wlroots_sub.found() and wlroots.type_name() == 'internal'
+  wlroots = declare_dependency(
+    dependencies: wlroots,
+    include_directories: include_directories('subprojects/wlroots/protocol'),
+  )
+endif
 
 wayland_server = dependency('wayland-server')
 xkbcommon = dependency('xkbcommon')

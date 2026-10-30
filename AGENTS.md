@@ -28,6 +28,8 @@ meson test -C build --print-errorlogs  # 跑全部测试
 - 特性开关在 `meson_options.txt`：`effects`（默认 false）、`tiling-layout`（默认 false）、`xwayland`（默认 true）、`test`（默认 false，跑测试要开）。
 - 特性开关经 `configure_file` 生成 `build/config.h`，用 `WOODLAND_HAVE_*` 宏。
 - 冒烟测试用 headless 后端：`tests/smoke/run_headless.sh` 内部以 `WLR_BACKENDS=headless WLR_RENDERER=pixman` 后台启动 + `kill -TERM` + 等退出码 0（M1 起追加 `WLR_HEADLESS_OUTPUTS=1`）。ASan 验证用 `meson setup build-asan -Db_sanitize=address,undefined -Dtest=enabled`。
+- **CI 跑在 `archlinux:base-devel`，不要换回 `debian:stable`。** wlroots 0.20 要 wayland >= 1.24、libdrm >= 2.4.129、xkbcommon >= 1.8、pixman >= 0.43，bookworm 一个都不满足，meson 会退到 wrap 里逐个编 fallback，链条断在第一个 wayland 子项目（`Dependency "expat" not found`）。缺 expat 只是表象，补它只会把失败推到下一个依赖。
+- **顶层 `meson.build` 里给 `wlroots` 包的那层 `declare_dependency` 别删。** wlroots 作为子项目构建时，`wayland-scanner` 生成的协议头落在 `build/subprojects/wlroots/protocol/`，而它自己只导出 `include/`，于是 `wlr/types/wlr_layer_shell_v1.h` 里 `#include "wlr-layer-shell-unstable-v1-protocol.h"` 直接编译失败。系统装过 wlroots 的机器上 `/usr/include` 有这个头，问题会被掩盖——**本地能编不代表能编**。
 
 ## 调试接口（wctl）
 
@@ -107,6 +109,7 @@ test/commit、写布局时已放开，客户端就会先收到 configuration（w
 - 资源释放纪律：`finish` 逆序释放，每步判空 + 置空（幂等），不能 double-free、不能 use-after-free。
 - 单实例全局 `struct woodland_server`，模块间通过指针传递，不做依赖注入框架。
 - 保持 diff 最小：只碰与任务相关的文件和符号，不做任务外的大范围重构/重命名/格式化。
+- **不要直接推 `main`**：任何改动（包括只修 CI、只改文档）都开分支、走 PR 合入。`main` 只接受 fast-forward 之外的合并，提交历史要保持线性、一个主题一个 commit。
 - 依赖只经 meson wrap（wlroots 0.20.2、scenefx 0.5），**不新增依赖**、不 vendored。
 - 参照实现以 labwc 的 `src/output.c` / `src/input/cursor.c`、wlroots 的 `examples/scene-graph.c` 为权威（本机已下载：`/home/ut004971@uos/work/labwc`、`/home/ut004971@uos/work/wlroots`）。
 

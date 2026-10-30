@@ -118,15 +118,22 @@ if "$WCTL" -s "$SOCK" bogus >/dev/null 2>&1; then
     fail "unknown command should exit non-zero"
 fi
 
-echo "== multiple commands on one connection (nc) =="
-LINES="$(printf 'get_focus\nhelp\n' | nc -U -q1 "$SOCK" 2>/dev/null | wc -l)"
-[ "$LINES" -ge 2 ] || fail "expected 2 replies over one connection, got $LINES"
+# nc 只用于下面两条「一个连接多条命令」的传输测试，缺了不影响其余断言，
+# 所以不放进上面的必需列表。之前直接调用它，没有 nc 的环境里管道失败被
+# 2>/dev/null 吞掉，表现成「0 条回应」的假失败（Arch 的 base 就没有 nc）。
+if command -v nc >/dev/null 2>&1; then
+    echo "== multiple commands on one connection (nc) =="
+    LINES="$(printf 'get_focus\nhelp\n' | nc -U -q1 "$SOCK" 2>/dev/null | wc -l)"
+    [ "$LINES" -ge 2 ] || fail "expected 2 replies over one connection, got $LINES"
 
-# 一次灌进多条命令：服务端"发不完就先不解析下一条、等 WRITABLE 再续"
-# 这条状态机如果写错，表现就是回了前几条然后卡死
-echo "== pipelined commands =="
-PIPED="$(awk 'BEGIN{for(i=0;i<20;i++)print "ping"}' | nc -U -q1 "$SOCK" 2>/dev/null | wc -l)"
-[ "$PIPED" -ge 20 ] || fail "expected 20 pipelined replies, got $PIPED"
+    # 一次灌进多条命令：服务端"发不完就先不解析下一条、等 WRITABLE 再续"
+    # 这条状态机如果写错，表现就是回了前几条然后卡死
+    echo "== pipelined commands =="
+    PIPED="$(awk 'BEGIN{for(i=0;i<20;i++)print "ping"}' | nc -U -q1 "$SOCK" 2>/dev/null | wc -l)"
+    [ "$PIPED" -ge 20 ] || fail "expected 20 pipelined replies, got $PIPED"
+else
+    echo "== nc not found, skipping the pipelined transport checks =="
+fi
 
 echo "== wctl options =="
 "$WCTL" --help >/dev/null 2>&1 || fail "--help should exit 0"

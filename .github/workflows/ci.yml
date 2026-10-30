@@ -5,25 +5,47 @@ on: [push, pull_request]
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    # Arch 而不是 debian:stable：wlroots 0.20 要求 wayland >= 1.24、
+    # libdrm >= 2.4.129、xkbcommon >= 1.8、pixman >= 0.43，而 bookworm 的
+    # 1.21 / 2.4.114 / 1.5 / 0.42 一个都不满足，meson 于是退到 wrap 里逐个
+    # 编 fallback（第一个是 wayland，它要 expat），链条就断在 setup。
     container:
-      image: debian:stable
+      image: archlinux:base-devel
+    env:
+      # run_headless.sh 直接用继承的 XDG_RUNTIME_DIR（其余 smoke 脚本自己
+      # mktemp 覆盖），容器里没有这个变量时 wayland socket 建不出来。
+      XDG_RUNTIME_DIR: /tmp/xdg-runtime
     steps:
       - name: Install dependencies
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends \
-            meson ninja-build gcc pkg-config git ca-certificates \
-            libwayland-dev libpixman-1-dev libxkbcommon-dev \
-            libinput-dev libxcb1-dev libxcb-composite0-dev \
-            libxcb-icccm4-dev libxcb-render-util0-dev \
-            libxcb-xfixes0-dev libxcb-errors-dev \
-            libx11-xcb-dev libegl1-mesa-dev libgles2-mesa-dev \
-            libgbm-dev libdrm-dev libx11-dev libxcb-xkb-dev \
-            libxcb-xinput-dev libxcb-present-dev \
-            libseat-dev hwdata libliftoff-dev libdisplay-info-dev
+          pacman -Syu --noconfirm --needed \
+            meson ninja git \
+            wayland wayland-protocols libxkbcommon libinput \
+            pixman libdrm mesa lcms2 \
+            systemd-libs seatd hwdata libliftoff libdisplay-info \
+            libxcb xcb-util-errors xcb-util-wm \
+            xcb-util-image xcb-util-renderutil libx11 \
+            cairo pango xorg-xwayland \
+            expat libffi \
+            wlr-protocols \
+            wayland-utils wlr-randr wl-clipboard grim jq \
+            weston imagemagick file xterm \
+            openbsd-netcat scdoc
       - uses: actions/checkout@v4
+      # lswt 只有 AUR 包，而 capture / xwayland 两个 smoke 用它造 layer-shell
+      # 窗口。现场编一次；编不出来就让它俩自己 skip，不因此判流水线失败。
+      - name: Build lswt (optional)
+        continue-on-error: true
+        run: |
+          git clone --depth 1 https://git.sr.ht/~leon_plickat/lswt /tmp/lswt
+          make -C /tmp/lswt
+          bin="$(find /tmp/lswt -maxdepth 2 -type f -perm -u+x -name lswt | head -1)"
+          install -Dm755 "$bin" /usr/local/bin/lswt
       - name: Setup
-        run: meson setup build -Dtest=enabled
+        run: |
+          mkdir -p "$XDG_RUNTIME_DIR"
+          chmod 700 "$XDG_RUNTIME_DIR"
+          meson setup build -Dtest=enabled
       - name: Build
         run: meson compile -C build
       - name: Test
