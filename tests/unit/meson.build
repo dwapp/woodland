@@ -101,8 +101,26 @@ test_config = executable('test_config', 'test_config.c',
   link_with: [config_lib, util_lib, trace_lib, output_lib, cursor_lib, shell_lib, seat_lib, ime_lib, workspace_lib, layer_lib, ssd_lib, capture_lib, ipc_lib, protocol_lib])
 test('config', test_config)
 
-test_ime = executable('test_ime', 'test_ime.c',
-  dependencies: [wlroots, wayland_server, xkbcommon],
+vk_xml = meson.project_source_root() + '/subprojects/wlroots/protocol/virtual-keyboard-unstable-v1.xml'
+im_xml = meson.project_source_root() + '/subprojects/wlroots/protocol/input-method-unstable-v2.xml'
+
+test_ime_srcs = ['test_ime.c']
+test_ime_deps = [wlroots, wayland_server, xkbcommon]
+if wayland_client_dep.found() and wayland_scanner.found()
+  test_ime_deps += wayland_client_dep
+  foreach p : [[vk_xml, 'virtual-keyboard-unstable-v1'],
+               [im_xml, 'input-method-unstable-v2']]
+    test_ime_srcs += custom_target(p[1] + '-client-header',
+      output: p[1] + '-client-protocol.h',
+      command: [wayland_scanner, 'client-header', p[0], '@OUTPUT@'])
+    test_ime_srcs += custom_target(p[1] + '-client-code',
+      output: p[1] + '-protocol.c',
+      command: [wayland_scanner, 'private-code', p[0], '@OUTPUT@'])
+  endforeach
+endif
+
+test_ime = executable('test_ime', test_ime_srcs,
+  dependencies: test_ime_deps,
   include_directories: woodland_inc,
   link_with: [ime_lib, seat_lib, cursor_lib, output_lib, shell_lib, workspace_lib, layer_lib, ssd_lib, protocol_lib, util_lib])
 test('ime', test_ime)

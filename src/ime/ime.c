@@ -15,6 +15,7 @@
 #include <wlr/util/box.h>
 #include <wlr/util/log.h>
 
+#include "layer.h"
 #include "seat.h"
 #include "util/listener.h"
 #include "view.h"
@@ -42,33 +43,6 @@ struct woodland_ime_popup {
 
     struct wl_listener commit;
     struct wl_listener destroy;
-};
-
-struct woodland_ime_relay {
-    struct woodland_server *server;
-    struct wlr_input_method_manager_v2 *input_method_manager;
-    struct wlr_text_input_manager_v3 *text_input_manager;
-    struct wlr_virtual_keyboard_manager_v1 *virtual_keyboard_manager;
-
-    struct wlr_input_method_v2 *input_method;
-    struct wlr_surface *focused_surface;
-    struct woodland_text_input *active_text_input;
-
-    struct wl_list text_inputs; // struct woodland_text_input.link
-    struct wl_list popups;      // struct woodland_ime_popup.link
-    struct wlr_scene_tree *popup_tree;
-
-    struct wl_listener new_input_method;
-    struct wl_listener new_text_input;
-    struct wl_listener new_virtual_keyboard;
-    struct wl_listener seat_focus_change;
-    struct wl_listener focused_surface_destroy;
-
-    struct wl_listener input_method_commit;
-    struct wl_listener input_method_grab_keyboard;
-    struct wl_listener input_method_destroy;
-    struct wl_listener input_method_new_popup_surface;
-    struct wl_listener keyboard_grab_destroy;
 };
 
 /* ==================== 键盘与防死循环逻辑 ==================== */
@@ -207,8 +181,22 @@ static void update_popup_position(struct woodland_ime_popup *popup)
     if (view) {
         struct wlr_box geo;
         woodland_view_content_box(view, &geo);
-        cursor_rect.x += view->scene_tree->node.x + geo.x;
-        cursor_rect.y += view->scene_tree->node.y + geo.y;
+        int lx = 0, ly = 0;
+        wlr_scene_node_coords(&view->scene_tree->node, &lx, &ly);
+        cursor_rect.x += lx + geo.x;
+        cursor_rect.y += ly + geo.y;
+    } else {
+        struct wlr_layer_surface_v1 *layer_surface =
+            wlr_layer_surface_v1_try_from_wlr_surface(relay->focused_surface);
+        if (layer_surface && layer_surface->data) {
+            struct woodland_layer_surface *layer = layer_surface->data;
+            if (layer->scene_layer_surface && layer->scene_layer_surface->tree) {
+                int lx = 0, ly = 0;
+                wlr_scene_node_coords(&layer->scene_layer_surface->tree->node, &lx, &ly);
+                cursor_rect.x += lx;
+                cursor_rect.y += ly;
+            }
+        }
     }
 
     /* 根据屏幕边界 unconstrain */
@@ -335,16 +323,16 @@ static void handle_input_method_new_popup_surface(struct wl_listener *listener, 
     popup->popup_surface = popup_surface;
     popup->relay = relay;
 
-    woodland_listener_connect(&popup->destroy, &popup_surface->events.destroy, handle_popup_destroy,
-                              "ime.popup.destroy");
-    woodland_listener_connect(&popup->commit, &popup_surface->surface->events.commit,
-                              handle_popup_commit, "ime.popup.commit");
-
     popup->tree = wlr_scene_subsurface_tree_create(relay->popup_tree, popup_surface->surface);
     if (!popup->tree) {
         free(popup);
         return;
     }
+
+    woodland_listener_connect(&popup->destroy, &popup_surface->events.destroy, handle_popup_destroy,
+                              "ime.popup.destroy");
+    woodland_listener_connect(&popup->commit, &popup_surface->surface->events.commit,
+                              handle_popup_commit, "ime.popup.commit");
 
     wl_list_insert(&relay->popups, &popup->link);
     update_popup_position(popup);
@@ -554,11 +542,15 @@ bool woodland_ime_init(struct woodland_server *server)
     }
     wlr_scene_node_raise_to_top(&relay->popup_tree->node);
 
-    /* 注册三个核心协议 global */
+    /*
+     * 注册三个核心协议 global:
+     * 安全特权说明：当前 Woodland 运行在用户会话内，未启用 security-context-v1 协议。
+     * zwp_input_method_manager_v2 与 zwp_virtual_keyboard_manager_v1 对当前会话内客户端开放，
+     * 便于 Fcitx5 等用户输入法服务自由接入。特权控制将在后续沙箱安全机制统一落地。
+     */
     relay->input_method_manager = wlr_input_method_manager_v2_create(server->display);
     relay->text_input_manager = wlr_text_input_manager_v3_create(server->display);
     relay->virtual_keyboard_manager = wlr_virtual_keyboard_manager_v1_create(server->display);
-
     if (!relay->input_method_manager || !relay->text_input_manager ||
         !relay->virtual_keyboard_manager) {
         wlr_log(WLR_ERROR, "failed to create input method managers");
