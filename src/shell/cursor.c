@@ -28,9 +28,9 @@
  * 指针每帧只会悬停在一个 SSD 部件上，所以这里维护"唯一的 hover 目标"：
  * 换了视图先清旧的，避免两个窗口同时亮着。
  */
-static void ssd_update_hover(struct woodland_server *server,
-                             struct woodland_view *view,
-                             enum woodland_ssd_part part) {
+static void ssd_update_hover(struct woodland_server *server, struct woodland_view *view,
+                             enum woodland_ssd_part part)
+{
     if (server->hover_view == view && server->hover_part == part) {
         return;
     }
@@ -45,7 +45,8 @@ static void ssd_update_hover(struct woodland_server *server,
 }
 
 /* 清掉按下态（不执行动作） */
-static void ssd_clear_pressed(struct woodland_server *server) {
+static void ssd_clear_pressed(struct woodland_server *server)
+{
     if (server->pressed_view) {
         woodland_ssd_set_pressed(server->pressed_view, WOODLAND_SSD_NONE);
     }
@@ -59,7 +60,8 @@ static void ssd_clear_pressed(struct woodland_server *server) {
  * 动作放在释放而不是按下，是为了让"按下态"有意义（按住时能看到凹陷），
  * 同时支持按住后拖离按钮取消（与常见工具包的行为一致）。
  */
-static void ssd_button_release(struct woodland_server *server) {
+static void ssd_button_release(struct woodland_server *server)
+{
     struct woodland_view *view = server->pressed_view;
     enum woodland_ssd_part part = server->pressed_part;
     ssd_clear_pressed(server);
@@ -68,8 +70,7 @@ static void ssd_button_release(struct woodland_server *server) {
         return;
     }
     uint32_t edges = 0;
-    if (woodland_ssd_at(view, server->cursor->x, server->cursor->y, &edges)
-            != part) {
+    if (woodland_ssd_at(view, server->cursor->x, server->cursor->y, &edges) != part) {
         return;
     }
 
@@ -90,7 +91,8 @@ static void ssd_button_release(struct woodland_server *server) {
 
 /* ==================== motion 分发 ==================== */
 
-void woodland_cursor_process_motion(struct woodland_server *server, uint32_t time) {
+void woodland_cursor_process_motion(struct woodland_server *server, uint32_t time)
+{
     if (server->cursor_mode == WOODLAND_CURSOR_MOVE) {
         shell_process_cursor_move(server);
         return;
@@ -102,8 +104,8 @@ void woodland_cursor_process_motion(struct woodland_server *server, uint32_t tim
     double sx, sy;
     struct wlr_seat *seat = server->seat;
     struct wlr_surface *surface = NULL;
-    struct woodland_view *view = woodland_view_at(server,
-        server->cursor->x, server->cursor->y, &surface, &sx, &sy);
+    struct woodland_view *view =
+        woodland_view_at(server, server->cursor->x, server->cursor->y, &surface, &sx, &sy);
 
     /* 未命中 surface 时，检查是否悬停在某视图的 SSD 区域（标题栏/边框） */
     enum woodland_ssd_part ssd_part = WOODLAND_SSD_NONE;
@@ -111,9 +113,10 @@ void woodland_cursor_process_motion(struct woodland_server *server, uint32_t tim
     struct woodland_view *ssd_view = NULL;
     if (!view) {
         struct woodland_view *v;
-        wl_list_for_each(v, &server->views, link) {
-            enum woodland_ssd_part part = woodland_ssd_at(v,
-                server->cursor->x, server->cursor->y, &edges);
+        wl_list_for_each(v, &server->views, link)
+        {
+            enum woodland_ssd_part part =
+                woodland_ssd_at(v, server->cursor->x, server->cursor->y, &edges);
             if (part != WOODLAND_SSD_NONE) {
                 ssd_part = part;
                 ssd_view = v;
@@ -124,20 +127,35 @@ void woodland_cursor_process_motion(struct woodland_server *server, uint32_t tim
 
     if (ssd_view) {
         /* 悬停 SSD：按区域切换光标，不给 surface 指针焦点 */
-        const char *cursor_name = "default";
         if (ssd_part == WOODLAND_SSD_TITLEBAR) {
-            cursor_name = "default";
-        } else if (ssd_part >= WOODLAND_SSD_BORDER_LEFT
-                && ssd_part <= WOODLAND_SSD_BORDER_BOTTOM) {
-            cursor_name = "se-resize";
+            shell_cursor_set(server, "default");
+        } else if (ssd_part >= WOODLAND_SSD_BORDER_LEFT && ssd_part <= WOODLAND_SSD_BORDER_BOTTOM) {
+            uint32_t resize_edges = edges;
+            int w = 0, h = 0;
+            if (woodland_ssd_content_size(ssd_view, &w, &h) && w > 0 && h > 0) {
+                double rx = server->cursor->x - ssd_view->scene_tree->node.x;
+                double ry = server->cursor->y - ssd_view->scene_tree->node.y;
+                int corner_dist = 16;
+                if (rx <= corner_dist) {
+                    resize_edges |= WLR_EDGE_LEFT;
+                } else if (rx >= w - corner_dist) {
+                    resize_edges |= WLR_EDGE_RIGHT;
+                }
+                if (ry <= corner_dist) {
+                    resize_edges |= WLR_EDGE_TOP;
+                } else if (ry >= h - corner_dist) {
+                    resize_edges |= WLR_EDGE_BOTTOM;
+                }
+            }
+            shell_cursor_set_resize(server, resize_edges);
+        } else {
+            shell_cursor_set(server, "default");
         }
-        wlr_cursor_set_xcursor(server->cursor, server->xcursor_manager,
-            cursor_name);
         wlr_seat_pointer_clear_focus(seat);
         /* 只有按钮才亮；标题栏/边框传 NONE（顺带清掉上一个按钮的高亮） */
-        bool on_button = ssd_part == WOODLAND_SSD_BUTTON_CLOSE
-            || ssd_part == WOODLAND_SSD_BUTTON_MAXIMIZE
-            || ssd_part == WOODLAND_SSD_BUTTON_MINIMIZE;
+        bool on_button = ssd_part == WOODLAND_SSD_BUTTON_CLOSE ||
+                         ssd_part == WOODLAND_SSD_BUTTON_MAXIMIZE ||
+                         ssd_part == WOODLAND_SSD_BUTTON_MINIMIZE;
         ssd_update_hover(server, on_button ? ssd_view : NULL,
                          on_button ? ssd_part : WOODLAND_SSD_NONE);
         return;
@@ -147,7 +165,7 @@ void woodland_cursor_process_motion(struct woodland_server *server, uint32_t tim
     ssd_update_hover(server, NULL, WOODLAND_SSD_NONE);
 
     if (!view) {
-        wlr_cursor_set_xcursor(server->cursor, server->xcursor_manager, "default");
+        shell_cursor_set(server, "default");
     }
     if (surface) {
         wlr_seat_pointer_notify_enter(seat, surface, sx, sy);
@@ -159,33 +177,30 @@ void woodland_cursor_process_motion(struct woodland_server *server, uint32_t tim
 
 /* ==================== wlr_cursor 监听器 ==================== */
 
-static void server_cursor_motion(struct wl_listener *listener, void *data) {
+static void server_cursor_motion(struct wl_listener *listener, void *data)
+{
     /* 手动计数的示例：已经在改这个回调、又想知道"它跑了吗/跑了多少次"
      * 时，开头插这一行就够。想零回调侵入见 connect_verbose（output.frame） */
     woodland_listener_count(listener);
-    struct woodland_server *server =
-        wl_container_of(listener, server, cursor_motion);
+    struct woodland_server *server = wl_container_of(listener, server, cursor_motion);
     struct wlr_pointer_motion_event *event = data;
-    wlr_cursor_move(server->cursor, &event->pointer->base,
-        event->delta_x, event->delta_y);
+    wlr_cursor_move(server->cursor, &event->pointer->base, event->delta_x, event->delta_y);
     woodland_cursor_process_motion(server, event->time_msec);
 }
 
-static void server_cursor_motion_absolute(struct wl_listener *listener, void *data) {
-    struct woodland_server *server =
-        wl_container_of(listener, server, cursor_motion_absolute);
+static void server_cursor_motion_absolute(struct wl_listener *listener, void *data)
+{
+    struct woodland_server *server = wl_container_of(listener, server, cursor_motion_absolute);
     struct wlr_pointer_motion_absolute_event *event = data;
-    wlr_cursor_warp_absolute(server->cursor, &event->pointer->base,
-        event->x, event->y);
+    wlr_cursor_warp_absolute(server->cursor, &event->pointer->base, event->x, event->y);
     woodland_cursor_process_motion(server, event->time_msec);
 }
 
-static void server_cursor_button(struct wl_listener *listener, void *data) {
-    struct woodland_server *server =
-        wl_container_of(listener, server, cursor_button);
+static void server_cursor_button(struct wl_listener *listener, void *data)
+{
+    struct woodland_server *server = wl_container_of(listener, server, cursor_button);
     struct wlr_pointer_button_event *event = data;
-    wlr_seat_pointer_notify_button(server->seat,
-        event->time_msec, event->button, event->state);
+    wlr_seat_pointer_notify_button(server->seat, event->time_msec, event->button, event->state);
     if (event->state == WL_POINTER_BUTTON_STATE_RELEASED) {
         /* 拖动结束：先决定是否贴边铺满，再清抓取状态（铺满要用 grabbed_view） */
         if (server->cursor_mode == WOODLAND_CURSOR_MOVE && server->grabbed_view) {
@@ -198,8 +213,8 @@ static void server_cursor_button(struct wl_listener *listener, void *data) {
         ssd_clear_pressed(server);
         double sx, sy;
         struct wlr_surface *surface = NULL;
-        struct woodland_view *view = woodland_view_at(server,
-            server->cursor->x, server->cursor->y, &surface, &sx, &sy);
+        struct woodland_view *view =
+            woodland_view_at(server, server->cursor->x, server->cursor->y, &surface, &sx, &sy);
         if (view) {
             woodland_focus_view(view, true);
         } else {
@@ -208,9 +223,10 @@ static void server_cursor_button(struct wl_listener *listener, void *data) {
             struct woodland_view *ssd_view = NULL;
             enum woodland_ssd_part ssd_part = WOODLAND_SSD_NONE;
             struct woodland_view *v;
-            wl_list_for_each(v, &server->views, link) {
-                enum woodland_ssd_part part = woodland_ssd_at(v,
-                    server->cursor->x, server->cursor->y, &edges);
+            wl_list_for_each(v, &server->views, link)
+            {
+                enum woodland_ssd_part part =
+                    woodland_ssd_at(v, server->cursor->x, server->cursor->y, &edges);
                 if (part != WOODLAND_SSD_NONE) {
                     ssd_part = part;
                     ssd_view = v;
@@ -234,9 +250,27 @@ static void server_cursor_button(struct wl_listener *listener, void *data) {
                 case WOODLAND_SSD_BORDER_LEFT:
                 case WOODLAND_SSD_BORDER_RIGHT:
                 case WOODLAND_SSD_BORDER_TOP:
-                case WOODLAND_SSD_BORDER_BOTTOM:
-                    woodland_view_begin_interactive(ssd_view, WOODLAND_CURSOR_RESIZE, edges);
+                case WOODLAND_SSD_BORDER_BOTTOM: {
+                    uint32_t resize_edges = edges;
+                    int w = 0, h = 0;
+                    if (woodland_ssd_content_size(ssd_view, &w, &h) && w > 0 && h > 0) {
+                        double rx = server->cursor->x - ssd_view->scene_tree->node.x;
+                        double ry = server->cursor->y - ssd_view->scene_tree->node.y;
+                        int corner_dist = 16;
+                        if (rx <= corner_dist) {
+                            resize_edges |= WLR_EDGE_LEFT;
+                        } else if (rx >= w - corner_dist) {
+                            resize_edges |= WLR_EDGE_RIGHT;
+                        }
+                        if (ry <= corner_dist) {
+                            resize_edges |= WLR_EDGE_TOP;
+                        } else if (ry >= h - corner_dist) {
+                            resize_edges |= WLR_EDGE_BOTTOM;
+                        }
+                    }
+                    woodland_view_begin_interactive(ssd_view, WOODLAND_CURSOR_RESIZE, resize_edges);
                     break;
+                }
                 default:
                     break;
                 }
@@ -245,8 +279,7 @@ static void server_cursor_button(struct wl_listener *listener, void *data) {
                 struct wlr_surface *lsurf = NULL;
                 double lsx, lsy;
                 struct wlr_layer_surface_v1 *layer = woodland_layer_surface_at(
-                    server, server->cursor->x, server->cursor->y,
-                    &lsurf, &lsx, &lsy);
+                    server, server->cursor->x, server->cursor->y, &lsurf, &lsx, &lsy);
                 if (layer) {
                     woodland_layer_try_focus(server, layer);
                 }
@@ -255,36 +288,38 @@ static void server_cursor_button(struct wl_listener *listener, void *data) {
     }
 }
 
-static void server_cursor_axis(struct wl_listener *listener, void *data) {
-    struct woodland_server *server =
-        wl_container_of(listener, server, cursor_axis);
+static void server_cursor_axis(struct wl_listener *listener, void *data)
+{
+    struct woodland_server *server = wl_container_of(listener, server, cursor_axis);
     struct wlr_pointer_axis_event *event = data;
-    wlr_seat_pointer_notify_axis(server->seat,
-        event->time_msec, event->orientation, event->delta,
-        event->delta_discrete, event->source, event->relative_direction);
+    wlr_seat_pointer_notify_axis(server->seat, event->time_msec, event->orientation, event->delta,
+                                 event->delta_discrete, event->source, event->relative_direction);
 }
 
-static void server_cursor_frame(struct wl_listener *listener, void *data) {
-    struct woodland_server *server =
-        wl_container_of(listener, server, cursor_frame);
+static void server_cursor_frame(struct wl_listener *listener, void *data)
+{
+    struct woodland_server *server = wl_container_of(listener, server, cursor_frame);
     wlr_seat_pointer_notify_frame(server->seat);
     (void)data;
 }
 
-void woodland_cursor_init_events(struct woodland_server *server) {
+void woodland_cursor_init_events(struct woodland_server *server)
+{
     woodland_listener_connect(&server->cursor_motion, &server->cursor->events.motion,
-                          server_cursor_motion, "cursor.motion");
-    woodland_listener_connect(&server->cursor_motion_absolute, &server->cursor->events.motion_absolute,
-                          server_cursor_motion_absolute, "cursor.motion_absolute");
+                              server_cursor_motion, "cursor.motion");
+    woodland_listener_connect(&server->cursor_motion_absolute,
+                              &server->cursor->events.motion_absolute,
+                              server_cursor_motion_absolute, "cursor.motion_absolute");
     woodland_listener_connect(&server->cursor_button, &server->cursor->events.button,
-                          server_cursor_button, "cursor.button");
+                              server_cursor_button, "cursor.button");
     woodland_listener_connect(&server->cursor_axis, &server->cursor->events.axis,
-                          server_cursor_axis, "cursor.axis");
+                              server_cursor_axis, "cursor.axis");
     woodland_listener_connect(&server->cursor_frame, &server->cursor->events.frame,
-                          server_cursor_frame, "cursor.frame");
+                              server_cursor_frame, "cursor.frame");
 }
 
-void woodland_cursor_finish_events(struct woodland_server *server) {
+void woodland_cursor_finish_events(struct woodland_server *server)
+{
     if (server->cursor) {
         wl_list_remove(&server->cursor_motion.link);
         wl_list_remove(&server->cursor_motion_absolute.link);
@@ -292,4 +327,55 @@ void woodland_cursor_finish_events(struct woodland_server *server) {
         wl_list_remove(&server->cursor_axis.link);
         wl_list_remove(&server->cursor_frame.link);
     }
+}
+
+void shell_cursor_set(struct woodland_server *server, const char *name)
+{
+    if (!server || !server->cursor || !server->xcursor_manager) {
+        return;
+    }
+    wlr_cursor_unset_image(server->cursor);
+    wlr_cursor_set_xcursor(server->cursor, server->xcursor_manager, name);
+}
+
+void shell_cursor_set_resize(struct woodland_server *server, uint32_t edges)
+{
+    if (!server || !server->cursor || !server->xcursor_manager) {
+        return;
+    }
+    const char *primary = "default";
+    const char *fallback = NULL;
+
+    if (edges == (WLR_EDGE_TOP | WLR_EDGE_LEFT)) {
+        primary = "nw-resize";
+        fallback = "top_left_corner";
+    } else if (edges == (WLR_EDGE_TOP | WLR_EDGE_RIGHT)) {
+        primary = "ne-resize";
+        fallback = "top_right_corner";
+    } else if (edges == (WLR_EDGE_BOTTOM | WLR_EDGE_LEFT)) {
+        primary = "sw-resize";
+        fallback = "bottom_left_corner";
+    } else if (edges == (WLR_EDGE_BOTTOM | WLR_EDGE_RIGHT)) {
+        primary = "se-resize";
+        fallback = "bottom_right_corner";
+    } else if (edges & WLR_EDGE_TOP) {
+        primary = "n-resize";
+        fallback = "top_side";
+    } else if (edges & WLR_EDGE_BOTTOM) {
+        primary = "s-resize";
+        fallback = "bottom_side";
+    } else if (edges & WLR_EDGE_LEFT) {
+        primary = "w-resize";
+        fallback = "left_side";
+    } else if (edges & WLR_EDGE_RIGHT) {
+        primary = "e-resize";
+        fallback = "right_side";
+    }
+
+    const char *name = primary;
+    if (fallback && !wlr_xcursor_manager_get_xcursor(server->xcursor_manager, primary, 1.0f)) {
+        name = fallback;
+    }
+    wlr_cursor_unset_image(server->cursor);
+    wlr_cursor_set_xcursor(server->cursor, server->xcursor_manager, name);
 }

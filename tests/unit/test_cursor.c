@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
+#include "cursor.h"
+#include "woodland.h"
 #include <assert.h>
 #include <wayland-server-core.h>
 #include <wlr/backend.h>
@@ -8,10 +10,9 @@
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_scene.h>
 #include <wlr/types/wlr_xcursor_manager.h>
-#include "cursor.h"
-#include "woodland.h"
 
-int main(void) {
+int main(void)
+{
     struct woodland_server server = {0};
     server.display = wl_display_create();
     server.event_loop = wl_display_get_event_loop(server.display);
@@ -30,6 +31,17 @@ int main(void) {
     woodland_cursor_set(&server, "pointer");
     /* 未知形状不崩溃（回退到 default） */
     woodland_cursor_set(&server, "nonexistent-shape-xyz");
+
+    /* 缩放光标设置测试（四边与四角） */
+    woodland_cursor_set_resize(&server, WLR_EDGE_TOP);
+    woodland_cursor_set_resize(&server, WLR_EDGE_BOTTOM);
+    woodland_cursor_set_resize(&server, WLR_EDGE_LEFT);
+    woodland_cursor_set_resize(&server, WLR_EDGE_RIGHT);
+    woodland_cursor_set_resize(&server, WLR_EDGE_TOP | WLR_EDGE_LEFT);
+    woodland_cursor_set_resize(&server, WLR_EDGE_TOP | WLR_EDGE_RIGHT);
+    woodland_cursor_set_resize(&server, WLR_EDGE_BOTTOM | WLR_EDGE_LEFT);
+    woodland_cursor_set_resize(&server, WLR_EDGE_BOTTOM | WLR_EDGE_RIGHT);
+    woodland_cursor_set_resize(&server, 0);
 
     woodland_cursor_finish(&server);
 
