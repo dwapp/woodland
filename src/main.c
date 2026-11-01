@@ -9,13 +9,15 @@
 #include "util/log.h"
 #include "woodland.h"
 
-static void usage(const char *name) {
+static void usage(const char *name)
+{
     printf("Usage: %s [-s startup command] [-c config file] [-p placement policy] [--self-check]"
            " [--trace]\n"
            "\n"
            "  -s  command run after the compositor is up\n"
            "  -c  path to configuration file (default: $XDG_CONFIG_HOME/woodland/config.toml)\n"
            "  -p  new window placement: cascade (default), center, cursor, autoplace\n"
+           "  --self-check  run invariant checks after every state change\n"
            "                (failures are logged, not fatal)\n"
            "  --trace       keep the last 4096 state-change decisions in a ring\n"
            "                buffer and expose them as `wctl get_trace`\n"
@@ -25,7 +27,8 @@ static void usage(const char *name) {
            name);
 }
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[])
+{
     woodland_log_init(WLR_INFO);
 
     char *startup_cmd = NULL;

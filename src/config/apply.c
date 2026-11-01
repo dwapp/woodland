@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-only
-#include "woodland_config.h"
 #include "cursor.h"
 #include "seat.h"
 #include "ssd.h"
@@ -7,6 +6,7 @@
 #include "trace.h"
 #include "view.h"
 #include "woodland.h"
+#include "woodland_config.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -17,8 +17,17 @@
 #include <wlr/util/log.h>
 #include <xkbcommon/xkbcommon.h>
 
+static bool str_diff(const char *a, const char *b)
+{
+    if ((a != NULL) != (b != NULL)) {
+        return true;
+    }
+    return a && b && strcmp(a, b) != 0;
+}
+
 static void apply_keyboard_config(struct woodland_server *server,
-                                  const struct woodland_config_keyboard *kb_cfg) {
+                                  const struct woodland_config_keyboard *kb_cfg)
+{
     if (!server || !kb_cfg || !server->keyboards.next) {
         return;
     }
@@ -35,14 +44,13 @@ static void apply_keyboard_config(struct woodland_server *server,
         .options = kb_cfg->options,
     };
 
-    struct xkb_keymap *keymap = xkb_keymap_new_from_names(ctx, &rules,
-                                                           XKB_KEYMAP_COMPILE_NO_FLAGS);
+    struct xkb_keymap *keymap = xkb_keymap_new_from_names(ctx, &rules, XKB_KEYMAP_COMPILE_NO_FLAGS);
     if (keymap) {
         struct woodland_keyboard *kb;
-        wl_list_for_each(kb, &server->keyboards, link) {
+        wl_list_for_each(kb, &server->keyboards, link)
+        {
             wlr_keyboard_set_keymap(kb->wlr_keyboard, keymap);
-            wlr_keyboard_set_repeat_info(kb->wlr_keyboard,
-                                         kb_cfg->repeat_rate,
+            wlr_keyboard_set_repeat_info(kb->wlr_keyboard, kb_cfg->repeat_rate,
                                          kb_cfg->repeat_delay);
         }
         xkb_keymap_unref(keymap);
@@ -53,29 +61,52 @@ static void apply_keyboard_config(struct woodland_server *server,
     xkb_context_unref(ctx);
 }
 
-static void apply_ssd_config(struct woodland_server *server) {
+static void apply_ssd_config(struct woodland_server *server,
+                             const struct woodland_config_decorations *ssd_cfg)
+{
     if (!server || !server->views.next) {
         return;
     }
-    struct woodland_view *view;
-    wl_list_for_each(view, &server->views, link) {
-        if (view->ssd) {
-            woodland_ssd_update(view);
+    struct woodland_view *view, *tmp;
+    wl_list_for_each_safe(view, tmp, &server->views, link)
+    {
+        if (!ssd_cfg->enabled) {
+            if (view->ssd) {
+                woodland_ssd_destroy(view);
+            }
+        } else {
+            if (!view->ssd && !view->deco_csd && view->mapped) {
+                woodland_ssd_create(view);
+            } else if (view->ssd) {
+                woodland_ssd_update(view);
+            }
         }
     }
 }
 
 static void apply_cursor_config(struct woodland_server *server,
-                                const struct woodland_config_cursor *cur_cfg) {
-    if (!server || !cur_cfg || !server->xcursor_manager) {
+                                const struct woodland_config_cursor *cur_cfg,
+                                const struct woodland_config_cursor *old_cur_cfg)
+{
+    if (!server || !cur_cfg || !server->cursor || !server->xcursor_manager) {
         return;
     }
-    wlr_xcursor_manager_load(server->xcursor_manager, cur_cfg->size);
+    bool theme_changed = !old_cur_cfg || str_diff(cur_cfg->theme, old_cur_cfg->theme);
+
+    if (theme_changed && server->xcursor_manager) {
+        wlr_xcursor_manager_destroy(server->xcursor_manager);
+        server->xcursor_manager = wlr_xcursor_manager_create(cur_cfg->theme, cur_cfg->size);
+        if (server->xcursor_manager) {
+            wlr_xcursor_manager_load(server->xcursor_manager, 1);
+        }
+    } else if (server->xcursor_manager) {
+        wlr_xcursor_manager_load(server->xcursor_manager, cur_cfg->size);
+    }
     woodland_cursor_set(server, "default");
 }
 
-void woodland_config_apply(struct woodland_server *server,
-                           struct woodland_config *new_config) {
+void woodland_config_apply(struct woodland_server *server, struct woodland_config *new_config)
+{
     if (!server || !new_config) {
         return;
     }
@@ -83,50 +114,50 @@ void woodland_config_apply(struct woodland_server *server,
     struct woodland_config *old_config = server->config;
 
     /* 1. general */
-    if (!server->placement_specified && (new_config->general.placement_specified || !old_config)) {
+    if (!server->placement_specified) {
         server->placement_policy = new_config->general.placement_policy;
     }
 
     /* 2. keyboard */
     bool kb_changed = !old_config ||
-        (new_config->keyboard.repeat_rate != old_config->keyboard.repeat_rate) ||
-        (new_config->keyboard.repeat_delay != old_config->keyboard.repeat_delay) ||
-        ((new_config->keyboard.layout != NULL) != (old_config->keyboard.layout != NULL)) ||
-        (new_config->keyboard.layout && strcmp(new_config->keyboard.layout, old_config->keyboard.layout) != 0) ||
-        ((new_config->keyboard.options != NULL) != (old_config->keyboard.options != NULL)) ||
-        (new_config->keyboard.options && strcmp(new_config->keyboard.options, old_config->keyboard.options) != 0);
-
+                      (new_config->keyboard.repeat_rate != old_config->keyboard.repeat_rate) ||
+                      (new_config->keyboard.repeat_delay != old_config->keyboard.repeat_delay) ||
+                      str_diff(new_config->keyboard.layout, old_config->keyboard.layout) ||
+                      str_diff(new_config->keyboard.variant, old_config->keyboard.variant) ||
+                      str_diff(new_config->keyboard.options, old_config->keyboard.options) ||
+                      str_diff(new_config->keyboard.model, old_config->keyboard.model);
     if (kb_changed) {
         apply_keyboard_config(server, &new_config->keyboard);
     }
 
     /* 3. ssd */
-    bool ssd_changed = !old_config ||
-        (new_config->ssd.enabled != old_config->ssd.enabled) ||
+    bool ssd_changed =
+        !old_config || (new_config->ssd.enabled != old_config->ssd.enabled) ||
         (new_config->ssd.titlebar_height != old_config->ssd.titlebar_height) ||
         (new_config->ssd.border_width != old_config->ssd.border_width) ||
+        (new_config->ssd.button_width != old_config->ssd.button_width) ||
         (new_config->ssd.active_title_color != old_config->ssd.active_title_color) ||
-        (new_config->ssd.inactive_title_color != old_config->ssd.inactive_title_color);
+        (new_config->ssd.inactive_title_color != old_config->ssd.inactive_title_color) ||
+        (new_config->ssd.active_border_color != old_config->ssd.active_border_color) ||
+        (new_config->ssd.inactive_border_color != old_config->ssd.inactive_border_color);
 
     if (ssd_changed) {
-        apply_ssd_config(server);
+        apply_ssd_config(server, &new_config->ssd);
     }
 
     /* 4. cursor */
-    bool cur_changed = !old_config ||
-        (new_config->cursor.size != old_config->cursor.size) ||
-        ((new_config->cursor.theme != NULL) != (old_config->cursor.theme != NULL)) ||
-        (new_config->cursor.theme && strcmp(new_config->cursor.theme, old_config->cursor.theme) != 0);
+    bool cur_changed = !old_config || (new_config->cursor.size != old_config->cursor.size) ||
+                       str_diff(new_config->cursor.theme, old_config->cursor.theme);
 
     if (cur_changed) {
-        apply_cursor_config(server, &new_config->cursor);
+        apply_cursor_config(server, &new_config->cursor, old_config ? &old_config->cursor : NULL);
     }
 
     /* 5. 记入决策轨迹 */
     woodland_trace_add("cfg_apply", 0, "path=%s placement=%s kb_changed=%d ssd_changed=%d",
                        new_config->loaded_path ? new_config->loaded_path : "defaults",
-                       woodland_placement_policy_name(server->placement_policy),
-                       kb_changed, ssd_changed);
+                       woodland_placement_policy_name(server->placement_policy), kb_changed,
+                       ssd_changed);
 
     /* 6. 替换配置指针并销毁旧配置 */
     server->config = new_config;
@@ -135,7 +166,8 @@ void woodland_config_apply(struct woodland_server *server,
     }
 }
 
-bool woodland_config_reload(struct woodland_server *server) {
+bool woodland_config_reload(struct woodland_server *server)
+{
     if (!server) {
         return false;
     }
@@ -148,8 +180,7 @@ bool woodland_config_reload(struct woodland_server *server) {
 
     FILE *f = fopen(path, "rb");
     if (!f) {
-        wlr_log(WLR_ERROR, "config: reload failed: cannot open %s: %s",
-                path, strerror(errno));
+        wlr_log(WLR_ERROR, "config: reload failed: cannot open %s: %s", path, strerror(errno));
         return false;
     }
 

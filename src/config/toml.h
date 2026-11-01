@@ -39,8 +39,8 @@ struct toml_node {
 };
 
 struct toml_table {
-    char *name;             /* 表名，如 "general"、"decorations" */
-    bool is_array_elem;     /* 是否由 [[table]] 产生 */
+    char *name;         /* 表名，如 "general"、"decorations" */
+    bool is_array_elem; /* 是否由 [[table]] 产生 */
     struct toml_node *nodes;
     struct toml_table *next;
 };
