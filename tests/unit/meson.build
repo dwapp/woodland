@@ -20,14 +20,14 @@ test_seat = executable('test_seat', 'test_seat.c',
   dependencies: [wlroots, wayland_server],
   include_directories: woodland_inc,
   # seat.c 现在会调 protocol 层的 idle / 快捷键抑制钩子
-  link_with: [cursor_lib, output_lib, shell_lib, seat_lib, workspace_lib, layer_lib, ssd_lib, protocol_lib, util_lib])
+  link_with: [cursor_lib, output_lib, shell_lib, seat_lib, ime_lib, workspace_lib, layer_lib, ssd_lib, protocol_lib, util_lib])
 test('seat', test_seat)
 
 test_workspace = executable('test_workspace', 'test_workspace.c',
   dependencies: [wlroots, wayland_server],
   include_directories: woodland_inc,
   # workspace 切换会回调焦点回退（focus.c 在 shell_lib 里）
-  link_with: [output_lib, cursor_lib, shell_lib, workspace_lib, ssd_lib, layer_lib, seat_lib, capture_lib, util_lib])
+  link_with: [output_lib, cursor_lib, shell_lib, workspace_lib, ssd_lib, layer_lib, seat_lib, ime_lib, capture_lib, util_lib])
 test('workspace', test_workspace)
 
 test_view = executable('test_view', 'test_view.c',
@@ -39,7 +39,7 @@ test('view', test_view)
 test_layer = executable('test_layer', 'test_layer.c',
   dependencies: [wlroots, wayland_server],
   include_directories: woodland_inc,
-  link_with: [output_lib, cursor_lib, layer_lib, shell_lib, seat_lib, workspace_lib, ssd_lib, util_lib])
+  link_with: [output_lib, cursor_lib, layer_lib, shell_lib, seat_lib, ime_lib, workspace_lib, ssd_lib, util_lib])
 test('layer', test_layer)
 
 test_ssd = executable('test_ssd', 'test_ssd.c',
@@ -98,5 +98,11 @@ test('listener', test_listener)
 test_config = executable('test_config', 'test_config.c',
   dependencies: [wlroots, wayland_server, xkbcommon],
   include_directories: woodland_inc,
-  link_with: [config_lib, util_lib, trace_lib, output_lib, cursor_lib, shell_lib, seat_lib, workspace_lib, layer_lib, ssd_lib, capture_lib, ipc_lib, protocol_lib])
+  link_with: [config_lib, util_lib, trace_lib, output_lib, cursor_lib, shell_lib, seat_lib, ime_lib, workspace_lib, layer_lib, ssd_lib, capture_lib, ipc_lib, protocol_lib])
 test('config', test_config)
+
+test_ime = executable('test_ime', 'test_ime.c',
+  dependencies: [wlroots, wayland_server, xkbcommon],
+  include_directories: woodland_inc,
+  link_with: [ime_lib, seat_lib, cursor_lib, output_lib, shell_lib, workspace_lib, layer_lib, ssd_lib, protocol_lib, util_lib])
+test('ime', test_ime)
