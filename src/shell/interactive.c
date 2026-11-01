@@ -38,15 +38,15 @@
  * [span_start, span_start+span_len) 有交叠的视图——否则隔着半屏的窗口
  * 也会把我们的窗口吸过去。
  */
-static int collect_snap_edges(struct woodland_server *server,
-                              struct woodland_view *exclude, bool x_edges,
-                              int span_start, int span_len,
-                              int *edges, int max_edges) {
+static int collect_snap_edges(struct woodland_server *server, struct woodland_view *exclude,
+                              bool x_edges, int span_start, int span_len, int *edges, int max_edges)
+{
     int n = 0;
     struct woodland_view *it;
-    wl_list_for_each(it, &server->views, link) {
-        if (it == exclude || !it->mapped || it->minimized || it->fullscreen
-            || it->workspace != exclude->workspace) {
+    wl_list_for_each(it, &server->views, link)
+    {
+        if (it == exclude || !it->mapped || it->minimized || it->fullscreen ||
+            it->workspace != exclude->workspace) {
             continue;
         }
         struct woodland_ssd_margins m;
@@ -61,8 +61,7 @@ static int collect_snap_edges(struct woodland_server *server,
         };
         int other_start = x_edges ? box.y : box.x;
         int other_len = x_edges ? box.height : box.width;
-        if (other_start + other_len <= span_start
-            || span_start + span_len <= other_start) {
+        if (other_start + other_len <= span_start || span_start + span_len <= other_start) {
             continue;
         }
         if (n + 2 > max_edges) {
@@ -82,21 +81,21 @@ static int collect_snap_edges(struct woodland_server *server,
  * 直接把窗口平移到光标处是错的——最大化窗口一旦被拖，用户期望它缩回
  * 原来的大小并"挂在"光标上（labwc / 多数桌面的行为）。
  */
-static void view_unsnap_for_drag(struct woodland_view *view) {
+static void view_unsnap_for_drag(struct woodland_view *view)
+{
     if (!view->maximized && view->snapped_edges == 0) {
         return;
     }
     struct woodland_server *server = view->server;
 
-    struct wlr_box restore;   /* 内容框 */
+    struct wlr_box restore; /* 内容框 */
     if (view->maximized) {
         restore = view->saved_geometry;
         /* 直接落标志 + 通知客户端，位置稍后统一按光标摆 */
         view->maximized = false;
         shell_view_apply_maximized_state(view, false);
         if (view->toplevel_handle) {
-            wlr_foreign_toplevel_handle_v1_set_maximized(
-                view->toplevel_handle, false);
+            wlr_foreign_toplevel_handle_v1_set_maximized(view->toplevel_handle, false);
         }
     } else {
         struct woodland_ssd_margins m;
@@ -127,7 +126,8 @@ static void view_unsnap_for_drag(struct woodland_view *view) {
 }
 
 /* 释放鼠标时把"拖到边上的窗口"铺满（左/右半屏、上边最大化、四角 1/4） */
-void shell_view_apply_snap(struct woodland_view *view) {
+void shell_view_apply_snap(struct woodland_view *view)
+{
     uint32_t edges = view->pending_snap_edges;
     view->pending_snap_edges = 0;
     if (woodland_view_snap_to(view, edges)) {
@@ -137,9 +137,9 @@ void shell_view_apply_snap(struct woodland_view *view) {
 
 /* ==================== 抓取开始 ==================== */
 
-void woodland_view_begin_interactive(struct woodland_view *view,
-                                     enum woodland_cursor_mode mode,
-                                     uint32_t edges) {
+void woodland_view_begin_interactive(struct woodland_view *view, enum woodland_cursor_mode mode,
+                                     uint32_t edges)
+{
     struct woodland_server *server = view->server;
     server->grabbed_view = view;
     server->cursor_mode = mode;
@@ -152,16 +152,17 @@ void woodland_view_begin_interactive(struct woodland_view *view,
         view_unsnap_for_drag(view);
         server->grab_x = server->cursor->x - view->scene_tree->node.x;
         server->grab_y = server->cursor->y - view->scene_tree->node.y;
+        shell_cursor_set(server, "grabbing");
     } else {
         /* 手动缩放即放弃贴边状态（尺寸由用户接管） */
         view->snapped_edges = 0;
         view->pending_snap_edges = 0;
         struct wlr_box geo_box;
         woodland_view_content_box(view, &geo_box);
-        double border_x = (view->scene_tree->node.x + geo_box.x) +
-            ((edges & WLR_EDGE_RIGHT) ? geo_box.width : 0);
+        double border_x =
+            (view->scene_tree->node.x + geo_box.x) + ((edges & WLR_EDGE_RIGHT) ? geo_box.width : 0);
         double border_y = (view->scene_tree->node.y + geo_box.y) +
-            ((edges & WLR_EDGE_BOTTOM) ? geo_box.height : 0);
+                          ((edges & WLR_EDGE_BOTTOM) ? geo_box.height : 0);
         server->grab_x = server->cursor->x - border_x;
         server->grab_y = server->cursor->y - border_y;
 
@@ -170,16 +171,19 @@ void woodland_view_begin_interactive(struct woodland_view *view,
         server->grab_geobox.y += view->scene_tree->node.y;
 
         server->resize_edges = edges;
+        shell_cursor_set_resize(server, edges);
     }
 }
 
-static void xdg_toplevel_request_move(struct wl_listener *listener, void *data) {
+static void xdg_toplevel_request_move(struct wl_listener *listener, void *data)
+{
     struct woodland_view *view = wl_container_of(listener, view, request_move);
     woodland_view_begin_interactive(view, WOODLAND_CURSOR_MOVE, 0);
     (void)data;
 }
 
-static void xdg_toplevel_request_resize(struct wl_listener *listener, void *data) {
+static void xdg_toplevel_request_resize(struct wl_listener *listener, void *data)
+{
     struct wlr_xdg_toplevel_resize_event *event = data;
     struct woodland_view *view = wl_container_of(listener, view, request_resize);
     woodland_view_begin_interactive(view, WOODLAND_CURSOR_RESIZE, event->edges);
@@ -195,7 +199,8 @@ static void xdg_toplevel_request_resize(struct wl_listener *listener, void *data
  * 算 y，避免两次吸附互相打脸。吸附基准是**窗口所在输出**的工作区，
  * 多输出下光标在副屏时不会被主屏的边吸走。
  */
-void shell_process_cursor_move(struct woodland_server *server) {
+void shell_process_cursor_move(struct woodland_server *server)
+{
     struct woodland_view *view = server->grabbed_view;
     struct woodland_ssd_margins margins;
     woodland_ssd_get_margins(view, &margins);
@@ -211,8 +216,8 @@ void shell_process_cursor_move(struct woodland_server *server) {
     view->pending_snap_edges = 0;
 
     if (!view->maximized && !view->fullscreen) {
-        struct woodland_output *wo = woodland_output_at(server,
-            server->cursor->x, server->cursor->y);
+        struct woodland_output *wo =
+            woodland_output_at(server, server->cursor->x, server->cursor->y);
         if (!wo) {
             wo = woodland_output_for_view(view);
         }
@@ -220,15 +225,13 @@ void shell_process_cursor_move(struct woodland_server *server) {
         woodland_output_workarea(wo, &area);
 
         int edges[WOODLAND_SNAP_MAX_EDGES];
-        int n = collect_snap_edges(server, view, true, y, outer_h,
-                                   edges, WOODLAND_SNAP_MAX_EDGES);
-        x = woodland_snap_axis(x, outer_w, area.x, area.x + area.width,
-                               edges, n, WOODLAND_SNAP_DISTANCE);
+        int n = collect_snap_edges(server, view, true, y, outer_h, edges, WOODLAND_SNAP_MAX_EDGES);
+        x = woodland_snap_axis(x, outer_w, area.x, area.x + area.width, edges, n,
+                               WOODLAND_SNAP_DISTANCE);
 
-        n = collect_snap_edges(server, view, false, x, outer_w,
-                               edges, WOODLAND_SNAP_MAX_EDGES);
-        y = woodland_snap_axis(y, outer_h, area.y, area.y + area.height,
-                               edges, n, WOODLAND_SNAP_DISTANCE);
+        n = collect_snap_edges(server, view, false, x, outer_w, edges, WOODLAND_SNAP_MAX_EDGES);
+        y = woodland_snap_axis(y, outer_h, area.y, area.y + area.height, edges, n,
+                               WOODLAND_SNAP_DISTANCE);
 
         /*
          * 贴边铺满的判定：只有真的拖动了（超过阈值距离）才算，
@@ -236,19 +239,19 @@ void shell_process_cursor_move(struct woodland_server *server) {
          */
         double dx = server->cursor->x - server->drag_start_x;
         double dy = server->cursor->y - server->drag_start_y;
-        if ((dx < 0 ? -dx : dx) > WOODLAND_SNAP_DISTANCE
-                || (dy < 0 ? -dy : dy) > WOODLAND_SNAP_DISTANCE) {
-            struct wlr_box outer = { x, y, outer_w, outer_h };
-            view->pending_snap_edges = woodland_snap_edges_for(
-                &outer, &area, WOODLAND_SNAP_DISTANCE);
+        if ((dx < 0 ? -dx : dx) > WOODLAND_SNAP_DISTANCE ||
+            (dy < 0 ? -dy : dy) > WOODLAND_SNAP_DISTANCE) {
+            struct wlr_box outer = {x, y, outer_w, outer_h};
+            view->pending_snap_edges =
+                woodland_snap_edges_for(&outer, &area, WOODLAND_SNAP_DISTANCE);
         }
     }
 
-    wlr_scene_node_set_position(&view->scene_tree->node,
-        x + margins.left, y + margins.top);
+    wlr_scene_node_set_position(&view->scene_tree->node, x + margins.left, y + margins.top);
 }
 
-void shell_process_cursor_resize(struct woodland_server *server) {
+void shell_process_cursor_resize(struct woodland_server *server)
+{
     struct woodland_view *view = server->grabbed_view;
     double border_x = server->cursor->x - server->grab_x;
     double border_y = server->cursor->y - server->grab_y;
@@ -313,21 +316,23 @@ void shell_process_cursor_resize(struct woodland_server *server) {
 
     struct wlr_box geo_box;
     woodland_view_content_box(view, &geo_box);
-    wlr_scene_node_set_position(&view->scene_tree->node,
-        new_left - geo_box.x, new_top - geo_box.y);
+    wlr_scene_node_set_position(&view->scene_tree->node, new_left - geo_box.x, new_top - geo_box.y);
 
-    woodland_view_request_size(view, new_right - new_left,
-                               new_bottom - new_top);
+    woodland_view_request_size(view, new_right - new_left, new_bottom - new_top);
 }
 
-void woodland_cursor_reset_mode(struct woodland_server *server) {
+void woodland_cursor_reset_mode(struct woodland_server *server)
+{
     server->cursor_mode = WOODLAND_CURSOR_PASSTHROUGH;
     server->grabbed_view = NULL;
+    server->resize_edges = 0;
+    shell_cursor_set(server, "default");
 }
 
-void shell_interactive_attach(struct woodland_view *view) {
+void shell_interactive_attach(struct woodland_view *view)
+{
     woodland_listener_connect(&view->request_move, &view->xdg_toplevel->events.request_move,
-                          xdg_toplevel_request_move, "interactive.request_move");
+                              xdg_toplevel_request_move, "interactive.request_move");
     woodland_listener_connect(&view->request_resize, &view->xdg_toplevel->events.request_resize,
-                          xdg_toplevel_request_resize, "interactive.request_resize");
+                              xdg_toplevel_request_resize, "interactive.request_resize");
 }

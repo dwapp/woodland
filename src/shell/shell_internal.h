@@ -32,11 +32,9 @@ struct wlr_box;
 void shell_toplevel_state_attach(struct woodland_view *view);
 
 /* 下面三个给 interactive.c 用：拖动恢复、贴边恢复、松手铺满都要落几何 */
-void shell_view_apply_geometry(struct woodland_view *view,
-                               const struct wlr_box *box);
+void shell_view_apply_geometry(struct woodland_view *view, const struct wlr_box *box);
 void shell_view_schedule_configure(struct woodland_view *view);
-void shell_view_apply_maximized_state(struct woodland_view *view,
-                                      bool maximized);
+void shell_view_apply_maximized_state(struct woodland_view *view, bool maximized);
 
 /* ---- interactive.c ---- */
 
@@ -49,5 +47,9 @@ void shell_process_cursor_resize(struct woodland_server *server);
 
 /** 松手时把"拖到边上的窗口"铺满（由 cursor.c 在释放分支调用）。 */
 void shell_view_apply_snap(struct woodland_view *view);
+
+/* ---- cursor.c ---- */
+void shell_cursor_set(struct woodland_server *server, const char *name);
+void shell_cursor_set_resize(struct woodland_server *server, uint32_t edges);
 
 #endif
