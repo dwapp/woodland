@@ -39,8 +39,10 @@ static void usage(const char *name) {
            "  self_check  invariant checks\n"
            "  dump_scene  the wlr_scene tree\n"
            "  ping        liveness probe\n"
+           "  get_config  active runtime configuration\n"
+           "  reload_config reload configuration from file\n"
            "\n"
-           "aliases: tree, focus, check, scene\n"
+           "aliases: tree, focus, check, scene, config, reload\n"
            "\n"
            "options:\n"
            "  -s, --socket PATH   debug socket (default: $WOODLAND_IPC)\n"
@@ -64,6 +66,12 @@ static const char *normalize(const char *cmd) {
     }
     if (strcmp(cmd, "scene") == 0 || strcmp(cmd, "dump-scene") == 0) {
         return "dump_scene";
+    }
+    if (strcmp(cmd, "config") == 0 || strcmp(cmd, "get-config") == 0) {
+        return "get_config";
+    }
+    if (strcmp(cmd, "reload") == 0 || strcmp(cmd, "reload-config") == 0) {
+        return "reload_config";
     }
     return cmd;
 }

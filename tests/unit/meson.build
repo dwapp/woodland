@@ -94,3 +94,9 @@ test_listener = executable('test_listener', 'test_listener.c',
   include_directories: woodland_inc,
   link_with: util_lib)
 test('listener', test_listener)
+
+test_config = executable('test_config', 'test_config.c',
+  dependencies: [wlroots, wayland_server, xkbcommon],
+  include_directories: woodland_inc,
+  link_with: [config_lib, util_lib, trace_lib, output_lib, cursor_lib, shell_lib, seat_lib, workspace_lib, layer_lib, ssd_lib, capture_lib, ipc_lib, protocol_lib])
+test('config', test_config)

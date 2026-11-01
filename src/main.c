@@ -10,12 +10,12 @@
 #include "woodland.h"
 
 static void usage(const char *name) {
-    printf("Usage: %s [-s startup command] [-p placement policy] [--self-check]"
+    printf("Usage: %s [-s startup command] [-c config file] [-p placement policy] [--self-check]"
            " [--trace]\n"
            "\n"
            "  -s  command run after the compositor is up\n"
+           "  -c  path to configuration file (default: $XDG_CONFIG_HOME/woodland/config.toml)\n"
            "  -p  new window placement: cascade (default), center, cursor, autoplace\n"
-           "  --self-check  run invariant checks after every state change\n"
            "                (failures are logged, not fatal)\n"
            "  --trace       keep the last 4096 state-change decisions in a ring\n"
            "                buffer and expose them as `wctl get_trace`\n"
@@ -29,10 +29,11 @@ int main(int argc, char *argv[]) {
     woodland_log_init(WLR_INFO);
 
     char *startup_cmd = NULL;
+    char *config_path = NULL;
     bool self_check = false;
     bool trace_enabled = false;
+    bool placement_specified = false;
     enum woodland_placement_policy placement = WOODLAND_PLACE_CASCADE;
-
     enum {
         OPT_SELF_CHECK = 256,
         OPT_TRACE,
@@ -40,15 +41,19 @@ int main(int argc, char *argv[]) {
     static const struct option long_options[] = {
         {"self-check", no_argument, NULL, OPT_SELF_CHECK},
         {"trace", no_argument, NULL, OPT_TRACE},
+        {"config", required_argument, NULL, 'c'},
         {"help", no_argument, NULL, 'h'},
         {NULL, 0, NULL, 0},
     };
 
     int c;
-    while ((c = getopt_long(argc, argv, "s:p:h", long_options, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "s:p:c:h", long_options, NULL)) != -1) {
         switch (c) {
         case 's':
             startup_cmd = optarg;
+            break;
+        case 'c':
+            config_path = optarg;
             break;
         case 'p':
             if (!woodland_placement_policy_parse(optarg, &placement)) {
@@ -56,6 +61,7 @@ int main(int argc, char *argv[]) {
                 usage(argv[0]);
                 return 1;
             }
+            placement_specified = true;
             break;
         case OPT_SELF_CHECK:
             self_check = true;
@@ -78,7 +84,9 @@ int main(int argc, char *argv[]) {
 
     struct woodland_server server = {0};
     server.startup_cmd = startup_cmd;
+    server.config_path = config_path;
     server.placement_policy = placement;
+    server.placement_specified = placement_specified;
     server.self_check = self_check;
     if (!woodland_server_init(&server)) {
         woodland_server_finish(&server);
