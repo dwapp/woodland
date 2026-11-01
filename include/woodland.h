@@ -32,6 +32,7 @@ struct wlr_compositor;
 /* 上游协议（src/protocol）：整体不透明，外部只经 protocol.h 的接口访问 */
 struct woodland_proto;
 struct woodland_config;
+struct woodland_ime_relay;
 struct woodland_server {
     struct wl_display *display;
     struct wl_event_loop *event_loop;
@@ -42,8 +43,8 @@ struct woodland_server {
     struct wlr_renderer *renderer;
     struct wlr_allocator *allocator;
     struct wlr_scene *scene;
-    struct wl_list outputs;               // struct woodland_output.link 链表头
-    struct wl_listener new_output;        // backend->events.new_output 监听器
+    struct wl_list outputs;        // struct woodland_output.link 链表头
+    struct wl_listener new_output; // backend->events.new_output 监听器
     /*
      * 新输出的收尾广播：在 woodland_output 完全就位（含 commit）之后跑，
      * 因为 output 层不该反过来依赖协议层。注册顺序决定执行顺序，所以在
@@ -62,11 +63,12 @@ struct woodland_server {
 
     /* seat 与输入 */
     struct wlr_seat *seat;
-    struct wl_list keyboards;             // struct woodland_keyboard.link 链表头
-    struct wl_listener new_input;         // backend->events.new_input 监听器
-    struct wl_listener request_cursor;    // seat->events.request_set_cursor
+    struct wl_list keyboards;                 // struct woodland_keyboard.link 链表头
+    struct wl_listener new_input;             // backend->events.new_input 监听器
+    struct wl_listener request_cursor;        // seat->events.request_set_cursor
     struct wl_listener request_set_selection; // seat->events.request_set_selection
     struct wl_listener pointer_focus_change;  // seat->pointer_state.events.focus_change
+    struct woodland_ime_relay *ime;           // 输入法中继器与协议管理
 
     /* 光标 */
     struct wlr_cursor *cursor;
@@ -81,7 +83,7 @@ struct woodland_server {
     enum woodland_cursor_mode cursor_mode;
     struct woodland_view *grabbed_view;
     double grab_x, grab_y;
-    double drag_start_x, drag_start_y;   // 本次拖动起点（判断是否真的拖动了）
+    double drag_start_x, drag_start_y; // 本次拖动起点（判断是否真的拖动了）
     struct wlr_box grab_geobox;
     uint32_t resize_edges;
 
@@ -93,7 +95,7 @@ struct woodland_server {
 
     /* shell 与视图 */
     struct wlr_xdg_shell *xdg_shell;
-    struct wl_list views;                 // struct woodland_view.link 链表头（z 序，最上在前）
+    struct wl_list views; // struct woodland_view.link 链表头（z 序，最上在前）
     /*
      * 当前焦点视图。
      *
@@ -116,7 +118,7 @@ struct woodland_server {
     struct wl_listener new_toplevel_decoration;
 
     /* 工作区 */
-    struct wl_list workspaces;            // struct woodland_workspace.link
+    struct wl_list workspaces; // struct woodland_workspace.link
     struct woodland_workspace *active_workspace;
     struct wlr_ext_workspace_manager_v1 *ext_workspace_manager;
     struct wlr_ext_workspace_group_handle_v1 *ext_workspace_group;
@@ -146,9 +148,9 @@ struct woodland_server {
     struct wlr_ext_foreign_toplevel_list_v1 *ext_toplevel_list;
 
     /* Xwayland（src/xwayland） */
-    struct wlr_compositor *compositor;    // wlr_xwayland_create 需要
+    struct wlr_compositor *compositor; // wlr_xwayland_create 需要
     struct wlr_xwayland *xwayland;
-    struct wl_list xwayland_unmanaged;    // override-redirect 窗口链表头
+    struct wl_list xwayland_unmanaged;              // override-redirect 窗口链表头
     struct wlr_scene_tree *xwayland_unmanaged_tree; // 浮在普通视图之上
     struct wl_listener new_xwayland_surface;
     struct wl_listener xwayland_ready;
@@ -162,7 +164,7 @@ struct woodland_server {
     char *ipc_path;
     int ipc_fd;
     struct wl_event_source *ipc_source;
-    struct wl_list ipc_clients;           // struct woodland_ipc_client.link
+    struct wl_list ipc_clients; // struct woodland_ipc_client.link
 
     /*
      * 不变量自检（src/selfcheck）。
@@ -177,9 +179,9 @@ struct woodland_server {
     /* 视图 id：调试接口里的稳定标识（指针每次运行都变，没法写断言） */
     uint32_t next_view_id;
 
-    const char *startup_cmd;              // -s 启动命令
-    const char *config_path;              // -c 配置文件路径
-    struct woodland_config *config;       // 运行时配置
+    const char *startup_cmd;        // -s 启动命令
+    const char *config_path;        // -c 配置文件路径
+    struct woodland_config *config; // 运行时配置
 };
 
 #endif

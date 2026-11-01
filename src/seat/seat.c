@@ -10,6 +10,7 @@
 #include <xkbcommon/xkbcommon.h>
 
 #include "focus.h"
+#include "ime.h"
 #include "protocol.h"
 #include "seat.h"
 #include "view.h"
@@ -22,8 +23,11 @@
 static void keyboard_handle_modifiers(struct wl_listener *listener, void *data)
 {
     struct woodland_keyboard *keyboard = wl_container_of(listener, keyboard, modifiers);
-    wlr_seat_set_keyboard(keyboard->server->seat, keyboard->wlr_keyboard);
-    wlr_seat_keyboard_notify_modifiers(keyboard->server->seat, &keyboard->wlr_keyboard->modifiers);
+    if (!woodland_ime_keyboard_grab_modifiers(keyboard->server, keyboard->wlr_keyboard)) {
+        wlr_seat_set_keyboard(keyboard->server->seat, keyboard->wlr_keyboard);
+        wlr_seat_keyboard_notify_modifiers(keyboard->server->seat,
+                                           &keyboard->wlr_keyboard->modifiers);
+    }
     (void)data;
 }
 
@@ -102,8 +106,10 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data)
     }
 
     if (!handled) {
-        wlr_seat_set_keyboard(seat, keyboard->wlr_keyboard);
-        wlr_seat_keyboard_notify_key(seat, event->time_msec, event->keycode, event->state);
+        if (!woodland_ime_keyboard_grab_key(server, keyboard->wlr_keyboard, event)) {
+            wlr_seat_set_keyboard(seat, keyboard->wlr_keyboard);
+            wlr_seat_keyboard_notify_key(seat, event->time_msec, event->keycode, event->state);
+        }
     }
 }
 
@@ -118,7 +124,7 @@ static void keyboard_handle_destroy(struct wl_listener *listener, void *data)
     (void)data;
 }
 
-static void server_new_keyboard(struct woodland_server *server, struct wlr_input_device *device)
+void woodland_seat_new_keyboard(struct woodland_server *server, struct wlr_input_device *device)
 {
     struct wlr_keyboard *wlr_keyboard = wlr_keyboard_from_input_device(device);
 
@@ -175,7 +181,7 @@ static void server_new_input(struct wl_listener *listener, void *data)
     struct wlr_input_device *device = data;
     switch (device->type) {
     case WLR_INPUT_DEVICE_KEYBOARD:
-        server_new_keyboard(server, device);
+        woodland_seat_new_keyboard(server, device);
         break;
     case WLR_INPUT_DEVICE_POINTER:
         server_new_pointer(server, device);

@@ -19,6 +19,7 @@
 #include "capture.h"
 #include "config.h"
 #include "cursor.h"
+#include "ime.h"
 #include "ipc.h"
 #include "layer.h"
 #include "output.h"
@@ -167,6 +168,10 @@ bool woodland_server_init(struct woodland_server *server)
         return false;
     }
 
+    if (!woodland_ime_init(server)) {
+        wlr_log(WLR_ERROR, "failed to init ime");
+        return false;
+    }
     if (!woodland_shell_init(server)) {
         wlr_log(WLR_ERROR, "failed to init shell");
         return false;
@@ -326,6 +331,7 @@ void woodland_server_finish(struct woodland_server *server)
     woodland_ssd_finish();
     woodland_layer_finish(server);
     woodland_workspace_finish(server);
+    woodland_ime_finish(server);
     woodland_seat_finish(server);
     woodland_cursor_finish(server);
     woodland_output_finish(server);
