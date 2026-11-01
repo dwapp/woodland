@@ -1,16 +1,20 @@
 // SPDX-License-Identifier: GPL-2.0-only
+#include "icon.h"
+#include "ssd.h"
+#include "view.h"
+#include "woodland.h"
 #include <assert.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <wayland-server-core.h>
 #include <wlr/types/wlr_scene.h>
 #include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/util/edges.h>
-#include "ssd.h"
-#include "view.h"
-#include "woodland.h"
 
 /* 用栈上伪造的 view/xdg 结构测 SSD 纯几何逻辑，不依赖真实 client 连接 */
-int main(void) {
+int main(void)
+{
     struct woodland_server server = {0};
     server.display = wl_display_create();
     assert(server.display);
@@ -18,8 +22,8 @@ int main(void) {
     assert(server.scene);
 
     struct wlr_xdg_surface fake_base = {0};
-    fake_base.geometry = (struct wlr_box){ .x = 0, .y = 0, .width = 400, .height = 300 };
-    struct wlr_xdg_toplevel fake_toplevel = { .base = &fake_base };
+    fake_base.geometry = (struct wlr_box){.x = 0, .y = 0, .width = 400, .height = 300};
+    struct wlr_xdg_toplevel fake_toplevel = {.base = &fake_base};
 
     struct woodland_view view = {0};
     view.server = &server;
@@ -34,8 +38,7 @@ int main(void) {
 
     /* titlebar 命中：布局坐标 (150, 88) → 相对 (50, -12) 在标题栏内（高 26） */
     uint32_t edges = 0;
-    enum woodland_ssd_part part =
-        woodland_ssd_at(&view, 150, 88, &edges);
+    enum woodland_ssd_part part = woodland_ssd_at(&view, 150, 88, &edges);
     assert(part == WOODLAND_SSD_TITLEBAR);
 
     /* 按钮：宽 26、间距 0，自右向左 close/max/iconify，占 [400-78, 400) */
@@ -83,8 +86,7 @@ int main(void) {
     woodland_ssd_set_active(&view, false);
 
     /* 按钮 hover/按下态：状态切换不崩溃，且与命中区域一一对应 */
-    assert(woodland_ssd_at(&view, 100 + 380, 100 - 12, &edges)
-        == WOODLAND_SSD_BUTTON_CLOSE);
+    assert(woodland_ssd_at(&view, 100 + 380, 100 - 12, &edges) == WOODLAND_SSD_BUTTON_CLOSE);
     woodland_ssd_set_hover(&view, WOODLAND_SSD_BUTTON_CLOSE);
     woodland_ssd_set_pressed(&view, WOODLAND_SSD_BUTTON_CLOSE);
     woodland_ssd_set_pressed(&view, WOODLAND_SSD_NONE);
@@ -110,20 +112,37 @@ int main(void) {
     /* 全屏：装饰全隐，无任何外边距 */
     view.fullscreen = true;
     woodland_ssd_get_margins(&view, &margins);
-    assert(margins.left == 0 && margins.top == 0
-        && margins.right == 0 && margins.bottom == 0);
+    assert(margins.left == 0 && margins.top == 0 && margins.right == 0 && margins.bottom == 0);
     view.fullscreen = false;
 
     /* CSD（客户端自绘）：同样无边距，否则窗口会被挪出空档 */
     view.deco_csd = true;
     woodland_ssd_get_margins(&view, &margins);
-    assert(margins.left == 0 && margins.top == 0
-        && margins.right == 0 && margins.bottom == 0);
+    assert(margins.left == 0 && margins.top == 0 && margins.right == 0 && margins.bottom == 0);
     view.deco_csd = false;
 
     /* destroy：view->ssd 置空，scene 树级联释放 */
     woodland_ssd_destroy(&view);
     assert(view.ssd == NULL);
+
+    /* .desktop 图标解析单测 */
+    char tmp_desktop[] = "/tmp/woodland_test_desktop_XXXXXX";
+    int fd = mkstemp(tmp_desktop);
+    assert(fd >= 0);
+    const char *content = "[Desktop Entry]\nName=Test App\nIcon=org.test.App\nType=Application\n";
+    assert(write(fd, content, strlen(content)) == (ssize_t)strlen(content));
+    close(fd);
+    char *parsed_icon = woodland_icon_from_desktop_file(tmp_desktop);
+    assert(parsed_icon != NULL);
+    assert(strcmp(parsed_icon, "org.test.App") == 0);
+    free(parsed_icon);
+    unlink(tmp_desktop);
+
+    /* 不存在的图标路径查询不崩溃 */
+    char *nonexistent = woodland_icon_find_path("nonexistent.app.xyz.123");
+    assert(nonexistent == NULL);
+
+    woodland_ssd_finish();
 
     wlr_scene_node_destroy(&view.scene_tree->node);
     wlr_scene_node_destroy(&server.scene->tree.node);

@@ -19,7 +19,6 @@
 #include "capture.h"
 #include "config.h"
 #include "cursor.h"
-#include "woodland_config.h"
 #include "ipc.h"
 #include "layer.h"
 #include "output.h"
@@ -28,29 +27,32 @@
 #include "selfcheck.h"
 #include "server.h"
 #include "view.h"
-#include "workspace.h"
 #include "woodland.h"
+#include "woodland_config.h"
+#include "workspace.h"
 #if WOODLAND_HAVE_XWAYLAND
 #include "xwayland.h"
 #endif
 
-static int handle_terminate(int signal, void *data) {
+static int handle_terminate(int signal, void *data)
+{
     struct wl_display *display = data;
     wlr_log(WLR_INFO, "received signal %d, terminating", signal);
     wl_display_terminate(display);
     return 0;
 }
 
-static int handle_sighup(int signal, void *data) {
+static int handle_sighup(int signal, void *data)
+{
     struct woodland_server *server = data;
     wlr_log(WLR_INFO, "received signal %d (SIGHUP), reloading configuration", signal);
     woodland_config_reload(server);
     return 0;
 }
 
-static void handle_request_set_shape(struct wl_listener *listener, void *data) {
-    struct woodland_server *server =
-        wl_container_of(listener, server, request_set_shape);
+static void handle_request_set_shape(struct wl_listener *listener, void *data)
+{
+    struct woodland_server *server = wl_container_of(listener, server, request_set_shape);
     struct wlr_cursor_shape_manager_v1_request_set_shape_event *event = data;
     const char *name = wlr_cursor_shape_v1_name(event->shape);
     woodland_cursor_set(server, name);
@@ -65,17 +67,17 @@ static void handle_request_set_shape(struct wl_listener *listener, void *data) {
  * 一份——wdisplays / kanshi 从此看不到这个输出。本监听器注册在
  * handle_new_output 之后，跑的时候输出已经完全就位。
  */
-static void handle_new_output_broadcast(struct wl_listener *listener,
-                                        void *data) {
-    struct woodland_server *server =
-        wl_container_of(listener, server, new_output_broadcast);
+static void handle_new_output_broadcast(struct wl_listener *listener, void *data)
+{
+    struct woodland_server *server = wl_container_of(listener, server, new_output_broadcast);
     /* 协议层可能还没初始化（headless 的首个输出早于 protocol init），
      * 那种情况由 woodland_protocol_init 末尾的补广播覆盖 */
     woodland_protocol_output_changed(server);
     (void)data;
 }
 
-bool woodland_server_init(struct woodland_server *server) {
+bool woodland_server_init(struct woodland_server *server)
+{
     /* ipc_fd 的 0 是 stdin：先置 -1，避免 finish 里误关标准输入 */
     server->ipc_fd = -1;
     wl_list_init(&server->ipc_clients);
@@ -91,12 +93,12 @@ bool woodland_server_init(struct woodland_server *server) {
 
     server->event_loop = wl_display_get_event_loop(server->display);
 
-    server->sigint_source = wl_event_loop_add_signal(
-        server->event_loop, SIGINT, handle_terminate, server->display);
-    server->sigterm_source = wl_event_loop_add_signal(
-        server->event_loop, SIGTERM, handle_terminate, server->display);
-    server->sighup_source = wl_event_loop_add_signal(
-        server->event_loop, SIGHUP, handle_sighup, server);
+    server->sigint_source =
+        wl_event_loop_add_signal(server->event_loop, SIGINT, handle_terminate, server->display);
+    server->sigterm_source =
+        wl_event_loop_add_signal(server->event_loop, SIGTERM, handle_terminate, server->display);
+    server->sighup_source =
+        wl_event_loop_add_signal(server->event_loop, SIGHUP, handle_sighup, server);
     if (!server->sigint_source || !server->sigterm_source || !server->sighup_source) {
         wlr_log(WLR_ERROR, "failed to register signal handler");
         return false;
@@ -130,8 +132,7 @@ bool woodland_server_init(struct woodland_server *server) {
     /* 基础协议：compositor 是客户端分配 surface 的必需接口；
      * subcompositor 处理 subsurface；data-device-manager 处理剪贴板。
      * 三者均挂在 display 上，随 display 销毁自动释放。 */
-    server->compositor = wlr_compositor_create(server->display, 5,
-                                               server->renderer);
+    server->compositor = wlr_compositor_create(server->display, 5, server->renderer);
     wlr_subcompositor_create(server->display);
     wlr_data_device_manager_create(server->display);
 
@@ -150,7 +151,6 @@ bool woodland_server_init(struct woodland_server *server) {
         wlr_log(WLR_ERROR, "failed to create scene");
         return false;
     }
-
 
     if (!woodland_output_init(server)) {
         wlr_log(WLR_ERROR, "failed to init output");
@@ -208,9 +208,9 @@ bool woodland_server_init(struct woodland_server *server) {
      * verbose 注册（emit 自动计数）：它是 connect_verbose 的活体示例，
      * 选它是因为启动必发一次——smoke 拿"emits >= 1"断言计账链路是活的；
      * 同时它自己就是坑 2 的契约现场，跑没跑一眼可查 */
-    woodland_listener_connect_verbose(
-        &server->new_output_broadcast, &server->backend->events.new_output,
-        handle_new_output_broadcast, "server.new_output");
+    woodland_listener_connect_verbose(&server->new_output_broadcast,
+                                      &server->backend->events.new_output,
+                                      handle_new_output_broadcast, "server.new_output");
 
     if (!woodland_capture_init(server)) {
         wlr_log(WLR_ERROR, "failed to init capture");
@@ -226,15 +226,15 @@ bool woodland_server_init(struct woodland_server *server) {
     }
 #endif
 
-    server->cursor_shape_manager =
-        wlr_cursor_shape_manager_v1_create(server->display, 1);
+    server->cursor_shape_manager = wlr_cursor_shape_manager_v1_create(server->display, 1);
     if (!server->cursor_shape_manager) {
         wlr_log(WLR_ERROR, "failed to create cursor-shape manager");
         return false;
     }
 
-    woodland_listener_connect(&server->request_set_shape, &server->cursor_shape_manager->events.request_set_shape,
-                          handle_request_set_shape, "server.request_set_shape");
+    woodland_listener_connect(&server->request_set_shape,
+                              &server->cursor_shape_manager->events.request_set_shape,
+                              handle_request_set_shape, "server.request_set_shape");
 
     if (!server->config) {
         struct woodland_config *cfg = woodland_config_load(server->config_path);
@@ -243,7 +243,8 @@ bool woodland_server_init(struct woodland_server *server) {
     return true;
 }
 
-bool woodland_server_start(struct woodland_server *server) {
+bool woodland_server_start(struct woodland_server *server)
+{
     const char *socket = wl_display_add_socket_auto(server->display);
     if (!socket) {
         wlr_log(WLR_ERROR, "failed to add wayland socket");
@@ -281,12 +282,14 @@ bool woodland_server_start(struct woodland_server *server) {
     return true;
 }
 
-void woodland_server_run(struct woodland_server *server) {
+void woodland_server_run(struct woodland_server *server)
+{
     wl_display_run(server->display);
     wl_display_destroy_clients(server->display);
 }
 
-void woodland_server_finish(struct woodland_server *server) {
+void woodland_server_finish(struct woodland_server *server)
+{
     if (server->sigint_source) {
         wl_event_source_remove(server->sigint_source);
         server->sigint_source = NULL;
@@ -320,6 +323,7 @@ void woodland_server_finish(struct woodland_server *server) {
     woodland_protocol_finish(server);
     woodland_capture_finish(server);
     woodland_shell_finish(server);
+    woodland_ssd_finish();
     woodland_layer_finish(server);
     woodland_workspace_finish(server);
     woodland_seat_finish(server);

@@ -5,6 +5,7 @@
 #include <wlr/util/edges.h>
 #include <wlr/util/log.h>
 
+#include "icon.h"
 #include "ssd.h"
 #include "text_buffer.h"
 #include "view.h"
@@ -37,6 +38,7 @@ struct woodland_ssd {
     struct wlr_scene_rect *button_bg[BUTTON_COUNT]; // 按钮悬停/按下底色（在图标之下）
     struct wlr_scene_buffer *button[BUTTON_COUNT];
     struct woodland_text_buffer *title_text;
+    struct wlr_scene_buffer *title_icon; // 标题栏应用图标
     enum woodland_ssd_part hover_part;   // 悬停的按钮（NONE = 无）
     enum woodland_ssd_part pressed_part; // 按下的按钮（NONE = 无）
     int width;                           /* 内容宽（缓存的几何） */
@@ -276,16 +278,28 @@ static void ssd_layout(struct woodland_ssd *ssd)
         x -= gap + bwn;
     }
 
-    /* 标题文字：按 GXDE/Deepin 风格全宽居中，靠右侧按钮过近时向左让位 */
+    /* 左侧应用图标：垂直居中于标题栏 */
+    int icon_size = th >= 32 ? 22 : 16;
+    int icon_pad = 8;
+    if (ssd->title_icon) {
+        int icon_y = -th + (th - icon_size) / 2;
+        wlr_scene_node_set_position(&ssd->title_icon->node, icon_pad, icon_y);
+    }
+
+    /* 标题文字：按 GXDE/Deepin 风格全宽居中，左右分别与应用图标及控制按钮保持安全距离 */
     if (ssd->title_text) {
         int title_w = woodland_text_buffer_get_width(ssd->title_text);
         int right_btns = BUTTON_COUNT * bwn + (BUTTON_COUNT - 1) * gap;
+        int left_bound = ssd->title_icon ? (icon_pad + icon_size + 8) : 8;
         int tx = (w - title_w) / 2;
+        if (tx < left_bound) {
+            tx = left_bound;
+        }
         if (tx + title_w > w - right_btns - 8) {
             tx = w - right_btns - 8 - title_w;
         }
-        if (tx < 8) {
-            tx = 8;
+        if (tx < left_bound) {
+            tx = left_bound;
         }
         woodland_text_buffer_set_position(ssd->title_text, tx, -th);
     }
@@ -348,6 +362,13 @@ void woodland_ssd_create(struct woodland_view *view)
 
     ssd->title_text = woodland_text_buffer_create(ssd->tree);
 
+    int th = ssd_titlebar_height(view);
+    int icon_size = th >= 32 ? 22 : 16;
+    struct wlr_buffer *icon_buf = woodland_ssd_get_icon_buffer(view, icon_size, 1.0f);
+    if (icon_buf) {
+        ssd->title_icon = wlr_scene_buffer_create(ssd->tree, icon_buf);
+    }
+
     if (!ssd->titlebar || !ssd->border[BORDER_TOP] || !ssd->border[BORDER_BOTTOM] ||
         !ssd->border[BORDER_LEFT] || !ssd->border[BORDER_RIGHT] || !ssd->button_bg[BUTTON_CLOSE] ||
         !ssd->button_bg[BUTTON_MAXIMIZE] || !ssd->button_bg[BUTTON_MINIMIZE] ||
@@ -397,6 +418,9 @@ static void ssd_apply_state(struct woodland_ssd *ssd)
     for (int i = 0; i < BUTTON_COUNT; i++) {
         wlr_scene_node_set_enabled(&ssd->button[i]->node, true);
     }
+    if (ssd->title_icon) {
+        wlr_scene_node_set_enabled(&ssd->title_icon->node, true);
+    }
 }
 
 void woodland_ssd_update(struct woodland_view *view)
@@ -409,6 +433,15 @@ void woodland_ssd_update(struct woodland_view *view)
     ssd_content_size(view, &w, &h);
     ssd->width = w;
     ssd->height = h;
+    if (!ssd->title_icon) {
+        int th = ssd_titlebar_height(view);
+        int icon_size = th >= 32 ? 22 : 16;
+        struct wlr_buffer *icon_buf = woodland_ssd_get_icon_buffer(view, icon_size, 1.0f);
+        if (icon_buf) {
+            ssd->title_icon = wlr_scene_buffer_create(ssd->tree, icon_buf);
+        }
+    }
+
     /* 最大化状态切换时更新按钮图标（最大化切换为还原图标，反之亦然） */
     bool max = view->maximized;
     if (ssd->maximized != max) {
@@ -572,4 +605,9 @@ bool woodland_ssd_content_size(const struct woodland_view *view, int *width, int
         *height = view->ssd->height;
     }
     return true;
+}
+
+void woodland_ssd_finish(void)
+{
+    woodland_icon_cache_finish();
 }

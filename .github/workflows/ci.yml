@@ -25,7 +25,7 @@ jobs:
             systemd-libs seatd hwdata libliftoff libdisplay-info \
             libxcb xcb-util-errors xcb-util-wm \
             xcb-util-image xcb-util-renderutil libx11 \
-            cairo pango xorg-xwayland \
+            cairo pango librsvg xorg-xwayland \
             expat libffi \
             wlr-protocols \
             wayland-utils wlr-randr wl-clipboard grim jq \
