@@ -21,7 +21,6 @@
 #include <wlr/util/edges.h>
 
 #include "config.h"
-#include "woodland_config.h"
 #include "focus.h"
 #include "ipc.h"
 #include "output.h"
@@ -33,6 +32,7 @@
 #include "util/listener.h"
 #include "view.h"
 #include "woodland.h"
+#include "woodland_config.h"
 #include "workspace.h"
 
 /* 场景树转储的递归深度与节点上限：防止一次 dump 输出几百 KB */
@@ -71,16 +71,18 @@ static const struct ipc_field_doc get_tree_fields[] = {
     {"ipc", "str", "debug socket path"},
     {"placement_policy", "str", "cascade | center | cursor | autoplace"},
     {"self_check", "bool", "--self-check was given at startup"},
-    {"outputs", "obj[]", "name, enabled, box[x,y,w,h], workarea, width, "
-                         "height, scale (per-mille)"},
+    {"outputs", "obj[]",
+     "name, enabled, box[x,y,w,h], workarea, width, "
+     "height, scale (per-mille)"},
     {"workspace", "obj", "current: str, all: str[]"},
     {"focus", "obj", "same fields as get_focus"},
-    {"views", "obj[]", "per view: id, kind, z, title, app_id, tag, workspace, "
-                       "output, mapped, placed, minimized, maximized, "
-                       "fullscreen, override_redirect, csd, focused, "
-                       "activated, focusable, scene_visible, parent, "
-                       "outer[x,y,w,h], content[x,y,w,h], "
-                       "ssd{present,active,margins}, limits, snapped[]"},
+    {"views", "obj[]",
+     "per view: id, kind, z, title, app_id, tag, workspace, "
+     "output, mapped, placed, minimized, maximized, "
+     "fullscreen, override_redirect, csd, focused, "
+     "activated, focusable, scene_visible, parent, "
+     "outer[x,y,w,h], content[x,y,w,h], "
+     "ssd{present,active,margins}, limits, snapped[]"},
     {"count", "int", "number of views"},
 };
 
@@ -100,21 +102,25 @@ static const struct ipc_field_doc get_trace_fields[] = {
     {"count", "int", "entries still in the ring"},
     {"total", "int", "entries ever written"},
     {"dropped", "int", "total - count: overwritten before you asked"},
-    {"entries", "obj[]", "seq, ms, obj, what, detail — what/why of each "
-                         "state-change decision, oldest first"},
+    {"entries", "obj[]",
+     "seq, ms, obj, what, detail — what/why of each "
+     "state-change decision, oldest first"},
 };
 
 static const struct ipc_field_doc get_listeners_fields[] = {
     {"count", "int", "listeners registered right now"},
-    {"overflow", "int", "non-zero means registrations the table could not "
-                        "record: a leak, not a dump problem"},
-    {"listeners", "obj[]", "seq (registration order — listeners fire in "
-                           "this order), name, emits"},
+    {"overflow", "int",
+     "non-zero means registrations the table could not "
+     "record: a leak, not a dump problem"},
+    {"listeners", "obj[]",
+     "seq (registration order — listeners fire in "
+     "this order), name, emits"},
 };
 
 static const struct ipc_field_doc dump_scene_fields[] = {
-    {"tree", "obj", "scene graph: type, enabled, x, y, w, h, "
-                    "rgba|opacity+has_buffer, children[], truncated"},
+    {"tree", "obj",
+     "scene graph: type, enabled, x, y, w, h, "
+     "rgba|opacity+has_buffer, children[], truncated"},
     {"nodes", "int", "nodes emitted (caps at 2000, depth 6)"},
     {"error", "str", "set instead of tree when no scene exists"},
 };
@@ -139,23 +145,23 @@ static const struct ipc_field_doc help_fields[] = {
 };
 static const struct ipc_cmd_doc ipc_cmd_docs[] = {
     {"ping", "liveness probe", ping_fields, IPC_FIELDS_LEN(ping_fields)},
-    {"get_tree", "full compositor state",
-     get_tree_fields, IPC_FIELDS_LEN(get_tree_fields)},
-    {"get_focus", "who has focus and why (recorded vs keyboard)",
-     get_focus_fields_doc, IPC_FIELDS_LEN(get_focus_fields_doc)},
-    {"get_trace", "recent state-change decisions (needs --trace)",
-     get_trace_fields, IPC_FIELDS_LEN(get_trace_fields)},
-    {"get_listeners", "wl_listener registry: registration order is "
-                      "call order (see AGENTS.md pitfall 2)",
+    {"get_tree", "full compositor state", get_tree_fields, IPC_FIELDS_LEN(get_tree_fields)},
+    {"get_focus", "who has focus and why (recorded vs keyboard)", get_focus_fields_doc,
+     IPC_FIELDS_LEN(get_focus_fields_doc)},
+    {"get_trace", "recent state-change decisions (needs --trace)", get_trace_fields,
+     IPC_FIELDS_LEN(get_trace_fields)},
+    {"get_listeners",
+     "wl_listener registry: registration order is "
+     "call order (see AGENTS.md pitfall 2)",
      get_listeners_fields, IPC_FIELDS_LEN(get_listeners_fields)},
-    {"dump_scene", "wlr_scene graph as JSON (for drawn-but-invisible bugs)",
-     dump_scene_fields, IPC_FIELDS_LEN(dump_scene_fields)},
-    {"self_check", "invariant assertions (alias: self-check)",
-     self_check_fields, IPC_FIELDS_LEN(self_check_fields)},
-    {"get_config", "runtime configuration as JSON",
-     get_config_fields, IPC_FIELDS_LEN(get_config_fields)},
-    {"reload_config", "hot-reload configuration from file",
-     reload_config_fields, IPC_FIELDS_LEN(reload_config_fields)},
+    {"dump_scene", "wlr_scene graph as JSON (for drawn-but-invisible bugs)", dump_scene_fields,
+     IPC_FIELDS_LEN(dump_scene_fields)},
+    {"self_check", "invariant assertions (alias: self-check)", self_check_fields,
+     IPC_FIELDS_LEN(self_check_fields)},
+    {"get_config", "runtime configuration as JSON", get_config_fields,
+     IPC_FIELDS_LEN(get_config_fields)},
+    {"reload_config", "hot-reload configuration from file", reload_config_fields,
+     IPC_FIELDS_LEN(reload_config_fields)},
     {"help", "this response", help_fields, IPC_FIELDS_LEN(help_fields)},
 };
 
@@ -181,8 +187,8 @@ _Static_assert(sizeof(ipc_cmd_docs) / sizeof(ipc_cmd_docs[0]) == IPC_CMD_COUNT,
  */
 
 /* 盒子：jq 里 .outer[2] 就是宽，比 {x,y,w,h} 好取 */
-static void obj_box(struct woodland_json_obj *obj, const char *key,
-                    const struct wlr_box *box) {
+static void obj_box(struct woodland_json_obj *obj, const char *key, const struct wlr_box *box)
+{
     int values[4] = {box->x, box->y, box->width, box->height};
     woodland_json_obj_key(obj, key);
     woodland_json_int_array(obj->json, values, 4);
@@ -190,7 +196,8 @@ static void obj_box(struct woodland_json_obj *obj, const char *key,
 
 /* 视图引用：写成 id，没有则 null（比指针好读，也能跨进程用） */
 static void obj_view_id(struct woodland_json_obj *obj, const char *key,
-                        const struct woodland_view *view) {
+                        const struct woodland_view *view)
+{
     woodland_json_obj_key(obj, key);
     if (view) {
         woodland_json_int(obj->json, view->id);
@@ -199,12 +206,14 @@ static void obj_view_id(struct woodland_json_obj *obj, const char *key,
     }
 }
 
-static const char *view_kind(const struct woodland_view *view) {
+static const char *view_kind(const struct woodland_view *view)
+{
     return view->type == WOODLAND_VIEW_XWAYLAND ? "x11" : "xdg";
 }
 
 /* 贴边位掩码 → 字符串数组（left/right/top/bottom） */
-static void obj_snapped(struct woodland_json_obj *obj, uint32_t edges) {
+static void obj_snapped(struct woodland_json_obj *obj, uint32_t edges)
+{
     static const struct {
         uint32_t edge;
         const char *name;
@@ -229,7 +238,8 @@ static void obj_snapped(struct woodland_json_obj *obj, uint32_t edges) {
     woodland_json_arr_close(&arr);
 }
 
-static const char *view_output_name(struct woodland_view *view) {
+static const char *view_output_name(struct woodland_view *view)
+{
     if (!view->server || !view->server->output_layout) {
         return NULL;
     }
@@ -242,17 +252,17 @@ static const char *view_output_name(struct woodland_view *view) {
 
 /* ==================== get_tree ==================== */
 
-static void write_focus_fields(struct woodland_server *server,
-                               struct woodland_json_obj *obj);
+static void write_focus_fields(struct woodland_server *server, struct woodland_json_obj *obj);
 
 /* 只写值（数组），"outputs" 这个 key 由调用方负责 */
-static void append_outputs(struct woodland_server *server,
-                           struct woodland_json *out) {
+static void append_outputs(struct woodland_server *server, struct woodland_json *out)
+{
     struct woodland_json_arr arr;
     woodland_json_arr_open(&arr, out);
 
     struct woodland_output *wo;
-    wl_list_for_each(wo, &server->outputs, link) {
+    wl_list_for_each(wo, &server->outputs, link)
+    {
         if (!wo->wlr_output) {
             continue;
         }
@@ -265,8 +275,7 @@ static void append_outputs(struct woodland_server *server,
 
         if (server->output_layout) {
             struct wlr_box box = {0};
-            wlr_output_layout_get_box(server->output_layout, wo->wlr_output,
-                                      &box);
+            wlr_output_layout_get_box(server->output_layout, wo->wlr_output, &box);
             obj_box(&obj, "box", &box);
             struct wlr_box area = {0};
             woodland_output_workarea(wo, &area);
@@ -281,19 +290,19 @@ static void append_outputs(struct woodland_server *server,
 }
 
 /* 只写值（对象），"workspace" 这个 key 由调用方负责 */
-static void append_workspace(struct woodland_server *server,
-                             struct woodland_json *out) {
+static void append_workspace(struct woodland_server *server, struct woodland_json *out)
+{
     struct woodland_json_obj obj;
     woodland_json_obj_open(&obj, out);
-    woodland_json_obj_str(&obj, "current", server->active_workspace
-                                          ? server->active_workspace->name
-                                          : NULL);
+    woodland_json_obj_str(&obj, "current",
+                          server->active_workspace ? server->active_workspace->name : NULL);
     woodland_json_obj_key(&obj, "all");
     struct woodland_json_arr arr;
     woodland_json_arr_open(&arr, out);
 
     struct woodland_workspace *ws;
-    wl_list_for_each(ws, &server->workspaces, link) {
+    wl_list_for_each(ws, &server->workspaces, link)
+    {
         woodland_json_arr_sep(&arr);
         woodland_json_string(out, ws->name);
     }
@@ -301,9 +310,9 @@ static void append_workspace(struct woodland_server *server,
     woodland_json_obj_close(&obj);
 }
 
-static void append_view_details(struct woodland_server *server,
-                                struct woodland_view *view, int z,
-                                struct woodland_json *out) {
+static void append_view_details(struct woodland_server *server, struct woodland_view *view, int z,
+                                struct woodland_json *out)
+{
     struct woodland_json_obj obj;
     woodland_json_obj_open(&obj, out);
     woodland_json_obj_int(&obj, "id", view->id);
@@ -328,8 +337,8 @@ static void append_view_details(struct woodland_server *server,
     woodland_json_obj_bool(&obj, "focused", server->focused_view == view);
     woodland_json_obj_bool(&obj, "activated", view->activated);
     woodland_json_obj_bool(&obj, "focusable", woodland_view_focusable(view));
-    woodland_json_obj_bool(&obj, "scene_visible", view->scene_tree
-                                    && view->scene_tree->node.enabled);
+    woodland_json_obj_bool(&obj, "scene_visible",
+                           view->scene_tree && view->scene_tree->node.enabled);
     obj_view_id(&obj, "parent", view->parent);
 
     struct wlr_box outer = {0};
@@ -352,8 +361,7 @@ static void append_view_details(struct woodland_server *server,
     woodland_json_obj_bool(&ssd, "active", woodland_ssd_is_active(view));
     struct woodland_ssd_margins margins = {0};
     woodland_ssd_get_margins(view, &margins);
-    int margin_values[4] = {margins.left, margins.top, margins.right,
-                            margins.bottom};
+    int margin_values[4] = {margins.left, margins.top, margins.right, margins.bottom};
     woodland_json_obj_key(&ssd, "margins");
     woodland_json_int_array(out, margin_values, 4);
     woodland_json_obj_close(&ssd);
@@ -368,16 +376,15 @@ static void append_view_details(struct woodland_server *server,
     woodland_json_obj_close(&obj);
 }
 
-static void ipc_get_tree(struct woodland_server *server,
-                         struct woodland_json *out) {
+static void ipc_get_tree(struct woodland_server *server, struct woodland_json *out)
+{
     /* first=false：ok/cmd 前缀已经手写，后面的字段自动带前置逗号 */
     struct woodland_json_obj obj = {.json = out, .first = false};
     woodland_json_raw(out, "{\"ok\":true,\"cmd\":\"get_tree\"");
     woodland_json_obj_int(&obj, "pid", (long long)getpid());
     woodland_json_obj_str(&obj, "ipc", server->ipc_path);
     woodland_json_obj_str(&obj, "placement_policy",
-                          woodland_placement_policy_name(
-                              server->placement_policy));
+                          woodland_placement_policy_name(server->placement_policy));
     woodland_json_obj_bool(&obj, "self_check", server->self_check);
 
     woodland_json_obj_key(&obj, "outputs");
@@ -397,7 +404,8 @@ static void ipc_get_tree(struct woodland_server *server,
     int count = 0;
     int z = 0;
     struct woodland_view *view;
-    wl_list_for_each(view, &server->views, link) {
+    wl_list_for_each(view, &server->views, link)
+    {
         woodland_json_arr_sep(&arr);
         count++;
         append_view_details(server, view, z++, out);
@@ -413,29 +421,27 @@ static void ipc_get_tree(struct woodland_server *server,
  * 焦点字段。抽成"往已有对象里写字段"的形式，get_tree 里嵌成
  * "focus": {...}，get_focus 则直接摊在顶层——两边永远说同一套字段。
  */
-static void write_focus_fields(struct woodland_server *server,
-                               struct woodland_json_obj *obj) {
+static void write_focus_fields(struct woodland_server *server, struct woodland_json_obj *obj)
+{
     struct woodland_view *focused = woodland_focus_current(server);
     struct woodland_view *keyboard_view = NULL;
     if (server->seat) {
-        keyboard_view = woodland_view_from_surface(
-            server->seat->keyboard_state.focused_surface);
+        keyboard_view = woodland_view_from_surface(server->seat->keyboard_state.focused_surface);
     }
 
     obj_view_id(obj, "view", focused);
     obj_view_id(obj, "recorded_view", server->focused_view);
     obj_view_id(obj, "keyboard_view", keyboard_view);
     woodland_json_obj_bool(obj, "keyboard_focused",
-             server->seat && server->seat->keyboard_state.focused_surface);
-    woodland_json_obj_str(obj, "layer", server->focused_layer
-                             ? server->focused_layer->namespace
-                             : NULL);
+                           server->seat && server->seat->keyboard_state.focused_surface);
+    woodland_json_obj_str(obj, "layer",
+                          server->focused_layer ? server->focused_layer->namespace : NULL);
     woodland_json_obj_bool(obj, "seat", server->seat != NULL);
     woodland_json_obj_str(obj, "title", focused ? focused->title : NULL);
 }
 
-static void ipc_get_focus(struct woodland_server *server,
-                          struct woodland_json *out) {
+static void ipc_get_focus(struct woodland_server *server, struct woodland_json *out)
+{
     woodland_json_raw(out, "{\"ok\":true,\"cmd\":\"get_focus\"");
     /* first=false：沿用已经写了一半的顶层对象，字段会带前置逗号 */
     struct woodland_json_obj obj = {.json = out, .first = false};
@@ -452,8 +458,8 @@ struct scene_dump_ctx {
     int max_depth;
 };
 
-static void dump_node(struct scene_dump_ctx *ctx, struct wlr_scene_node *node,
-                      int depth) {
+static void dump_node(struct scene_dump_ctx *ctx, struct wlr_scene_node *node, int depth)
+{
     struct woodland_json *out = ctx->out;
     if (!node || ctx->nodes >= ctx->max_nodes) {
         return;
@@ -506,7 +512,8 @@ static void dump_node(struct scene_dump_ctx *ctx, struct wlr_scene_node *node,
         struct woodland_json_arr arr;
         woodland_json_arr_open(&arr, out);
         struct wlr_scene_node *child;
-        wl_list_for_each(child, &tree->children, link) {
+        wl_list_for_each(child, &tree->children, link)
+        {
             if (ctx->nodes >= ctx->max_nodes) {
                 break;
             }
@@ -521,8 +528,8 @@ static void dump_node(struct scene_dump_ctx *ctx, struct wlr_scene_node *node,
     woodland_json_obj_close(&obj);
 }
 
-static void ipc_dump_scene(struct woodland_server *server,
-                           struct woodland_json *out) {
+static void ipc_dump_scene(struct woodland_server *server, struct woodland_json *out)
+{
     /* first=false：ok/cmd 前缀已手写 */
     struct woodland_json_obj obj = {.json = out, .first = false};
     woodland_json_raw(out, "{\"ok\":true,\"cmd\":\"dump_scene\"");
@@ -543,8 +550,8 @@ static void ipc_dump_scene(struct woodland_server *server,
     woodland_json_obj_close(&obj);
 }
 
-static void ipc_get_config(struct woodland_server *server,
-                           struct woodland_json *out) {
+static void ipc_get_config(struct woodland_server *server, struct woodland_json *out)
+{
     struct woodland_json_obj obj = {.json = out, .first = false};
     woodland_json_raw(out, "{\"ok\":true,\"cmd\":\"get_config\"");
     woodland_json_obj_key(&obj, "config");
@@ -556,8 +563,8 @@ static void ipc_get_config(struct woodland_server *server,
     woodland_json_obj_close(&obj);
 }
 
-static bool ipc_reload_config(struct woodland_server *server,
-                              struct woodland_json *out) {
+static bool ipc_reload_config(struct woodland_server *server, struct woodland_json *out)
+{
     bool ok = woodland_config_reload(server);
     struct woodland_json_obj obj;
     woodland_json_obj_open(&obj, out);
@@ -572,7 +579,8 @@ static bool ipc_reload_config(struct woodland_server *server,
 /* ==================== 分发 ==================== */
 
 /* help 的输出从 ipc_cmd_docs 生成：表是唯一事实源，不会和实现漂移 */
-static void ipc_help(struct woodland_json *out) {
+static void ipc_help(struct woodland_json *out)
+{
     struct woodland_json_obj obj;
     woodland_json_obj_open(&obj, out);
     woodland_json_obj_bool(&obj, "ok", true);
@@ -581,8 +589,7 @@ static void ipc_help(struct woodland_json *out) {
     woodland_json_obj_key(&obj, "commands");
     struct woodland_json_arr cmds;
     woodland_json_arr_open(&cmds, out);
-    for (size_t i = 0; i < sizeof(ipc_cmd_docs) / sizeof(ipc_cmd_docs[0]);
-         i++) {
+    for (size_t i = 0; i < sizeof(ipc_cmd_docs) / sizeof(ipc_cmd_docs[0]); i++) {
         const struct ipc_cmd_doc *doc = &ipc_cmd_docs[i];
         woodland_json_arr_sep(&cmds);
 
@@ -610,8 +617,8 @@ static void ipc_help(struct woodland_json *out) {
     woodland_json_obj_close(&obj);
 }
 
-static void respond_error(struct woodland_json *out, const char *cmd,
-                          const char *message) {
+static void respond_error(struct woodland_json *out, const char *cmd, const char *message)
+{
     struct woodland_json_obj obj;
     woodland_json_obj_open(&obj, out);
     woodland_json_obj_bool(&obj, "ok", false);
@@ -620,8 +627,8 @@ static void respond_error(struct woodland_json *out, const char *cmd,
     woodland_json_obj_close(&obj);
 }
 
-static bool dispatch(struct woodland_server *server, const char *line,
-                     struct woodland_json *out) {
+static bool dispatch(struct woodland_server *server, const char *line, struct woodland_json *out)
+{
     /* 取第一个空白分隔的词作为命令名 */
     const char *p = line;
     while (*p == ' ' || *p == '\t') {
@@ -682,7 +689,8 @@ static bool dispatch(struct woodland_server *server, const char *line,
         woodland_json_raw(out, "}");
         return failures == 0;
     }
-    if (strcmp(cmd, "get_config") == 0 || strcmp(cmd, "get-config") == 0) {
+    if (strcmp(cmd, "get_config") == 0 || strcmp(cmd, "get-config") == 0 ||
+        strcmp(cmd, "config") == 0) {
         ipc_get_config(server, out);
         return true;
     }
@@ -702,7 +710,8 @@ static bool dispatch(struct woodland_server *server, const char *line,
  * 内存失败这回事——那本来就是查询层的问题。
  */
 bool woodland_ipc_dispatch(struct woodland_server *server, const char *line,
-                           struct woodland_json *out) {
+                           struct woodland_json *out)
+{
     if (!server || !line || !out) {
         return false;
     }

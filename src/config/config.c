@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
-#include "woodland_config.h"
 #include "toml.h"
 #include "util/json.h"
 #include "util/log.h"
+#include "woodland_config.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -12,7 +12,8 @@
 #include <unistd.h>
 #include <wlr/util/log.h>
 
-static uint32_t parse_color(const char *hex, uint32_t def) {
+static uint32_t parse_color(const char *hex, uint32_t def)
+{
     if (!hex || *hex != '#') {
         return def;
     }
@@ -31,21 +32,30 @@ static uint32_t parse_color(const char *hex, uint32_t def) {
     return def;
 }
 
-static enum wl_output_transform parse_transform(const char *name) {
+static enum wl_output_transform parse_transform(const char *name)
+{
     if (!name) {
         return WL_OUTPUT_TRANSFORM_NORMAL;
     }
-    if (strcmp(name, "90") == 0) return WL_OUTPUT_TRANSFORM_90;
-    if (strcmp(name, "180") == 0) return WL_OUTPUT_TRANSFORM_180;
-    if (strcmp(name, "270") == 0) return WL_OUTPUT_TRANSFORM_270;
-    if (strcmp(name, "flipped") == 0) return WL_OUTPUT_TRANSFORM_FLIPPED;
-    if (strcmp(name, "flipped-90") == 0) return WL_OUTPUT_TRANSFORM_FLIPPED_90;
-    if (strcmp(name, "flipped-180") == 0) return WL_OUTPUT_TRANSFORM_FLIPPED_180;
-    if (strcmp(name, "flipped-270") == 0) return WL_OUTPUT_TRANSFORM_FLIPPED_270;
+    if (strcmp(name, "90") == 0)
+        return WL_OUTPUT_TRANSFORM_90;
+    if (strcmp(name, "180") == 0)
+        return WL_OUTPUT_TRANSFORM_180;
+    if (strcmp(name, "270") == 0)
+        return WL_OUTPUT_TRANSFORM_270;
+    if (strcmp(name, "flipped") == 0)
+        return WL_OUTPUT_TRANSFORM_FLIPPED;
+    if (strcmp(name, "flipped-90") == 0)
+        return WL_OUTPUT_TRANSFORM_FLIPPED_90;
+    if (strcmp(name, "flipped-180") == 0)
+        return WL_OUTPUT_TRANSFORM_FLIPPED_180;
+    if (strcmp(name, "flipped-270") == 0)
+        return WL_OUTPUT_TRANSFORM_FLIPPED_270;
     return WL_OUTPUT_TRANSFORM_NORMAL;
 }
 
-void woodland_config_default_init(struct woodland_config *config) {
+void woodland_config_default_init(struct woodland_config *config)
+{
     if (!config) {
         return;
     }
@@ -65,7 +75,7 @@ void woodland_config_default_init(struct woodland_config *config) {
     config->ssd.button_width = WOODLAND_SSD_BUTTON_W;
     config->ssd.font = strdup("sans 10");
     config->ssd.active_title_color = 0xFFE1DEDB;    /* #e1dedb */
-    config->ssd.inactive_title_color = 0xFFF6F5F4;  /* #f6f5f4 */
+    config->ssd.inactive_title_color = 0xFFF7F6F4;  /* #f7f6f4 */
     config->ssd.active_border_color = 0xFFAAAAAA;   /* #aaaaaa */
     config->ssd.inactive_border_color = 0xFFAAAAAA; /* #aaaaaa */
 
@@ -97,7 +107,8 @@ void woodland_config_default_init(struct woodland_config *config) {
     wl_list_init(&config->output_rules);
 }
 
-struct woodland_config *woodland_config_create_default(void) {
+struct woodland_config *woodland_config_create_default(void)
+{
     struct woodland_config *config = calloc(1, sizeof(*config));
     if (!config) {
         return NULL;
@@ -106,9 +117,11 @@ struct woodland_config *woodland_config_create_default(void) {
     return config;
 }
 
-static void free_output_rules(struct wl_list *list) {
+static void free_output_rules(struct wl_list *list)
+{
     struct woodland_config_output_rule *rule, *tmp;
-    wl_list_for_each_safe(rule, tmp, list, link) {
+    wl_list_for_each_safe(rule, tmp, list, link)
+    {
         wl_list_remove(&rule->link);
         free(rule->name);
         free(rule->mode);
@@ -116,7 +129,8 @@ static void free_output_rules(struct wl_list *list) {
     }
 }
 
-void woodland_config_destroy(struct woodland_config *config) {
+void woodland_config_destroy(struct woodland_config *config)
+{
     if (!config) {
         return;
     }
@@ -132,7 +146,8 @@ void woodland_config_destroy(struct woodland_config *config) {
     free(config);
 }
 
-static void parse_output_table(const struct toml_table *tbl, struct woodland_config *cfg) {
+static void parse_output_table(const struct toml_table *tbl, struct woodland_config *cfg)
+{
     const char *name = toml_get_string(tbl, "name", NULL);
     if (!name) {
         return;
@@ -170,21 +185,26 @@ static void parse_output_table(const struct toml_table *tbl, struct woodland_con
     wl_list_insert(cfg->output_rules.prev, &rule->link);
 }
 
-struct woodland_config *woodland_config_parse_string(const char *content,
-                                                     size_t len,
-                                                     const char *source_name) {
-    (void)len;
+struct woodland_config *woodland_config_parse_string(const char *content, size_t len,
+                                                     const char *source_name)
+{
     struct woodland_config *cfg = woodland_config_create_default();
     if (!cfg) {
         return NULL;
     }
 
-    if (!content || !*content) {
+    if (!content || len == 0 || !*content) {
+        return cfg;
+    }
+
+    char *bounded = strndup(content, len);
+    if (!bounded) {
         return cfg;
     }
 
     char errbuf[256] = {0};
-    struct toml_doc *doc = toml_parse(content, errbuf, sizeof(errbuf));
+    struct toml_doc *doc = toml_parse(bounded, errbuf, sizeof(errbuf));
+    free(bounded);
     if (!doc) {
         wlr_log(WLR_ERROR, "config: syntax error in %s: %s (using defaults)",
                 source_name ? source_name : "<memory>", errbuf);
@@ -240,8 +260,8 @@ struct woodland_config *woodland_config_parse_string(const char *content,
             free(cfg->ssd.font);
             cfg->ssd.font = strdup(font_str);
         }
-        cfg->ssd.active_title_color = parse_color(
-            toml_get_string(ssd, "active_title_color", NULL), cfg->ssd.active_title_color);
+        cfg->ssd.active_title_color = parse_color(toml_get_string(ssd, "active_title_color", NULL),
+                                                  cfg->ssd.active_title_color);
         cfg->ssd.inactive_title_color = parse_color(
             toml_get_string(ssd, "inactive_title_color", NULL), cfg->ssd.inactive_title_color);
         cfg->ssd.active_border_color = parse_color(
@@ -293,10 +313,13 @@ struct woodland_config *woodland_config_parse_string(const char *content,
     }
     if (tp) {
         cfg->touchpad.tap_to_click = toml_get_bool(tp, "tap_to_click", cfg->touchpad.tap_to_click);
-        cfg->touchpad.natural_scroll = toml_get_bool(tp, "natural_scroll", cfg->touchpad.natural_scroll);
+        cfg->touchpad.natural_scroll =
+            toml_get_bool(tp, "natural_scroll", cfg->touchpad.natural_scroll);
         cfg->touchpad.accel_speed = toml_get_float(tp, "accel_speed", cfg->touchpad.accel_speed);
-        if (cfg->touchpad.accel_speed < -1.0) cfg->touchpad.accel_speed = -1.0;
-        if (cfg->touchpad.accel_speed > 1.0) cfg->touchpad.accel_speed = 1.0;
+        if (cfg->touchpad.accel_speed < -1.0)
+            cfg->touchpad.accel_speed = -1.0;
+        if (cfg->touchpad.accel_speed > 1.0)
+            cfg->touchpad.accel_speed = 1.0;
         const char *prof = toml_get_string(tp, "accel_profile", NULL);
         if (prof) {
             free(cfg->touchpad.accel_profile);
@@ -331,7 +354,8 @@ struct woodland_config *woodland_config_parse_string(const char *content,
     }
 
     /* 7. [[output]] 数组表 */
-    for (const struct toml_table *t = toml_find_table(doc, "output"); t; t = toml_next_table(t, "output")) {
+    for (const struct toml_table *t = toml_find_table(doc, "output"); t;
+         t = toml_next_table(t, "output")) {
         parse_output_table(t, cfg);
     }
 
@@ -339,7 +363,8 @@ struct woodland_config *woodland_config_parse_string(const char *content,
     return cfg;
 }
 
-static char *resolve_config_path(const char *path_override) {
+static char *resolve_config_path(const char *path_override)
+{
     if (path_override) {
         if (access(path_override, R_OK) == 0) {
             return strdup(path_override);
@@ -394,7 +419,8 @@ static char *resolve_config_path(const char *path_override) {
     return NULL;
 }
 
-struct woodland_config *woodland_config_load(const char *path_override) {
+struct woodland_config *woodland_config_load(const char *path_override)
+{
     char *path = resolve_config_path(path_override);
     if (!path) {
         wlr_log(WLR_INFO, "config: no config file found, using defaults");
@@ -403,8 +429,7 @@ struct woodland_config *woodland_config_load(const char *path_override) {
 
     FILE *f = fopen(path, "rb");
     if (!f) {
-        wlr_log(WLR_ERROR, "config: failed to open %s: %s (using defaults)",
-                path, strerror(errno));
+        wlr_log(WLR_ERROR, "config: failed to open %s: %s (using defaults)", path, strerror(errno));
         free(path);
         return woodland_config_create_default();
     }
@@ -443,8 +468,8 @@ struct woodland_config *woodland_config_load(const char *path_override) {
     return cfg;
 }
 
-void woodland_config_dump_json(const struct woodland_config *config,
-                               struct woodland_json *out) {
+void woodland_config_dump_json(const struct woodland_config *config, struct woodland_json *out)
+{
     if (!config || !out) {
         return;
     }
@@ -476,6 +501,8 @@ void woodland_config_dump_json(const struct woodland_config *config,
     woodland_json_obj_str(&ssd, "font", config->ssd.font);
     woodland_json_obj_int(&ssd, "active_title_color", config->ssd.active_title_color);
     woodland_json_obj_int(&ssd, "inactive_title_color", config->ssd.inactive_title_color);
+    woodland_json_obj_int(&ssd, "active_border_color", config->ssd.active_border_color);
+    woodland_json_obj_int(&ssd, "inactive_border_color", config->ssd.inactive_border_color);
     woodland_json_obj_close(&ssd);
 
     /* keyboard */
@@ -496,7 +523,8 @@ void woodland_config_dump_json(const struct woodland_config *config,
     woodland_json_obj_open(&tp, out);
     woodland_json_obj_bool(&tp, "tap_to_click", config->touchpad.tap_to_click);
     woodland_json_obj_bool(&tp, "natural_scroll", config->touchpad.natural_scroll);
-    woodland_json_obj_int(&tp, "accel_speed_milli", (long long)(config->touchpad.accel_speed * 1000.0));
+    woodland_json_obj_int(&tp, "accel_speed_milli",
+                          (long long)(config->touchpad.accel_speed * 1000.0));
     woodland_json_obj_str(&tp, "accel_profile", config->touchpad.accel_profile);
     woodland_json_obj_close(&tp);
 
@@ -523,7 +551,8 @@ void woodland_config_dump_json(const struct woodland_config *config,
     struct woodland_json_arr arr;
     woodland_json_arr_open(&arr, out);
     struct woodland_config_output_rule *rule;
-    wl_list_for_each(rule, &config->output_rules, link) {
+    wl_list_for_each(rule, &config->output_rules, link)
+    {
         woodland_json_arr_sep(&arr);
         struct woodland_json_obj ro;
         woodland_json_obj_open(&ro, out);

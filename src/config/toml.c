@@ -7,28 +7,32 @@
 #include <stdlib.h>
 #include <string.h>
 
-static void set_err(char *errbuf, size_t errbuf_len, const char *fmt, int line, const char *msg) {
+static void set_err(char *errbuf, size_t errbuf_len, const char *fmt, int line, const char *msg)
+{
     if (errbuf && errbuf_len > 0) {
         snprintf(errbuf, errbuf_len, "line %d: %s", line, msg ? msg : fmt);
     }
 }
 
-static char *skip_ws(char *p) {
+static char *skip_ws(char *p)
+{
     while (*p && (*p == ' ' || *p == '\t')) {
         p++;
     }
     return p;
 }
 
-static void trim_right(char *p) {
+static void trim_right(char *p)
+{
     size_t len = strlen(p);
-    while (len > 0 && (p[len - 1] == ' ' || p[len - 1] == '\t' ||
-                       p[len - 1] == '\r' || p[len - 1] == '\n')) {
+    while (len > 0 &&
+           (p[len - 1] == ' ' || p[len - 1] == '\t' || p[len - 1] == '\r' || p[len - 1] == '\n')) {
         p[--len] = '\0';
     }
 }
 
-static void toml_free_value(struct toml_value *v) {
+static void toml_free_value(struct toml_value *v)
+{
     if (!v) {
         return;
     }
@@ -45,7 +49,8 @@ static void toml_free_value(struct toml_value *v) {
     }
 }
 
-static void toml_free_nodes(struct toml_node *node) {
+static void toml_free_nodes(struct toml_node *node)
+{
     while (node) {
         struct toml_node *next = node->next;
         free(node->key);
@@ -55,7 +60,8 @@ static void toml_free_nodes(struct toml_node *node) {
     }
 }
 
-static void toml_free_table(struct toml_table *tbl) {
+static void toml_free_table(struct toml_table *tbl)
+{
     if (!tbl) {
         return;
     }
@@ -64,7 +70,8 @@ static void toml_free_table(struct toml_table *tbl) {
     free(tbl);
 }
 
-void toml_free(struct toml_doc *doc) {
+void toml_free(struct toml_doc *doc)
+{
     if (!doc) {
         return;
     }
@@ -78,7 +85,8 @@ void toml_free(struct toml_doc *doc) {
     free(doc);
 }
 
-static struct toml_table *toml_create_table(const char *name, bool is_array_elem) {
+static struct toml_table *toml_create_table(const char *name, bool is_array_elem)
+{
     struct toml_table *t = calloc(1, sizeof(*t));
     if (!t) {
         return NULL;
@@ -90,7 +98,8 @@ static struct toml_table *toml_create_table(const char *name, bool is_array_elem
     return t;
 }
 
-struct toml_table *toml_find_table(const struct toml_doc *doc, const char *name) {
+struct toml_table *toml_find_table(const struct toml_doc *doc, const char *name)
+{
     if (!doc || !name) {
         return NULL;
     }
@@ -102,7 +111,8 @@ struct toml_table *toml_find_table(const struct toml_doc *doc, const char *name)
     return NULL;
 }
 
-struct toml_table *toml_next_table(const struct toml_table *tbl, const char *name) {
+struct toml_table *toml_next_table(const struct toml_table *tbl, const char *name)
+{
     if (!tbl || !name) {
         return NULL;
     }
@@ -114,7 +124,8 @@ struct toml_table *toml_next_table(const struct toml_table *tbl, const char *nam
     return NULL;
 }
 
-const struct toml_value *toml_get(const struct toml_table *tbl, const char *key) {
+const struct toml_value *toml_get(const struct toml_table *tbl, const char *key)
+{
     if (!tbl || !key) {
         return NULL;
     }
@@ -126,17 +137,20 @@ const struct toml_value *toml_get(const struct toml_table *tbl, const char *key)
     return NULL;
 }
 
-const char *toml_get_string(const struct toml_table *tbl, const char *key, const char *def) {
+const char *toml_get_string(const struct toml_table *tbl, const char *key, const char *def)
+{
     const struct toml_value *v = toml_get(tbl, key);
     return (v && v->type == TOML_STRING) ? v->s : def;
 }
 
-int64_t toml_get_int(const struct toml_table *tbl, const char *key, int64_t def) {
+int64_t toml_get_int(const struct toml_table *tbl, const char *key, int64_t def)
+{
     const struct toml_value *v = toml_get(tbl, key);
     return (v && v->type == TOML_INT) ? v->i : def;
 }
 
-double toml_get_float(const struct toml_table *tbl, const char *key, double def) {
+double toml_get_float(const struct toml_table *tbl, const char *key, double def)
+{
     const struct toml_value *v = toml_get(tbl, key);
     if (!v) {
         return def;
@@ -150,13 +164,15 @@ double toml_get_float(const struct toml_table *tbl, const char *key, double def)
     return def;
 }
 
-bool toml_get_bool(const struct toml_table *tbl, const char *key, bool def) {
+bool toml_get_bool(const struct toml_table *tbl, const char *key, bool def)
+{
     const struct toml_value *v = toml_get(tbl, key);
     return (v && v->type == TOML_BOOL) ? v->b : def;
 }
 
 /* 解析双引号转义字符串 */
-static char *parse_quoted_string(const char *src, const char **endpos) {
+static char *parse_quoted_string(const char *src, const char **endpos)
+{
     if (*src != '"') {
         return NULL;
     }
@@ -177,12 +193,30 @@ static char *parse_quoted_string(const char *src, const char **endpos) {
             }
             char esc = *src++;
             switch (esc) {
-            case '"':  ch = '"'; break;
-            case '\\': ch = '\\'; break;
-            case 'n':  ch = '\n'; break;
-            case 't':  ch = '\t'; break;
-            case 'r':  ch = '\r'; break;
-            default:   ch = esc; break;
+            case '"':
+                ch = '"';
+                break;
+            case '\\':
+                ch = '\\';
+                break;
+            case 'b':
+                ch = '\b';
+                break;
+            case 'f':
+                ch = '\f';
+                break;
+            case 'n':
+                ch = '\n';
+                break;
+            case 't':
+                ch = '\t';
+                break;
+            case 'r':
+                ch = '\r';
+                break;
+            default:
+                free(buf);
+                return NULL;
             }
         }
         if (len + 1 >= cap) {
@@ -210,7 +244,8 @@ static char *parse_quoted_string(const char *src, const char **endpos) {
 }
 
 /* 解析字面量单引号字符串 */
-static char *parse_literal_string(const char *src, const char **endpos) {
+static char *parse_literal_string(const char *src, const char **endpos)
+{
     if (*src != '\'') {
         return NULL;
     }
@@ -237,7 +272,8 @@ static char *parse_literal_string(const char *src, const char **endpos) {
 }
 
 /* 单个值解析 */
-static bool parse_value(const char *src, struct toml_value *out, const char **endpos) {
+static bool parse_value(const char *src, struct toml_value *out, const char **endpos)
+{
     while (*src == ' ' || *src == '\t') {
         src++;
     }
@@ -341,7 +377,8 @@ static bool parse_value(const char *src, struct toml_value *out, const char **en
     }
 
     /* 3. 布尔值 */
-    if (strncmp(src, "true", 4) == 0 && (!src[4] || isspace((unsigned char)src[4]) || src[4] == ',' || src[4] == ']' || src[4] == '#')) {
+    if (strncmp(src, "true", 4) == 0 && (!src[4] || isspace((unsigned char)src[4]) ||
+                                         src[4] == ',' || src[4] == ']' || src[4] == '#')) {
         out->type = TOML_BOOL;
         out->b = true;
         if (endpos) {
@@ -349,7 +386,8 @@ static bool parse_value(const char *src, struct toml_value *out, const char **en
         }
         return true;
     }
-    if (strncmp(src, "false", 5) == 0 && (!src[5] || isspace((unsigned char)src[5]) || src[5] == ',' || src[5] == ']' || src[5] == '#')) {
+    if (strncmp(src, "false", 5) == 0 && (!src[5] || isspace((unsigned char)src[5]) ||
+                                          src[5] == ',' || src[5] == ']' || src[5] == '#')) {
         out->type = TOML_BOOL;
         out->b = false;
         if (endpos) {
@@ -376,7 +414,8 @@ static bool parse_value(const char *src, struct toml_value *out, const char **en
 
     if (is_float) {
         double d = strtod(src, &end);
-        if (end != src && (end == p || !*end || isspace((unsigned char)*end) || *end == ',' || *end == ']' || *end == '#')) {
+        if (end != src && (end == p || !*end || isspace((unsigned char)*end) || *end == ',' ||
+                           *end == ']' || *end == '#')) {
             out->type = TOML_FLOAT;
             out->d = d;
             if (endpos) {
@@ -386,7 +425,8 @@ static bool parse_value(const char *src, struct toml_value *out, const char **en
         }
     } else {
         int64_t i = strtoll(src, &end, 0);
-        if (end != src && (end == p || !*end || isspace((unsigned char)*end) || *end == ',' || *end == ']' || *end == '#')) {
+        if (end != src && (end == p || !*end || isspace((unsigned char)*end) || *end == ',' ||
+                           *end == ']' || *end == '#')) {
             out->type = TOML_INT;
             out->i = i;
             if (endpos) {
@@ -399,7 +439,8 @@ static bool parse_value(const char *src, struct toml_value *out, const char **en
     return false;
 }
 
-struct toml_doc *toml_parse(const char *src, char *errbuf, size_t errbuf_len) {
+struct toml_doc *toml_parse(const char *src, char *errbuf, size_t errbuf_len)
+{
     if (!src) {
         set_err(errbuf, errbuf_len, NULL, 0, "source is null");
         return NULL;
@@ -443,7 +484,16 @@ struct toml_doc *toml_parse(const char *src, char *errbuf, size_t errbuf_len) {
         if (p[0] == '[' && p[1] == '[') {
             char *close_bracket = strstr(p + 2, "]]");
             if (!close_bracket) {
-                set_err(errbuf, errbuf_len, NULL, line_no, "malformed table array header (missing ']]')");
+                set_err(errbuf, errbuf_len, NULL, line_no,
+                        "malformed table array header (missing ']]')");
+                free(content);
+                toml_free(doc);
+                return NULL;
+            }
+            char *after = skip_ws(close_bracket + 2);
+            if (*after && *after != '#') {
+                set_err(errbuf, errbuf_len, NULL, line_no,
+                        "unexpected characters after table header");
                 free(content);
                 toml_free(doc);
                 return NULL;
@@ -484,6 +534,14 @@ struct toml_doc *toml_parse(const char *src, char *errbuf, size_t errbuf_len) {
             char *close_bracket = strchr(p + 1, ']');
             if (!close_bracket) {
                 set_err(errbuf, errbuf_len, NULL, line_no, "malformed table header (missing ']')");
+                free(content);
+                toml_free(doc);
+                return NULL;
+            }
+            char *after = skip_ws(close_bracket + 1);
+            if (*after && *after != '#') {
+                set_err(errbuf, errbuf_len, NULL, line_no,
+                        "unexpected characters after table header");
                 free(content);
                 toml_free(doc);
                 return NULL;

@@ -28,7 +28,7 @@ struct woodland_config_decorations {
     int32_t border_width;
     int32_t button_width;
     char *font;
-    uint32_t active_title_color;    /* 0xAARRGGBB */
+    uint32_t active_title_color; /* 0xAARRGGBB */
     uint32_t inactive_title_color;
     uint32_t active_border_color;
     uint32_t inactive_border_color;
@@ -108,8 +108,7 @@ struct woodland_config *woodland_config_load(const char *path_override);
 /**
  * 解析内存中的 TOML 字符串内容（单测与外部注入用）。
  */
-struct woodland_config *woodland_config_parse_string(const char *content,
-                                                     size_t len,
+struct woodland_config *woodland_config_parse_string(const char *content, size_t len,
                                                      const char *source_name);
 
 /**
@@ -127,13 +126,11 @@ bool woodland_config_reload(struct woodland_server *server);
 /**
  * 将新配置与当前配置对比并向各子系统应用变更副作用。
  */
-void woodland_config_apply(struct woodland_server *server,
-                           struct woodland_config *new_config);
+void woodland_config_apply(struct woodland_server *server, struct woodland_config *new_config);
 
 /**
  * 将配置对象导出为 JSON（供 IPC get_config 命令）。
  */
-void woodland_config_dump_json(const struct woodland_config *config,
-                               struct woodland_json *out);
+void woodland_config_dump_json(const struct woodland_config *config, struct woodland_json *out);
 
 #endif /* WOODLAND_CONFIG_H */
