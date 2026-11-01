@@ -20,6 +20,8 @@
 #include <wlr/util/box.h>
 #include <wlr/util/edges.h>
 
+#include "config.h"
+#include "woodland_config.h"
 #include "focus.h"
 #include "ipc.h"
 #include "output.h"
@@ -123,10 +125,18 @@ static const struct ipc_field_doc self_check_fields[] = {
     {"checks", "obj[]", "name, ok, and expected/actual on failure"},
 };
 
+static const struct ipc_field_doc get_config_fields[] = {
+    {"config", "obj", "full runtime configuration tree"},
+};
+
+static const struct ipc_field_doc reload_config_fields[] = {
+    {"reloaded", "bool", "true if reloaded from config file"},
+    {"path", "str|null", "path of loaded configuration file"},
+};
+
 static const struct ipc_field_doc help_fields[] = {
     {"commands", "obj[]", "this list: name, desc, fields[{name,type,desc}]"},
 };
-
 static const struct ipc_cmd_doc ipc_cmd_docs[] = {
     {"ping", "liveness probe", ping_fields, IPC_FIELDS_LEN(ping_fields)},
     {"get_tree", "full compositor state",
@@ -142,6 +152,10 @@ static const struct ipc_cmd_doc ipc_cmd_docs[] = {
      dump_scene_fields, IPC_FIELDS_LEN(dump_scene_fields)},
     {"self_check", "invariant assertions (alias: self-check)",
      self_check_fields, IPC_FIELDS_LEN(self_check_fields)},
+    {"get_config", "runtime configuration as JSON",
+     get_config_fields, IPC_FIELDS_LEN(get_config_fields)},
+    {"reload_config", "hot-reload configuration from file",
+     reload_config_fields, IPC_FIELDS_LEN(reload_config_fields)},
     {"help", "this response", help_fields, IPC_FIELDS_LEN(help_fields)},
 };
 
@@ -153,7 +167,7 @@ static const struct ipc_cmd_doc ipc_cmd_docs[] = {
  * 把 dispatch、docs、计数三处一起过一遍。dispatch 单边新增依然没有
  * 编译期防护——那条靠评审兜底。
  */
-#define IPC_CMD_COUNT 8
+#define IPC_CMD_COUNT 10
 _Static_assert(sizeof(ipc_cmd_docs) / sizeof(ipc_cmd_docs[0]) == IPC_CMD_COUNT,
                "ipc_cmd_docs changed: update dispatch() and IPC_CMD_COUNT "
                "together (add one, bump the other)");
@@ -529,6 +543,32 @@ static void ipc_dump_scene(struct woodland_server *server,
     woodland_json_obj_close(&obj);
 }
 
+static void ipc_get_config(struct woodland_server *server,
+                           struct woodland_json *out) {
+    struct woodland_json_obj obj = {.json = out, .first = false};
+    woodland_json_raw(out, "{\"ok\":true,\"cmd\":\"get_config\"");
+    woodland_json_obj_key(&obj, "config");
+    if (server->config) {
+        woodland_config_dump_json(server->config, out);
+    } else {
+        woodland_json_raw(out, "null");
+    }
+    woodland_json_obj_close(&obj);
+}
+
+static bool ipc_reload_config(struct woodland_server *server,
+                              struct woodland_json *out) {
+    bool ok = woodland_config_reload(server);
+    struct woodland_json_obj obj;
+    woodland_json_obj_open(&obj, out);
+    woodland_json_obj_bool(&obj, "ok", ok);
+    woodland_json_obj_str(&obj, "cmd", "reload_config");
+    woodland_json_obj_bool(&obj, "reloaded", ok);
+    woodland_json_obj_str(&obj, "path", server->config ? server->config->loaded_path : NULL);
+    woodland_json_obj_close(&obj);
+    return ok;
+}
+
 /* ==================== 分发 ==================== */
 
 /* help 的输出从 ipc_cmd_docs 生成：表是唯一事实源，不会和实现漂移 */
@@ -641,6 +681,14 @@ static bool dispatch(struct woodland_server *server, const char *line,
         int failures = woodland_selfcheck_run(server, out);
         woodland_json_raw(out, "}");
         return failures == 0;
+    }
+    if (strcmp(cmd, "get_config") == 0 || strcmp(cmd, "get-config") == 0) {
+        ipc_get_config(server, out);
+        return true;
+    }
+    if (strcmp(cmd, "reload_config") == 0 || strcmp(cmd, "reload-config") == 0 ||
+        strcmp(cmd, "reload") == 0) {
+        return ipc_reload_config(server, out);
     }
 
     respond_error(out, cmd, "unknown command, try 'help'");

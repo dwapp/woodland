@@ -19,6 +19,7 @@
 #include "capture.h"
 #include "config.h"
 #include "cursor.h"
+#include "woodland_config.h"
 #include "ipc.h"
 #include "layer.h"
 #include "output.h"
@@ -37,6 +38,13 @@ static int handle_terminate(int signal, void *data) {
     struct wl_display *display = data;
     wlr_log(WLR_INFO, "received signal %d, terminating", signal);
     wl_display_terminate(display);
+    return 0;
+}
+
+static int handle_sighup(int signal, void *data) {
+    struct woodland_server *server = data;
+    wlr_log(WLR_INFO, "received signal %d (SIGHUP), reloading configuration", signal);
+    woodland_config_reload(server);
     return 0;
 }
 
@@ -87,7 +95,9 @@ bool woodland_server_init(struct woodland_server *server) {
         server->event_loop, SIGINT, handle_terminate, server->display);
     server->sigterm_source = wl_event_loop_add_signal(
         server->event_loop, SIGTERM, handle_terminate, server->display);
-    if (!server->sigint_source || !server->sigterm_source) {
+    server->sighup_source = wl_event_loop_add_signal(
+        server->event_loop, SIGHUP, handle_sighup, server);
+    if (!server->sigint_source || !server->sigterm_source || !server->sighup_source) {
         wlr_log(WLR_ERROR, "failed to register signal handler");
         return false;
     }
@@ -140,6 +150,7 @@ bool woodland_server_init(struct woodland_server *server) {
         wlr_log(WLR_ERROR, "failed to create scene");
         return false;
     }
+
 
     if (!woodland_output_init(server)) {
         wlr_log(WLR_ERROR, "failed to init output");
@@ -225,6 +236,10 @@ bool woodland_server_init(struct woodland_server *server) {
     woodland_listener_connect(&server->request_set_shape, &server->cursor_shape_manager->events.request_set_shape,
                           handle_request_set_shape, "server.request_set_shape");
 
+    if (!server->config) {
+        struct woodland_config *cfg = woodland_config_load(server->config_path);
+        woodland_config_apply(server, cfg);
+    }
     return true;
 }
 
@@ -279,6 +294,14 @@ void woodland_server_finish(struct woodland_server *server) {
     if (server->sigterm_source) {
         wl_event_source_remove(server->sigterm_source);
         server->sigterm_source = NULL;
+    }
+    if (server->sighup_source) {
+        wl_event_source_remove(server->sighup_source);
+        server->sighup_source = NULL;
+    }
+    if (server->config) {
+        woodland_config_destroy(server->config);
+        server->config = NULL;
     }
     if (server->request_set_shape.link.prev) {
         wl_list_remove(&server->request_set_shape.link);

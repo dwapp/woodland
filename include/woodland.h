@@ -31,12 +31,13 @@ struct wlr_xwayland;
 struct wlr_compositor;
 /* 上游协议（src/protocol）：整体不透明，外部只经 protocol.h 的接口访问 */
 struct woodland_proto;
-
+struct woodland_config;
 struct woodland_server {
     struct wl_display *display;
     struct wl_event_loop *event_loop;
     struct wl_event_source *sigint_source;
     struct wl_event_source *sigterm_source;
+    struct wl_event_source *sighup_source;
     struct wlr_backend *backend;
     struct wlr_renderer *renderer;
     struct wlr_allocator *allocator;
@@ -103,6 +104,7 @@ struct woodland_server {
     struct woodland_view *focused_view;
     /* 新窗口放置策略（-p / woodland_placement_policy_parse） */
     enum woodland_placement_policy placement_policy;
+    bool placement_specified;
     struct wl_listener new_xdg_toplevel;
     struct wl_listener new_xdg_popup;
 
@@ -176,6 +178,8 @@ struct woodland_server {
     uint32_t next_view_id;
 
     const char *startup_cmd;              // -s 启动命令
+    const char *config_path;              // -c 配置文件路径
+    struct woodland_config *config;       // 运行时配置
 };
 
 #endif
