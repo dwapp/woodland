@@ -13,6 +13,7 @@
 #include <wlr/types/wlr_scene.h>
 #include <wlr/types/wlr_seat.h>
 
+#include "cursor.h"
 #include "focus.h"
 #include "layer.h"
 #include "shell_internal.h"
@@ -128,7 +129,7 @@ void woodland_cursor_process_motion(struct woodland_server *server, uint32_t tim
     if (ssd_view) {
         /* 悬停 SSD：按区域切换光标，不给 surface 指针焦点 */
         if (ssd_part == WOODLAND_SSD_TITLEBAR) {
-            shell_cursor_set(server, "default");
+            woodland_cursor_set(server, "default");
         } else if (ssd_part >= WOODLAND_SSD_BORDER_LEFT && ssd_part <= WOODLAND_SSD_BORDER_BOTTOM) {
             uint32_t resize_edges = edges;
             int w = 0, h = 0;
@@ -147,9 +148,9 @@ void woodland_cursor_process_motion(struct woodland_server *server, uint32_t tim
                     resize_edges |= WLR_EDGE_BOTTOM;
                 }
             }
-            shell_cursor_set_resize(server, resize_edges);
+            woodland_cursor_set_resize(server, resize_edges);
         } else {
-            shell_cursor_set(server, "default");
+            woodland_cursor_set(server, "default");
         }
         wlr_seat_pointer_clear_focus(seat);
         /* 只有按钮才亮；标题栏/边框传 NONE（顺带清掉上一个按钮的高亮） */
@@ -165,7 +166,7 @@ void woodland_cursor_process_motion(struct woodland_server *server, uint32_t tim
     ssd_update_hover(server, NULL, WOODLAND_SSD_NONE);
 
     if (!view) {
-        shell_cursor_set(server, "default");
+        woodland_cursor_set(server, "default");
     }
     if (surface) {
         wlr_seat_pointer_notify_enter(seat, surface, sx, sy);
@@ -327,55 +328,4 @@ void woodland_cursor_finish_events(struct woodland_server *server)
         wl_list_remove(&server->cursor_axis.link);
         wl_list_remove(&server->cursor_frame.link);
     }
-}
-
-void shell_cursor_set(struct woodland_server *server, const char *name)
-{
-    if (!server || !server->cursor || !server->xcursor_manager) {
-        return;
-    }
-    wlr_cursor_unset_image(server->cursor);
-    wlr_cursor_set_xcursor(server->cursor, server->xcursor_manager, name);
-}
-
-void shell_cursor_set_resize(struct woodland_server *server, uint32_t edges)
-{
-    if (!server || !server->cursor || !server->xcursor_manager) {
-        return;
-    }
-    const char *primary = "default";
-    const char *fallback = NULL;
-
-    if (edges == (WLR_EDGE_TOP | WLR_EDGE_LEFT)) {
-        primary = "nw-resize";
-        fallback = "top_left_corner";
-    } else if (edges == (WLR_EDGE_TOP | WLR_EDGE_RIGHT)) {
-        primary = "ne-resize";
-        fallback = "top_right_corner";
-    } else if (edges == (WLR_EDGE_BOTTOM | WLR_EDGE_LEFT)) {
-        primary = "sw-resize";
-        fallback = "bottom_left_corner";
-    } else if (edges == (WLR_EDGE_BOTTOM | WLR_EDGE_RIGHT)) {
-        primary = "se-resize";
-        fallback = "bottom_right_corner";
-    } else if (edges & WLR_EDGE_TOP) {
-        primary = "n-resize";
-        fallback = "top_side";
-    } else if (edges & WLR_EDGE_BOTTOM) {
-        primary = "s-resize";
-        fallback = "bottom_side";
-    } else if (edges & WLR_EDGE_LEFT) {
-        primary = "w-resize";
-        fallback = "left_side";
-    } else if (edges & WLR_EDGE_RIGHT) {
-        primary = "e-resize";
-        fallback = "right_side";
-    }
-
-    const char *name = primary;
-    if (fallback && !wlr_xcursor_manager_get_xcursor(server->xcursor_manager, primary, 1.0f)) {
-        name = fallback;
-    }
-    wlr_cursor_unset_image(server->cursor);
-    wlr_cursor_set_xcursor(server->cursor, server->xcursor_manager, name);
 }

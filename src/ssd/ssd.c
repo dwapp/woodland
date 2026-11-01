@@ -39,6 +39,7 @@ struct woodland_ssd {
     struct wlr_scene_buffer *button[BUTTON_COUNT];
     struct woodland_text_buffer *title_text;
     struct wlr_scene_buffer *title_icon; // 标题栏应用图标
+    char *icon_key;                      // 当前加载图标使用的 app_id 键
     enum woodland_ssd_part hover_part;   // 悬停的按钮（NONE = 无）
     enum woodland_ssd_part pressed_part; // 按下的按钮（NONE = 无）
     int width;                           /* 内容宽（缓存的几何） */
@@ -288,9 +289,17 @@ static void ssd_layout(struct woodland_ssd *ssd)
 
     /* 标题文字：按 GXDE/Deepin 风格全宽居中，左右分别与应用图标及控制按钮保持安全距离 */
     if (ssd->title_text) {
-        int title_w = woodland_text_buffer_get_width(ssd->title_text);
         int right_btns = BUTTON_COUNT * bwn + (BUTTON_COUNT - 1) * gap;
         int left_bound = ssd->title_icon ? (icon_pad + icon_size + 8) : 8;
+        int avail_w = (w - right_btns - 8) - left_bound;
+        if (avail_w < 1) {
+            avail_w = 1;
+        }
+        const float *text_color = ssd->active ? COLOR_TITLE_TEXT_ACTIVE : COLOR_TITLE_TEXT_INACTIVE;
+        woodland_text_buffer_update(ssd->title_text, ssd->view->title, avail_w, th, text_color,
+                                    1.0f);
+
+        int title_w = woodland_text_buffer_get_width(ssd->title_text);
         int tx = (w - title_w) / 2;
         if (tx < left_bound) {
             tx = left_bound;
@@ -302,6 +311,28 @@ static void ssd_layout(struct woodland_ssd *ssd)
             tx = left_bound;
         }
         woodland_text_buffer_set_position(ssd->title_text, tx, -th);
+    }
+}
+
+static void ssd_update_icon(struct woodland_ssd *ssd)
+{
+    struct woodland_view *view = ssd->view;
+    const char *key = view->app_id ? view->app_id : (view->title ? view->title : "default");
+    if (ssd->title_icon && ssd->icon_key && strcmp(ssd->icon_key, key) == 0) {
+        return;
+    }
+    free(ssd->icon_key);
+    ssd->icon_key = strdup(key);
+
+    int th = ssd_titlebar_height(view);
+    int icon_size = th >= 32 ? 22 : 16;
+    struct wlr_buffer *icon_buf = woodland_ssd_get_icon_buffer(view, icon_size, 1.0f);
+    if (icon_buf) {
+        if (ssd->title_icon) {
+            wlr_scene_buffer_set_buffer(ssd->title_icon, icon_buf);
+        } else {
+            ssd->title_icon = wlr_scene_buffer_create(ssd->tree, icon_buf);
+        }
     }
 }
 
@@ -362,12 +393,7 @@ void woodland_ssd_create(struct woodland_view *view)
 
     ssd->title_text = woodland_text_buffer_create(ssd->tree);
 
-    int th = ssd_titlebar_height(view);
-    int icon_size = th >= 32 ? 22 : 16;
-    struct wlr_buffer *icon_buf = woodland_ssd_get_icon_buffer(view, icon_size, 1.0f);
-    if (icon_buf) {
-        ssd->title_icon = wlr_scene_buffer_create(ssd->tree, icon_buf);
-    }
+    ssd_update_icon(ssd);
 
     if (!ssd->titlebar || !ssd->border[BORDER_TOP] || !ssd->border[BORDER_BOTTOM] ||
         !ssd->border[BORDER_LEFT] || !ssd->border[BORDER_RIGHT] || !ssd->button_bg[BUTTON_CLOSE] ||
@@ -396,6 +422,7 @@ void woodland_ssd_destroy(struct woodland_view *view)
     if (ssd->title_text) {
         free(ssd->title_text);
     }
+    free(ssd->icon_key);
     wlr_scene_node_destroy(&ssd->tree->node);
     free(ssd);
 }
@@ -433,14 +460,7 @@ void woodland_ssd_update(struct woodland_view *view)
     ssd_content_size(view, &w, &h);
     ssd->width = w;
     ssd->height = h;
-    if (!ssd->title_icon) {
-        int th = ssd_titlebar_height(view);
-        int icon_size = th >= 32 ? 22 : 16;
-        struct wlr_buffer *icon_buf = woodland_ssd_get_icon_buffer(view, icon_size, 1.0f);
-        if (icon_buf) {
-            ssd->title_icon = wlr_scene_buffer_create(ssd->tree, icon_buf);
-        }
-    }
+    ssd_update_icon(ssd);
 
     /* 最大化状态切换时更新按钮图标（最大化切换为还原图标，反之亦然） */
     bool max = view->maximized;
@@ -456,12 +476,6 @@ void woodland_ssd_update(struct woodland_view *view)
         }
     }
 
-    /* 先更新标题文本（内部会重算宽度），再统一布局，保证标题按新宽度居中 */
-    if (ssd->title_text) {
-        const float *text_color = ssd->active ? COLOR_TITLE_TEXT_ACTIVE : COLOR_TITLE_TEXT_INACTIVE;
-        woodland_text_buffer_update(ssd->title_text, view->title, ssd_titlebar_height(view),
-                                    text_color, 1.0f);
-    }
     ssd_layout(ssd);
     ssd_apply_state(ssd);
     woodland_ssd_set_active(view, ssd->active);
@@ -483,11 +497,9 @@ void woodland_ssd_set_active(struct woodland_view *view, bool active)
     for (int i = 0; i < BORDER_COUNT; i++) {
         wlr_scene_rect_set_color(ssd->border[i], bc);
     }
-    /* 激活态改变时，更新标题文字前景色（激活 #303030，非激活弱化为 #969696） */
-    if (changed && ssd->title_text) {
-        const float *text_color = active ? COLOR_TITLE_TEXT_ACTIVE : COLOR_TITLE_TEXT_INACTIVE;
-        woodland_text_buffer_update(ssd->title_text, view->title, ssd_titlebar_height(view),
-                                    text_color, 1.0f);
+    /* 激活态改变时，刷新标题栏排版及文本前景色 */
+    if (changed) {
+        ssd_layout(ssd);
     }
 }
 

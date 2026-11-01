@@ -27,37 +27,37 @@ test_workspace = executable('test_workspace', 'test_workspace.c',
   dependencies: [wlroots, wayland_server],
   include_directories: woodland_inc,
   # workspace 切换会回调焦点回退（focus.c 在 shell_lib 里）
-  link_with: [output_lib, shell_lib, workspace_lib, ssd_lib, layer_lib, seat_lib, capture_lib, util_lib])
+  link_with: [output_lib, cursor_lib, shell_lib, workspace_lib, ssd_lib, layer_lib, seat_lib, capture_lib, util_lib])
 test('workspace', test_workspace)
 
 test_view = executable('test_view', 'test_view.c',
   dependencies: [wlroots, wayland_server],
   include_directories: woodland_inc,
-  link_with: [output_lib, shell_lib, layer_lib, ssd_lib, workspace_lib, capture_lib, util_lib])
+  link_with: [output_lib, cursor_lib, shell_lib, layer_lib, ssd_lib, workspace_lib, capture_lib, util_lib])
 test('view', test_view)
 
 test_layer = executable('test_layer', 'test_layer.c',
   dependencies: [wlroots, wayland_server],
   include_directories: woodland_inc,
-  link_with: [output_lib, layer_lib, shell_lib, seat_lib, workspace_lib, ssd_lib, util_lib])
+  link_with: [output_lib, cursor_lib, layer_lib, shell_lib, seat_lib, workspace_lib, ssd_lib, util_lib])
 test('layer', test_layer)
 
 test_ssd = executable('test_ssd', 'test_ssd.c',
   dependencies: [wlroots, wayland_server],
   include_directories: woodland_inc,
-  link_with: [ssd_lib, shell_lib, output_lib, layer_lib, workspace_lib, capture_lib, util_lib])
+  link_with: [ssd_lib, cursor_lib, shell_lib, output_lib, layer_lib, workspace_lib, capture_lib, util_lib])
 test('ssd', test_ssd)
 
 test_placement = executable('test_placement', 'test_placement.c',
   dependencies: [wlroots, wayland_server],
   include_directories: woodland_inc,
-  link_with: [output_lib, shell_lib, ssd_lib, workspace_lib, layer_lib, capture_lib, util_lib])
+  link_with: [output_lib, cursor_lib, shell_lib, ssd_lib, workspace_lib, layer_lib, capture_lib, util_lib])
 test('placement', test_placement)
 
 test_focus = executable('test_focus', 'test_focus.c',
   dependencies: [wlroots, wayland_server],
   include_directories: woodland_inc,
-  link_with: [output_lib, shell_lib, ssd_lib, workspace_lib, layer_lib, capture_lib, util_lib])
+  link_with: [output_lib, cursor_lib, shell_lib, ssd_lib, workspace_lib, layer_lib, capture_lib, util_lib])
 test('focus', test_focus)
 
 test_capture = executable('test_capture', 'test_capture.c',
@@ -77,7 +77,7 @@ test('json', test_json)
 test_selfcheck = executable('test_selfcheck', 'test_selfcheck.c',
   dependencies: [wlroots, wayland_server],
   include_directories: woodland_inc,
-  link_with: [output_lib, shell_lib, ssd_lib, workspace_lib, layer_lib,
+  link_with: [output_lib, cursor_lib, shell_lib, ssd_lib, workspace_lib, layer_lib,
               capture_lib, util_lib])
 test('selfcheck', test_selfcheck)
 

@@ -41,7 +41,7 @@ wayland_server = dependency('wayland-server')
 xkbcommon = dependency('xkbcommon')
 pangocairo = dependency('pangocairo')
 cairo = dependency('cairo')
-rsvg_dep = dependency('librsvg-2.0', version: '>=2.46', required: false)
+rsvg_dep = dependency('librsvg-2.0', version: '>=2.52', required: false)
 # Xwayland：依赖只提供 Xwayland 可执行文件路径（wlroots 编译期读取）。
 # 代码始终参与编译（view 访问器里要引用 wlroots 的 xwayland API），
 # -Dxwayland=disabled 只表示运行时不创建 Xwayland、不接 X 客户端。

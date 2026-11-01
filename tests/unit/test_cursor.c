@@ -2,6 +2,7 @@
 #include "cursor.h"
 #include "woodland.h"
 #include <assert.h>
+#include <string.h>
 #include <wayland-server-core.h>
 #include <wlr/backend.h>
 #include <wlr/backend/headless.h>
@@ -31,8 +32,32 @@ int main(void)
     woodland_cursor_set(&server, "pointer");
     /* 未知形状不崩溃（回退到 default） */
     woodland_cursor_set(&server, "nonexistent-shape-xyz");
+    /* 校验边缘及四角映射的标准光标名称 */
+    assert(strcmp(woodland_cursor_resize_name(WLR_EDGE_TOP), "n-resize") == 0);
+    assert(strcmp(woodland_cursor_resize_name(WLR_EDGE_BOTTOM), "s-resize") == 0);
+    assert(strcmp(woodland_cursor_resize_name(WLR_EDGE_LEFT), "w-resize") == 0);
+    assert(strcmp(woodland_cursor_resize_name(WLR_EDGE_RIGHT), "e-resize") == 0);
+    assert(strcmp(woodland_cursor_resize_name(WLR_EDGE_TOP | WLR_EDGE_LEFT), "nw-resize") == 0);
+    assert(strcmp(woodland_cursor_resize_name(WLR_EDGE_TOP | WLR_EDGE_RIGHT), "ne-resize") == 0);
+    assert(strcmp(woodland_cursor_resize_name(WLR_EDGE_BOTTOM | WLR_EDGE_LEFT), "sw-resize") == 0);
+    assert(strcmp(woodland_cursor_resize_name(WLR_EDGE_BOTTOM | WLR_EDGE_RIGHT), "se-resize") == 0);
+    assert(strcmp(woodland_cursor_resize_name(0), "default") == 0);
 
-    /* 缩放光标设置测试（四边与四角） */
+    /* 校验传统 X11 回退光标名称 */
+    assert(strcmp(woodland_cursor_resize_fallback_name(WLR_EDGE_TOP), "top_side") == 0);
+    assert(strcmp(woodland_cursor_resize_fallback_name(WLR_EDGE_BOTTOM), "bottom_side") == 0);
+    assert(strcmp(woodland_cursor_resize_fallback_name(WLR_EDGE_LEFT), "left_side") == 0);
+    assert(strcmp(woodland_cursor_resize_fallback_name(WLR_EDGE_RIGHT), "right_side") == 0);
+    assert(strcmp(woodland_cursor_resize_fallback_name(WLR_EDGE_TOP | WLR_EDGE_LEFT),
+                  "top_left_corner") == 0);
+    assert(strcmp(woodland_cursor_resize_fallback_name(WLR_EDGE_TOP | WLR_EDGE_RIGHT),
+                  "top_right_corner") == 0);
+    assert(strcmp(woodland_cursor_resize_fallback_name(WLR_EDGE_BOTTOM | WLR_EDGE_LEFT),
+                  "bottom_left_corner") == 0);
+    assert(strcmp(woodland_cursor_resize_fallback_name(WLR_EDGE_BOTTOM | WLR_EDGE_RIGHT),
+                  "bottom_right_corner") == 0);
+
+    /* 设置缩放光标不崩溃 */
     woodland_cursor_set_resize(&server, WLR_EDGE_TOP);
     woodland_cursor_set_resize(&server, WLR_EDGE_BOTTOM);
     woodland_cursor_set_resize(&server, WLR_EDGE_LEFT);
@@ -42,7 +67,6 @@ int main(void)
     woodland_cursor_set_resize(&server, WLR_EDGE_BOTTOM | WLR_EDGE_LEFT);
     woodland_cursor_set_resize(&server, WLR_EDGE_BOTTOM | WLR_EDGE_RIGHT);
     woodland_cursor_set_resize(&server, 0);
-
     woodland_cursor_finish(&server);
 
     /* 逆序释放 wlr 资源（ASan 下验证无泄漏） */

@@ -14,17 +14,17 @@
 #include "util/listener.h"
 #include <stdlib.h>
 
-#include <wlr/types/wlr_foreign_toplevel_management_v1.h>
-#include <wlr/types/wlr_scene.h>
-#include <wlr/types/wlr_xdg_shell.h>
-#include <wlr/util/edges.h>
-
+#include "cursor.h"
 #include "output.h"
 #include "placement.h"
 #include "shell_internal.h"
 #include "ssd.h"
 #include "view.h"
 #include "woodland.h"
+#include <wlr/types/wlr_foreign_toplevel_management_v1.h>
+#include <wlr/types/wlr_scene.h>
+#include <wlr/types/wlr_xdg_shell.h>
+#include <wlr/util/edges.h>
 
 /* ==================== 吸附候选边 ==================== */
 
@@ -152,7 +152,7 @@ void woodland_view_begin_interactive(struct woodland_view *view, enum woodland_c
         view_unsnap_for_drag(view);
         server->grab_x = server->cursor->x - view->scene_tree->node.x;
         server->grab_y = server->cursor->y - view->scene_tree->node.y;
-        shell_cursor_set(server, "grabbing");
+        woodland_cursor_set(server, "grabbing");
     } else {
         /* 手动缩放即放弃贴边状态（尺寸由用户接管） */
         view->snapped_edges = 0;
@@ -171,7 +171,7 @@ void woodland_view_begin_interactive(struct woodland_view *view, enum woodland_c
         server->grab_geobox.y += view->scene_tree->node.y;
 
         server->resize_edges = edges;
-        shell_cursor_set_resize(server, edges);
+        woodland_cursor_set_resize(server, edges);
     }
 }
 
@@ -326,7 +326,7 @@ void woodland_cursor_reset_mode(struct woodland_server *server)
     server->cursor_mode = WOODLAND_CURSOR_PASSTHROUGH;
     server->grabbed_view = NULL;
     server->resize_edges = 0;
-    shell_cursor_set(server, "default");
+    woodland_cursor_set(server, "default");
 }
 
 void shell_interactive_attach(struct woodland_view *view)

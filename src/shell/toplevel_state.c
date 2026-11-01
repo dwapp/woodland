@@ -35,7 +35,8 @@
 
 /* ==================== 几何落位 ==================== */
 
-static void view_save_geometry(struct woodland_view *view) {
+static void view_save_geometry(struct woodland_view *view)
+{
     struct wlr_box content;
     woodland_view_content_box(view, &content);
     view->saved_geometry.x = view->scene_tree->node.x;
@@ -44,15 +45,16 @@ static void view_save_geometry(struct woodland_view *view) {
     view->saved_geometry.height = content.height;
 }
 
-void shell_view_apply_geometry(struct woodland_view *view,
-                               const struct wlr_box *box) {
+void shell_view_apply_geometry(struct woodland_view *view, const struct wlr_box *box)
+{
     /* 先落位置再改尺寸：X11 的 configure 会把当前位置一并发给客户端 */
     wlr_scene_node_set_position(&view->scene_tree->node, box->x, box->y);
     woodland_view_request_size(view, box->width, box->height);
 }
 
 /* X11 的 configure 已由 woodland_view_request_size 直接发出，无需再排程 */
-void shell_view_schedule_configure(struct woodland_view *view) {
+void shell_view_schedule_configure(struct woodland_view *view)
+{
     if (view->type == WOODLAND_VIEW_XWAYLAND) {
         return;
     }
@@ -61,13 +63,12 @@ void shell_view_schedule_configure(struct woodland_view *view) {
 
 /* ==================== 状态标志的协议侧同步 ==================== */
 
-void shell_view_apply_maximized_state(struct woodland_view *view,
-                                      bool maximized) {
+void shell_view_apply_maximized_state(struct woodland_view *view, bool maximized)
+{
 #if WOODLAND_HAVE_XWAYLAND
     if (view->type == WOODLAND_VIEW_XWAYLAND) {
         if (view->xwayland_surface) {
-            wlr_xwayland_surface_set_maximized(view->xwayland_surface,
-                                               maximized, maximized);
+            wlr_xwayland_surface_set_maximized(view->xwayland_surface, maximized, maximized);
         }
         return;
     }
@@ -75,13 +76,12 @@ void shell_view_apply_maximized_state(struct woodland_view *view,
     wlr_xdg_toplevel_set_maximized(view->xdg_toplevel, maximized);
 }
 
-static void view_apply_fullscreen_state(struct woodland_view *view,
-                                        bool fullscreen) {
+static void view_apply_fullscreen_state(struct woodland_view *view, bool fullscreen)
+{
 #if WOODLAND_HAVE_XWAYLAND
     if (view->type == WOODLAND_VIEW_XWAYLAND) {
         if (view->xwayland_surface) {
-            wlr_xwayland_surface_set_fullscreen(view->xwayland_surface,
-                                                fullscreen);
+            wlr_xwayland_surface_set_fullscreen(view->xwayland_surface, fullscreen);
         }
         return;
     }
@@ -91,7 +91,8 @@ static void view_apply_fullscreen_state(struct woodland_view *view,
 
 /* ==================== 最大化 / 全屏 / 最小化 ==================== */
 
-void woodland_view_set_maximized(struct woodland_view *view, bool maximized) {
+void woodland_view_set_maximized(struct woodland_view *view, bool maximized)
+{
     if (maximized == view->maximized) {
         return;
     }
@@ -106,8 +107,8 @@ void woodland_view_set_maximized(struct woodland_view *view, bool maximized) {
         view_save_geometry(view);
         view->maximized = true;
         /* 最大化取"这个窗口所在输出"的工作区，多输出下才不会被拽到主屏 */
-        struct wlr_box box = woodland_view_maximized_geometry_on(
-            server, woodland_output_for_view(view));
+        struct wlr_box box =
+            woodland_view_maximized_geometry_on(server, woodland_output_for_view(view));
         /* 最大化保留标题栏，内容让出 titlebar 高度 */
         woodland_view_apply_outer_geometry(view, &box);
         shell_view_apply_maximized_state(view, true);
@@ -119,15 +120,14 @@ void woodland_view_set_maximized(struct woodland_view *view, bool maximized) {
     }
     shell_view_schedule_configure(view);
     if (view->toplevel_handle) {
-        wlr_foreign_toplevel_handle_v1_set_maximized(
-            view->toplevel_handle, view->maximized);
-        wlr_foreign_toplevel_handle_v1_set_fullscreen(
-            view->toplevel_handle, view->fullscreen);
+        wlr_foreign_toplevel_handle_v1_set_maximized(view->toplevel_handle, view->maximized);
+        wlr_foreign_toplevel_handle_v1_set_fullscreen(view->toplevel_handle, view->fullscreen);
     }
 }
 
 void woodland_view_set_fullscreen(struct woodland_view *view, bool fullscreen,
-                                  struct wlr_output *output) {
+                                  struct wlr_output *output)
+{
     if (fullscreen == view->fullscreen) {
         return;
     }
@@ -160,14 +160,13 @@ void woodland_view_set_fullscreen(struct woodland_view *view, bool fullscreen,
     }
     shell_view_schedule_configure(view);
     if (view->toplevel_handle) {
-        wlr_foreign_toplevel_handle_v1_set_fullscreen(
-            view->toplevel_handle, view->fullscreen);
-        wlr_foreign_toplevel_handle_v1_set_maximized(
-            view->toplevel_handle, view->maximized);
+        wlr_foreign_toplevel_handle_v1_set_fullscreen(view->toplevel_handle, view->fullscreen);
+        wlr_foreign_toplevel_handle_v1_set_maximized(view->toplevel_handle, view->maximized);
     }
 }
 
-void woodland_view_set_minimized(struct woodland_view *view, bool minimized) {
+void woodland_view_set_minimized(struct woodland_view *view, bool minimized)
+{
     if (minimized == view->minimized) {
         return;
     }
@@ -182,29 +181,28 @@ void woodland_view_set_minimized(struct woodland_view *view, bool minimized) {
         }
     }
     if (view->toplevel_handle) {
-        wlr_foreign_toplevel_handle_v1_set_minimized(
-            view->toplevel_handle, minimized);
+        wlr_foreign_toplevel_handle_v1_set_minimized(view->toplevel_handle, minimized);
     }
 }
 
-static void xdg_toplevel_request_maximize(struct wl_listener *listener, void *data) {
-    struct woodland_view *view =
-        wl_container_of(listener, view, request_maximize);
+static void xdg_toplevel_request_maximize(struct wl_listener *listener, void *data)
+{
+    struct woodland_view *view = wl_container_of(listener, view, request_maximize);
     woodland_view_set_maximized(view, view->xdg_toplevel->requested.maximized);
     (void)data;
 }
 
-static void xdg_toplevel_request_fullscreen(struct wl_listener *listener, void *data) {
-    struct woodland_view *view =
-        wl_container_of(listener, view, request_fullscreen);
+static void xdg_toplevel_request_fullscreen(struct wl_listener *listener, void *data)
+{
+    struct woodland_view *view = wl_container_of(listener, view, request_fullscreen);
     woodland_view_set_fullscreen(view, view->xdg_toplevel->requested.fullscreen,
                                  view->xdg_toplevel->requested.fullscreen_output);
     (void)data;
 }
 
-static void xdg_toplevel_request_minimize(struct wl_listener *listener, void *data) {
-    struct woodland_view *view =
-        wl_container_of(listener, view, request_minimize);
+static void xdg_toplevel_request_minimize(struct wl_listener *listener, void *data)
+{
+    struct woodland_view *view = wl_container_of(listener, view, request_minimize);
     woodland_view_set_minimized(view, view->xdg_toplevel->requested.minimized);
     (void)data;
 }
@@ -212,16 +210,17 @@ static void xdg_toplevel_request_minimize(struct wl_listener *listener, void *da
 /* ==================== 标题 / app_id / parent / tag ==================== */
 
 /* 客户端/合成器侧销毁句柄时清指针，避免视图销毁时二次释放 */
-static void ext_toplevel_handle_destroy(struct wl_listener *listener, void *data) {
-    struct woodland_view *view =
-        wl_container_of(listener, view, ext_handle_destroy);
+static void ext_toplevel_handle_destroy(struct wl_listener *listener, void *data)
+{
+    struct woodland_view *view = wl_container_of(listener, view, ext_handle_destroy);
     wl_list_remove(&view->ext_handle_destroy.link);
     view->ext_toplevel_handle = NULL;
     (void)data;
 }
 
 /* ext-foreign-toplevel-list 的句柄状态：只有 title/app_id 两项 */
-static void ext_toplevel_sync_state(struct woodland_view *view) {
+static void ext_toplevel_sync_state(struct woodland_view *view)
+{
     if (!view->ext_toplevel_handle) {
         return;
     }
@@ -229,11 +228,11 @@ static void ext_toplevel_sync_state(struct woodland_view *view) {
         .title = view->title,
         .app_id = view->app_id,
     };
-    wlr_ext_foreign_toplevel_handle_v1_update_state(
-        view->ext_toplevel_handle, &state);
+    wlr_ext_foreign_toplevel_handle_v1_update_state(view->ext_toplevel_handle, &state);
 }
 
-void woodland_view_set_title(struct woodland_view *view, const char *title) {
+void woodland_view_set_title(struct woodland_view *view, const char *title)
+{
     char *copy = title ? strdup(title) : NULL;
     if (title && !copy) {
         return;
@@ -242,8 +241,7 @@ void woodland_view_set_title(struct woodland_view *view, const char *title) {
     view->title = copy;
     /* wlroots 的 set_title 不接受 NULL（内部 strdup），空标题就不下发 */
     if (view->toplevel_handle && view->title) {
-        wlr_foreign_toplevel_handle_v1_set_title(view->toplevel_handle,
-                                                 view->title);
+        wlr_foreign_toplevel_handle_v1_set_title(view->toplevel_handle, view->title);
     }
     ext_toplevel_sync_state(view);
     /* 标题变化时刷新 SSD 标题文本 */
@@ -252,7 +250,8 @@ void woodland_view_set_title(struct woodland_view *view, const char *title) {
     }
 }
 
-void woodland_view_set_tag(struct woodland_view *view, const char *tag) {
+void woodland_view_set_tag(struct woodland_view *view, const char *tag)
+{
     char *copy = tag ? strdup(tag) : NULL;
     if (tag && !copy) {
         return;
@@ -261,7 +260,8 @@ void woodland_view_set_tag(struct woodland_view *view, const char *tag) {
     view->tag = copy;
 }
 
-void woodland_view_set_app_id(struct woodland_view *view, const char *app_id) {
+void woodland_view_set_app_id(struct woodland_view *view, const char *app_id)
+{
     char *copy = app_id ? strdup(app_id) : NULL;
     if (app_id && !copy) {
         return;
@@ -269,38 +269,41 @@ void woodland_view_set_app_id(struct woodland_view *view, const char *app_id) {
     free(view->app_id);
     view->app_id = copy;
     if (view->toplevel_handle && view->app_id) {
-        wlr_foreign_toplevel_handle_v1_set_app_id(view->toplevel_handle,
-                                                  view->app_id);
+        wlr_foreign_toplevel_handle_v1_set_app_id(view->toplevel_handle, view->app_id);
     }
     ext_toplevel_sync_state(view);
+    if (view->ssd) {
+        woodland_ssd_update(view);
+    }
 }
 
-void woodland_view_set_parent(struct woodland_view *view,
-                              struct woodland_view *parent) {
+void woodland_view_set_parent(struct woodland_view *view, struct woodland_view *parent)
+{
     view->parent = parent;
     /* 同步 foreign-toplevel parent */
     if (view->toplevel_handle) {
         struct wlr_foreign_toplevel_handle_v1 *parent_handle =
-            (parent && parent->toplevel_handle)
-                ? parent->toplevel_handle : NULL;
-        wlr_foreign_toplevel_handle_v1_set_parent(
-            view->toplevel_handle, parent_handle);
+            (parent && parent->toplevel_handle) ? parent->toplevel_handle : NULL;
+        wlr_foreign_toplevel_handle_v1_set_parent(view->toplevel_handle, parent_handle);
     }
 }
 
-static void xdg_toplevel_set_title(struct wl_listener *listener, void *data) {
+static void xdg_toplevel_set_title(struct wl_listener *listener, void *data)
+{
     struct woodland_view *view = wl_container_of(listener, view, set_title);
     woodland_view_set_title(view, view->xdg_toplevel->title);
     (void)data;
 }
 
-static void xdg_toplevel_set_app_id(struct wl_listener *listener, void *data) {
+static void xdg_toplevel_set_app_id(struct wl_listener *listener, void *data)
+{
     struct woodland_view *view = wl_container_of(listener, view, set_app_id);
     woodland_view_set_app_id(view, view->xdg_toplevel->app_id);
     (void)data;
 }
 
-static void xdg_toplevel_set_parent(struct wl_listener *listener, void *data) {
+static void xdg_toplevel_set_parent(struct wl_listener *listener, void *data)
+{
     struct woodland_view *view = wl_container_of(listener, view, set_parent);
     struct wlr_xdg_toplevel *parent = view->xdg_toplevel->parent;
     struct woodland_view *parent_view = NULL;
@@ -314,7 +317,8 @@ static void xdg_toplevel_set_parent(struct wl_listener *listener, void *data) {
 
 /* ==================== foreign-toplevel 请求 ==================== */
 
-static void ft_request_activate(struct wl_listener *listener, void *data) {
+static void ft_request_activate(struct wl_listener *listener, void *data)
+{
     struct woodland_view *view = wl_container_of(listener, view, ft_request_activate);
     /* 若最小化则先恢复 */
     if (view->minimized) {
@@ -324,49 +328,59 @@ static void ft_request_activate(struct wl_listener *listener, void *data) {
     (void)data;
 }
 
-static void ft_request_maximize(struct wl_listener *listener, void *data) {
+static void ft_request_maximize(struct wl_listener *listener, void *data)
+{
     struct woodland_view *view = wl_container_of(listener, view, ft_request_maximize);
     struct wlr_foreign_toplevel_handle_v1_maximized_event *event = data;
     woodland_view_set_maximized(view, event->maximized);
 }
 
-static void ft_request_fullscreen(struct wl_listener *listener, void *data) {
+static void ft_request_fullscreen(struct wl_listener *listener, void *data)
+{
     struct woodland_view *view = wl_container_of(listener, view, ft_request_fullscreen);
     struct wlr_foreign_toplevel_handle_v1_fullscreen_event *event = data;
     woodland_view_set_fullscreen(view, event->fullscreen, event->output);
 }
 
-static void ft_request_minimize(struct wl_listener *listener, void *data) {
+static void ft_request_minimize(struct wl_listener *listener, void *data)
+{
     struct woodland_view *view = wl_container_of(listener, view, ft_request_minimize);
     struct wlr_foreign_toplevel_handle_v1_minimized_event *event = data;
     woodland_view_set_minimized(view, event->minimized);
 }
 
-static void ft_request_close(struct wl_listener *listener, void *data) {
+static void ft_request_close(struct wl_listener *listener, void *data)
+{
     struct woodland_view *view = wl_container_of(listener, view, ft_request_close);
     woodland_view_close(view);
     (void)data;
 }
 
 /* foreign-toplevel 与 ext-foreign-toplevel-list 句柄：两个后端共用 */
-void woodland_view_init_handles(struct woodland_view *view) {
+void woodland_view_init_handles(struct woodland_view *view)
+{
     struct woodland_server *server = view->server;
 
     if (server->foreign_toplevel_manager) {
-        view->toplevel_handle = wlr_foreign_toplevel_handle_v1_create(
-            server->foreign_toplevel_manager);
+        view->toplevel_handle =
+            wlr_foreign_toplevel_handle_v1_create(server->foreign_toplevel_manager);
         if (view->toplevel_handle) {
             view->toplevel_handle->data = view;
-            woodland_listener_connect(&view->ft_request_activate, &view->toplevel_handle->events.request_activate,
-                          ft_request_activate, "toplevel_state.request_activate");
-            woodland_listener_connect(&view->ft_request_maximize, &view->toplevel_handle->events.request_maximize,
-                          ft_request_maximize, "toplevel_state.request_maximize");
-            woodland_listener_connect(&view->ft_request_fullscreen, &view->toplevel_handle->events.request_fullscreen,
-                          ft_request_fullscreen, "toplevel_state.request_fullscreen");
-            woodland_listener_connect(&view->ft_request_minimize, &view->toplevel_handle->events.request_minimize,
-                          ft_request_minimize, "toplevel_state.request_minimize");
-            woodland_listener_connect(&view->ft_request_close, &view->toplevel_handle->events.request_close,
-                          ft_request_close, "toplevel_state.request_close");
+            woodland_listener_connect(&view->ft_request_activate,
+                                      &view->toplevel_handle->events.request_activate,
+                                      ft_request_activate, "toplevel_state.request_activate");
+            woodland_listener_connect(&view->ft_request_maximize,
+                                      &view->toplevel_handle->events.request_maximize,
+                                      ft_request_maximize, "toplevel_state.request_maximize");
+            woodland_listener_connect(&view->ft_request_fullscreen,
+                                      &view->toplevel_handle->events.request_fullscreen,
+                                      ft_request_fullscreen, "toplevel_state.request_fullscreen");
+            woodland_listener_connect(&view->ft_request_minimize,
+                                      &view->toplevel_handle->events.request_minimize,
+                                      ft_request_minimize, "toplevel_state.request_minimize");
+            woodland_listener_connect(&view->ft_request_close,
+                                      &view->toplevel_handle->events.request_close,
+                                      ft_request_close, "toplevel_state.request_close");
         }
     }
 
@@ -377,29 +391,32 @@ void woodland_view_init_handles(struct woodland_view *view) {
             .title = view->title,
             .app_id = view->app_id,
         };
-        view->ext_toplevel_handle = wlr_ext_foreign_toplevel_handle_v1_create(
-            server->ext_toplevel_list, &state);
+        view->ext_toplevel_handle =
+            wlr_ext_foreign_toplevel_handle_v1_create(server->ext_toplevel_list, &state);
         if (view->ext_toplevel_handle) {
             view->ext_toplevel_handle->data = view;
-            woodland_listener_connect(&view->ext_handle_destroy, &view->ext_toplevel_handle->events.destroy,
-                          ext_toplevel_handle_destroy, "toplevel_state.destroy");
+            woodland_listener_connect(&view->ext_handle_destroy,
+                                      &view->ext_toplevel_handle->events.destroy,
+                                      ext_toplevel_handle_destroy, "toplevel_state.destroy");
         }
     }
 }
 
 /* ==================== 监听器注册 ==================== */
 
-void shell_toplevel_state_attach(struct woodland_view *view) {
+void shell_toplevel_state_attach(struct woodland_view *view)
+{
     woodland_listener_connect(&view->request_maximize, &view->xdg_toplevel->events.request_maximize,
-                          xdg_toplevel_request_maximize, "toplevel_state.request_maximize");
-    woodland_listener_connect(&view->request_fullscreen, &view->xdg_toplevel->events.request_fullscreen,
-                          xdg_toplevel_request_fullscreen, "toplevel_state.request_fullscreen");
+                              xdg_toplevel_request_maximize, "toplevel_state.request_maximize");
+    woodland_listener_connect(&view->request_fullscreen,
+                              &view->xdg_toplevel->events.request_fullscreen,
+                              xdg_toplevel_request_fullscreen, "toplevel_state.request_fullscreen");
     woodland_listener_connect(&view->request_minimize, &view->xdg_toplevel->events.request_minimize,
-                          xdg_toplevel_request_minimize, "toplevel_state.request_minimize");
+                              xdg_toplevel_request_minimize, "toplevel_state.request_minimize");
     woodland_listener_connect(&view->set_title, &view->xdg_toplevel->events.set_title,
-                          xdg_toplevel_set_title, "toplevel_state.set_title");
+                              xdg_toplevel_set_title, "toplevel_state.set_title");
     woodland_listener_connect(&view->set_app_id, &view->xdg_toplevel->events.set_app_id,
-                          xdg_toplevel_set_app_id, "toplevel_state.set_app_id");
+                              xdg_toplevel_set_app_id, "toplevel_state.set_app_id");
     woodland_listener_connect(&view->set_parent, &view->xdg_toplevel->events.set_parent,
-                          xdg_toplevel_set_parent, "toplevel_state.set_parent");
+                              xdg_toplevel_set_parent, "toplevel_state.set_parent");
 }

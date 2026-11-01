@@ -36,8 +36,8 @@ void woodland_text_buffer_destroy(struct woodland_text_buffer *tb);
  * @param color    前景色 RGBA（premultiplied，0~1）
  * @param scale    输出缩放（buffer 像素 = 逻辑 * scale）
  */
-void woodland_text_buffer_update(struct woodland_text_buffer *tb, const char *text, int height,
-                                 const float color[4], float scale);
+void woodland_text_buffer_update(struct woodland_text_buffer *tb, const char *text, int max_width,
+                                 int height, const float color[4], float scale);
 
 /** 移动文本 buffer 节点。 */
 void woodland_text_buffer_set_position(struct woodland_text_buffer *tb, int x, int y);
