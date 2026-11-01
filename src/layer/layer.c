@@ -17,11 +17,12 @@
 
 /* ==================== arrange ==================== */
 
-static void arrange_one_layer(const struct wlr_box *full_area,
-                              struct wlr_box *usable_area,
-                              struct wlr_scene_tree *tree, bool exclusive) {
+static void arrange_one_layer(const struct wlr_box *full_area, struct wlr_box *usable_area,
+                              struct wlr_scene_tree *tree, bool exclusive)
+{
     struct wlr_scene_node *node;
-    wl_list_for_each(node, &tree->children, link) {
+    wl_list_for_each(node, &tree->children, link)
+    {
         struct woodland_layer_surface *surface = node->data;
         struct wlr_scene_layer_surface_v1 *scene = surface->scene_layer_surface;
         if (!scene->layer_surface->initialized) {
@@ -34,12 +35,11 @@ static void arrange_one_layer(const struct wlr_box *full_area,
     }
 }
 
-void woodland_layer_arrange(struct woodland_server *server,
-                            struct woodland_output *output) {
+void woodland_layer_arrange(struct woodland_server *server, struct woodland_output *output)
+{
     (void)server;
     struct wlr_box full_area = {0};
-    wlr_output_effective_resolution(output->wlr_output,
-        &full_area.width, &full_area.height);
+    wlr_output_effective_resolution(output->wlr_output, &full_area.width, &full_area.height);
     struct wlr_box usable_area = full_area;
 
     /* 先 exclusive（overlay → background），再非 exclusive（background → overlay） */
@@ -55,15 +55,16 @@ void woodland_layer_arrange(struct woodland_server *server,
 
     /* 同步 layer tree 节点位置到输出在 layout 中的坐标 */
     for (int i = 0; i < 4; i++) {
-        wlr_scene_node_set_position(&output->layer_tree[i]->node,
-            output->scene_output->x, output->scene_output->y);
+        wlr_scene_node_set_position(&output->layer_tree[i]->node, output->scene_output->x,
+                                    output->scene_output->y);
     }
 }
 
 /* ==================== 焦点（任务 3 完整实现，本任务先提供供 commit 调用） ==================== */
 
 void woodland_layer_try_focus(struct woodland_server *server,
-                              struct wlr_layer_surface_v1 *layer_surface) {
+                              struct wlr_layer_surface_v1 *layer_surface)
+{
     enum zwlr_layer_surface_v1_keyboard_interactivity interactivity =
         layer_surface->current.keyboard_interactive;
     struct wlr_seat *seat = server->seat;
@@ -71,11 +72,11 @@ void woodland_layer_try_focus(struct woodland_server *server,
     switch (interactivity) {
     case ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE:
     case ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND:
-        if (interactivity == ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND
-            && server->focused_layer != NULL) {
+        if (interactivity == ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND &&
+            server->focused_layer != NULL) {
             /* on_demand 不抢占已有 exclusive 层的焦点 */
-            if (server->focused_layer->current.keyboard_interactive
-                == ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE) {
+            if (server->focused_layer->current.keyboard_interactive ==
+                ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE) {
                 return;
             }
         }
@@ -85,9 +86,8 @@ void woodland_layer_try_focus(struct woodland_server *server,
         woodland_focus_yield_to_layer(server);
         struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(seat);
         if (keyboard != NULL) {
-            wlr_seat_keyboard_notify_enter(seat, layer_surface->surface,
-                keyboard->keycodes, keyboard->num_keycodes,
-                &keyboard->modifiers);
+            wlr_seat_keyboard_notify_enter(seat, layer_surface->surface, keyboard->keycodes,
+                                           keyboard->num_keycodes, &keyboard->modifiers);
         }
         break;
     case ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE:
@@ -100,17 +100,16 @@ void woodland_layer_try_focus(struct woodland_server *server,
     }
 }
 
-struct wlr_layer_surface_v1 *woodland_layer_surface_at(
-        struct woodland_server *server, double lx, double ly,
-        struct wlr_surface **surface, double *sx, double *sy) {
-    struct wlr_scene_node *node = wlr_scene_node_at(
-        &server->scene->tree.node, lx, ly, sx, sy);
+struct wlr_layer_surface_v1 *woodland_layer_surface_at(struct woodland_server *server, double lx,
+                                                       double ly, struct wlr_surface **surface,
+                                                       double *sx, double *sy)
+{
+    struct wlr_scene_node *node = wlr_scene_node_at(&server->scene->tree.node, lx, ly, sx, sy);
     if (node == NULL || node->type != WLR_SCENE_NODE_BUFFER) {
         return NULL;
     }
     struct wlr_scene_buffer *scene_buffer = wlr_scene_buffer_from_node(node);
-    struct wlr_scene_surface *scene_surface =
-        wlr_scene_surface_try_from_buffer(scene_buffer);
+    struct wlr_scene_surface *scene_surface = wlr_scene_surface_try_from_buffer(scene_buffer);
     if (!scene_surface) {
         return NULL;
     }
@@ -120,26 +119,26 @@ struct wlr_layer_surface_v1 *woodland_layer_surface_at(
 
 /* ==================== layer surface 事件 ==================== */
 
-static void handle_map(struct wl_listener *listener, void *data) {
-    struct woodland_layer_surface *layer =
-        wl_container_of(listener, layer, map);
+static void handle_map(struct wl_listener *listener, void *data)
+{
+    struct woodland_layer_surface *layer = wl_container_of(listener, layer, map);
     layer->mapped = true;
     struct wlr_layer_surface_v1 *layer_surface = layer->layer_surface;
     if (layer_surface->output) {
         struct woodland_output *output = layer_surface->output->data;
         woodland_layer_arrange(layer->server, output);
         /* exclusive 交互时给键盘焦点 */
-        if (layer_surface->current.keyboard_interactive
-            == ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE) {
+        if (layer_surface->current.keyboard_interactive ==
+            ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE) {
             woodland_layer_try_focus(layer->server, layer_surface);
         }
     }
     (void)data;
 }
 
-static void handle_unmap(struct wl_listener *listener, void *data) {
-    struct woodland_layer_surface *layer =
-        wl_container_of(listener, layer, unmap);
+static void handle_unmap(struct wl_listener *listener, void *data)
+{
+    struct woodland_layer_surface *layer = wl_container_of(listener, layer, unmap);
     layer->mapped = false;
     struct wlr_layer_surface_v1 *layer_surface = layer->layer_surface;
     if (layer_surface->output) {
@@ -149,9 +148,9 @@ static void handle_unmap(struct wl_listener *listener, void *data) {
     (void)data;
 }
 
-static void handle_surface_commit(struct wl_listener *listener, void *data) {
-    struct woodland_layer_surface *layer =
-        wl_container_of(listener, layer, surface_commit);
+static void handle_surface_commit(struct wl_listener *listener, void *data)
+{
+    struct woodland_layer_surface *layer = wl_container_of(listener, layer, surface_commit);
     struct wlr_layer_surface_v1 *layer_surface = layer->layer_surface;
     struct wlr_output *wlr_output = layer_surface->output;
     if (!wlr_output) {
@@ -163,7 +162,7 @@ static void handle_surface_commit(struct wl_listener *listener, void *data) {
     /* 处理 layer 变化：reparent 到新 layer tree */
     if (committed & WLR_LAYER_SURFACE_V1_STATE_LAYER) {
         wlr_scene_node_reparent(&layer->scene_layer_surface->tree->node,
-            output->layer_tree[layer_surface->current.layer]);
+                                output->layer_tree[layer_surface->current.layer]);
     }
     /* 处理 keyboard interactivity 变化 */
     if (committed & WLR_LAYER_SURFACE_V1_STATE_KEYBOARD_INTERACTIVITY) {
@@ -177,9 +176,9 @@ static void handle_surface_commit(struct wl_listener *listener, void *data) {
     (void)data;
 }
 
-static void handle_node_destroy(struct wl_listener *listener, void *data) {
-    struct woodland_layer_surface *layer =
-        wl_container_of(listener, layer, node_destroy);
+static void handle_node_destroy(struct wl_listener *listener, void *data)
+{
+    struct woodland_layer_surface *layer = wl_container_of(listener, layer, node_destroy);
     struct woodland_server *server = layer->server;
 
     /* 若持有键盘焦点，先把指针清掉再回退给 toplevel：
@@ -190,7 +189,9 @@ static void handle_node_destroy(struct wl_listener *listener, void *data) {
     }
     /* wlroots 可能已释放 scene_layer_surface，置 NULL 防误用 */
     layer->scene_layer_surface = NULL;
-
+    if (layer->layer_surface) {
+        layer->layer_surface->data = NULL;
+    }
     wl_list_remove(&layer->map.link);
     wl_list_remove(&layer->unmap.link);
     wl_list_remove(&layer->surface_commit.link);
@@ -201,9 +202,9 @@ static void handle_node_destroy(struct wl_listener *listener, void *data) {
     (void)data;
 }
 
-static void handle_output_destroy(struct wl_listener *listener, void *data) {
-    struct woodland_layer_surface *layer =
-        wl_container_of(listener, layer, output_destroy);
+static void handle_output_destroy(struct wl_listener *listener, void *data)
+{
+    struct woodland_layer_surface *layer = wl_container_of(listener, layer, output_destroy);
     layer->layer_surface->output = NULL;
     wlr_layer_surface_v1_destroy(layer->layer_surface);
     (void)data;
@@ -211,27 +212,27 @@ static void handle_output_destroy(struct wl_listener *listener, void *data) {
 
 /* ==================== popup ==================== */
 
-static void handle_popup_commit(struct wl_listener *listener, void *data) {
-    struct woodland_layer_popup *popup =
-        wl_container_of(listener, popup, commit);
+static void handle_popup_commit(struct wl_listener *listener, void *data)
+{
+    struct woodland_layer_popup *popup = wl_container_of(listener, popup, commit);
     if (popup->xdg_popup->base->initial_commit) {
         wlr_xdg_surface_schedule_configure(popup->xdg_popup->base);
     }
     (void)data;
 }
 
-static void handle_popup_destroy(struct wl_listener *listener, void *data) {
-    struct woodland_layer_popup *popup =
-        wl_container_of(listener, popup, destroy);
+static void handle_popup_destroy(struct wl_listener *listener, void *data)
+{
+    struct woodland_layer_popup *popup = wl_container_of(listener, popup, destroy);
     wl_list_remove(&popup->commit.link);
     wl_list_remove(&popup->destroy.link);
     free(popup);
     (void)data;
 }
 
-static void handle_new_popup(struct wl_listener *listener, void *data) {
-    struct woodland_layer_surface *layer =
-        wl_container_of(listener, layer, new_popup);
+static void handle_new_popup(struct wl_listener *listener, void *data)
+{
+    struct woodland_layer_surface *layer = wl_container_of(listener, layer, new_popup);
     struct wlr_xdg_popup *xdg_popup = data;
 
     struct woodland_layer_popup *popup = calloc(1, sizeof(*popup));
@@ -240,30 +241,31 @@ static void handle_new_popup(struct wl_listener *listener, void *data) {
         return;
     }
     popup->xdg_popup = xdg_popup;
-    popup->scene_tree = wlr_scene_xdg_surface_create(
-        layer->scene_layer_surface->tree, xdg_popup->base);
+    popup->scene_tree =
+        wlr_scene_xdg_surface_create(layer->scene_layer_surface->tree, xdg_popup->base);
     if (!popup->scene_tree) {
         free(popup);
         return;
     }
 
     woodland_listener_connect(&popup->commit, &xdg_popup->base->surface->events.commit,
-                          handle_popup_commit, "layer.commit");
-    woodland_listener_connect(&popup->destroy, &xdg_popup->events.destroy,
-                          handle_popup_destroy, "layer.destroy");
+                              handle_popup_commit, "layer.commit");
+    woodland_listener_connect(&popup->destroy, &xdg_popup->events.destroy, handle_popup_destroy,
+                              "layer.destroy");
 }
 
 /* ==================== new_surface ==================== */
 
-static void handle_new_layer_surface(struct wl_listener *listener, void *data) {
-    struct woodland_server *server =
-        wl_container_of(listener, server, new_layer_surface);
+static void handle_new_layer_surface(struct wl_listener *listener, void *data)
+{
+    struct woodland_server *server = wl_container_of(listener, server, new_layer_surface);
     struct wlr_layer_surface_v1 *layer_surface = data;
 
     /* 无输出时分配第一个输出 */
     if (!layer_surface->output) {
         struct woodland_output *wo;
-        wl_list_for_each(wo, &server->outputs, link) {
+        wl_list_for_each(wo, &server->outputs, link)
+        {
             layer_surface->output = wo->wlr_output;
             break;
         }
@@ -281,13 +283,12 @@ static void handle_new_layer_surface(struct wl_listener *listener, void *data) {
     }
     layer->layer_surface = layer_surface;
     layer->server = server;
+    layer_surface->data = layer;
 
     struct woodland_output *output = layer_surface->output->data;
-    struct wlr_scene_tree *selected_layer =
-        output->layer_tree[layer_surface->current.layer];
+    struct wlr_scene_tree *selected_layer = output->layer_tree[layer_surface->current.layer];
 
-    layer->scene_layer_surface = wlr_scene_layer_surface_v1_create(
-        selected_layer, layer_surface);
+    layer->scene_layer_surface = wlr_scene_layer_surface_v1_create(selected_layer, layer_surface);
     if (!layer->scene_layer_surface) {
         wlr_log(WLR_ERROR, "failed to create scene layer surface");
         free(layer);
@@ -297,35 +298,37 @@ static void handle_new_layer_surface(struct wl_listener *listener, void *data) {
     layer->scene_layer_surface->tree->node.data = layer;
 
     woodland_listener_connect(&layer->surface_commit, &layer_surface->surface->events.commit,
-                          handle_surface_commit, "layer.commit");
-    woodland_listener_connect(&layer->map, &layer_surface->surface->events.map,
-                          handle_map, "layer.map");
-    woodland_listener_connect(&layer->unmap, &layer_surface->surface->events.unmap,
-                          handle_unmap, "layer.unmap");
-    woodland_listener_connect(&layer->new_popup, &layer_surface->events.new_popup,
-                          handle_new_popup, "layer.new_popup");
+                              handle_surface_commit, "layer.commit");
+    woodland_listener_connect(&layer->map, &layer_surface->surface->events.map, handle_map,
+                              "layer.map");
+    woodland_listener_connect(&layer->unmap, &layer_surface->surface->events.unmap, handle_unmap,
+                              "layer.unmap");
+    woodland_listener_connect(&layer->new_popup, &layer_surface->events.new_popup, handle_new_popup,
+                              "layer.new_popup");
     woodland_listener_connect(&layer->output_destroy, &layer_surface->output->events.destroy,
-                          handle_output_destroy, "layer.destroy");
-    woodland_listener_connect(&layer->node_destroy, &layer->scene_layer_surface->tree->node.events.destroy,
-                          handle_node_destroy, "layer.destroy");
+                              handle_output_destroy, "layer.destroy");
+    woodland_listener_connect(&layer->node_destroy,
+                              &layer->scene_layer_surface->tree->node.events.destroy,
+                              handle_node_destroy, "layer.destroy");
 }
 
 /* ==================== init/finish ==================== */
 
-bool woodland_layer_init(struct woodland_server *server) {
-    server->layer_shell = wlr_layer_shell_v1_create(
-        server->display, WOODLAND_LAYER_SHELL_VERSION);
+bool woodland_layer_init(struct woodland_server *server)
+{
+    server->layer_shell = wlr_layer_shell_v1_create(server->display, WOODLAND_LAYER_SHELL_VERSION);
     if (!server->layer_shell) {
         wlr_log(WLR_ERROR, "failed to create layer shell");
         return false;
     }
 
     woodland_listener_connect(&server->new_layer_surface, &server->layer_shell->events.new_surface,
-                          handle_new_layer_surface, "layer.new_surface");
+                              handle_new_layer_surface, "layer.new_surface");
     return true;
 }
 
-void woodland_layer_finish(struct woodland_server *server) {
+void woodland_layer_finish(struct woodland_server *server)
+{
     if (server->layer_shell) {
         wl_list_remove(&server->new_layer_surface.link);
     }

@@ -11,8 +11,53 @@ struct woodland_keyboard;
 struct wlr_surface;
 struct wlr_keyboard;
 struct wlr_keyboard_key_event;
+struct wlr_input_method_manager_v2;
+struct wlr_text_input_manager_v3;
+struct wlr_virtual_keyboard_manager_v1;
+struct wlr_input_method_v2;
+struct wlr_scene_tree;
+struct woodland_text_input;
+struct woodland_ime_popup;
 
-struct woodland_ime_relay;
+struct woodland_ime_relay {
+    struct woodland_server *server;
+    struct wlr_input_method_manager_v2 *input_method_manager;
+    struct wlr_text_input_manager_v3 *text_input_manager;
+    struct wlr_virtual_keyboard_manager_v1 *virtual_keyboard_manager;
+
+    struct wlr_input_method_v2 *input_method;
+    struct wlr_surface *focused_surface;
+    struct woodland_text_input *active_text_input;
+
+    struct wl_list text_inputs; // struct woodland_text_input.link
+    struct wl_list popups;      // struct woodland_ime_popup.link
+    struct wlr_scene_tree *popup_tree;
+
+    struct wl_listener new_input_method;
+    struct wl_listener new_text_input;
+    struct wl_listener new_virtual_keyboard;
+    struct wl_listener seat_focus_change;
+    struct wl_listener focused_surface_destroy;
+
+    struct wl_listener input_method_commit;
+    struct wl_listener input_method_grab_keyboard;
+    struct wl_listener input_method_destroy;
+    struct wl_listener input_method_new_popup_surface;
+    struct wl_listener keyboard_grab_destroy;
+};
+/**
+ * 安全特权策略说明 (Security Policy):
+ *
+ * Woodland 为单用户 Wayland 会话合成器，依照全局协议规划（见 include/protocol.h 及
+ * docs/superpowers/2026-10-22-woodland-skeleton.md），security-context-v1 暂未接线。
+ * zwp_input_method_manager_v2 与 zwp_virtual_keyboard_manager_v1 暴露在当前会话的全局接口列表中，
+ * 供用户环境下的输入法引擎（如 Fcitx5、IBus）绑定使用。
+ *
+ * [已知风险与限制]：
+ * 任何能连入该 Wayland socket 的客户端均可请求输入法或虚拟键盘权限。
+ * 当后续里程碑引入特权协议访问控制机制后，应在 wl_global 的 bind 回调或
+ * wl_display_set_global_filter 中对输入法/虚拟键盘的绑定方施加权限验证。
+ */
 
 /**
  * 初始化 IME 模块与输入法中继器（zwp_input_method_v2, zwp_text_input_v3,

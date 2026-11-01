@@ -1,4 +1,8 @@
 if get_option('test').enabled()
+  wayland_client_dep = dependency('wayland-client', required: false)
+  wp_dep = dependency('wayland-protocols', required: false)
+  wayland_scanner = find_program('wayland-scanner', required: false)
+
   subdir('unit')
 
   # Xwayland 冒烟用的小客户端：建一个 override-redirect 窗口
@@ -49,9 +53,6 @@ if get_option('test').enabled()
   # idle-inhibit 的聚合回归（"最后一个抑制器销毁后 idle 必须恢复"）。
   # 需要 wayland-client 与 wayland-protocols 里的两份 xml：缺任何一样就
   # 不构建探针、不注册测试，免得把构建搞挂。
-  wayland_client_dep = dependency('wayland-client', required: false)
-  wp_dep = dependency('wayland-protocols', required: false)
-  wayland_scanner = find_program('wayland-scanner', required: false)
   if wayland_client_dep.found() and wp_dep.found() and wayland_scanner.found()
     wp_datadir = wp_dep.get_variable(pkgconfig: 'pkgdatadir')
     idle_inhibit_xml = wp_datadir / 'unstable' / 'idle-inhibit' / 'idle-inhibit-unstable-v1.xml'
