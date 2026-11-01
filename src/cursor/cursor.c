@@ -64,40 +64,57 @@ void woodland_cursor_set(struct woodland_server *server, const char *name)
     wlr_cursor_set_xcursor(server->cursor, server->xcursor_manager, name);
 }
 
+const char *woodland_cursor_resize_name(uint32_t edges)
+{
+    if (edges == (WLR_EDGE_TOP | WLR_EDGE_LEFT)) {
+        return "nw-resize";
+    } else if (edges == (WLR_EDGE_TOP | WLR_EDGE_RIGHT)) {
+        return "ne-resize";
+    } else if (edges == (WLR_EDGE_BOTTOM | WLR_EDGE_LEFT)) {
+        return "sw-resize";
+    } else if (edges == (WLR_EDGE_BOTTOM | WLR_EDGE_RIGHT)) {
+        return "se-resize";
+    } else if (edges & WLR_EDGE_TOP) {
+        return "n-resize";
+    } else if (edges & WLR_EDGE_BOTTOM) {
+        return "s-resize";
+    } else if (edges & WLR_EDGE_LEFT) {
+        return "w-resize";
+    } else if (edges & WLR_EDGE_RIGHT) {
+        return "e-resize";
+    }
+    return "default";
+}
+
+const char *woodland_cursor_resize_fallback_name(uint32_t edges)
+{
+    if (edges == (WLR_EDGE_TOP | WLR_EDGE_LEFT)) {
+        return "top_left_corner";
+    } else if (edges == (WLR_EDGE_TOP | WLR_EDGE_RIGHT)) {
+        return "top_right_corner";
+    } else if (edges == (WLR_EDGE_BOTTOM | WLR_EDGE_LEFT)) {
+        return "bottom_left_corner";
+    } else if (edges == (WLR_EDGE_BOTTOM | WLR_EDGE_RIGHT)) {
+        return "bottom_right_corner";
+    } else if (edges & WLR_EDGE_TOP) {
+        return "top_side";
+    } else if (edges & WLR_EDGE_BOTTOM) {
+        return "bottom_side";
+    } else if (edges & WLR_EDGE_LEFT) {
+        return "left_side";
+    } else if (edges & WLR_EDGE_RIGHT) {
+        return "right_side";
+    }
+    return NULL;
+}
+
 void woodland_cursor_set_resize(struct woodland_server *server, uint32_t edges)
 {
     if (!server || !server->cursor || !server->xcursor_manager) {
         return;
     }
-    const char *primary = "default";
-    const char *fallback = NULL;
-
-    if (edges == (WLR_EDGE_TOP | WLR_EDGE_LEFT)) {
-        primary = "nw-resize";
-        fallback = "top_left_corner";
-    } else if (edges == (WLR_EDGE_TOP | WLR_EDGE_RIGHT)) {
-        primary = "ne-resize";
-        fallback = "top_right_corner";
-    } else if (edges == (WLR_EDGE_BOTTOM | WLR_EDGE_LEFT)) {
-        primary = "sw-resize";
-        fallback = "bottom_left_corner";
-    } else if (edges == (WLR_EDGE_BOTTOM | WLR_EDGE_RIGHT)) {
-        primary = "se-resize";
-        fallback = "bottom_right_corner";
-    } else if (edges & WLR_EDGE_TOP) {
-        primary = "n-resize";
-        fallback = "top_side";
-    } else if (edges & WLR_EDGE_BOTTOM) {
-        primary = "s-resize";
-        fallback = "bottom_side";
-    } else if (edges & WLR_EDGE_LEFT) {
-        primary = "w-resize";
-        fallback = "left_side";
-    } else if (edges & WLR_EDGE_RIGHT) {
-        primary = "e-resize";
-        fallback = "right_side";
-    }
-
+    const char *primary = woodland_cursor_resize_name(edges);
+    const char *fallback = woodland_cursor_resize_fallback_name(edges);
     const char *name = primary;
     if (fallback && !wlr_xcursor_manager_get_xcursor(server->xcursor_manager, primary, 1.0f)) {
         name = fallback;

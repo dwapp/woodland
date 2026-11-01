@@ -11,5 +11,6 @@ bool woodland_cursor_init(struct woodland_server *server);
 void woodland_cursor_finish(struct woodland_server *server);
 void woodland_cursor_set(struct woodland_server *server, const char *name);
 void woodland_cursor_set_resize(struct woodland_server *server, uint32_t edges);
-
+const char *woodland_cursor_resize_name(uint32_t edges);
+const char *woodland_cursor_resize_fallback_name(uint32_t edges);
 #endif

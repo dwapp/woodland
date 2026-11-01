@@ -134,8 +134,8 @@ static int text_measure(const char *text)
     return w;
 }
 
-void woodland_text_buffer_update(struct woodland_text_buffer *tb, const char *text, int height,
-                                 const float color[4], float scale)
+void woodland_text_buffer_update(struct woodland_text_buffer *tb, const char *text, int max_width,
+                                 int height, const float color[4], float scale)
 {
     if (!tb) {
         return;
@@ -156,7 +156,11 @@ void woodland_text_buffer_update(struct woodland_text_buffer *tb, const char *te
         scale = 1.0f;
     }
 
-    int logical_w = text_measure(text);
+    int natural_w = text_measure(text);
+    if (natural_w <= 0) {
+        natural_w = 1;
+    }
+    int logical_w = (max_width > 0 && natural_w > max_width) ? max_width : natural_w;
     if (logical_w <= 0) {
         logical_w = 1;
     }
