@@ -21,9 +21,9 @@ struct woodland_text_buffer {
 #define WOODLAND_SSD_FONT "Sans 10"
 
 /* 给 pango layout 套用统一字体 */
-static void apply_font(PangoLayout *layout) {
-    PangoFontDescription *desc =
-        pango_font_description_from_string(WOODLAND_SSD_FONT);
+static void apply_font(PangoLayout *layout)
+{
+    PangoFontDescription *desc = pango_font_description_from_string(WOODLAND_SSD_FONT);
     pango_layout_set_font_description(layout, desc);
     pango_font_description_free(desc);
 }
@@ -37,19 +37,19 @@ struct text_wlr_buffer {
     cairo_surface_t *surface;
 };
 
-static void text_buffer_destroy(struct wlr_buffer *wlr_buffer) {
-    struct text_wlr_buffer *b =
-        wl_container_of(wlr_buffer, b, base);
+static void text_buffer_destroy(struct wlr_buffer *wlr_buffer)
+{
+    struct text_wlr_buffer *b = wl_container_of(wlr_buffer, b, base);
     cairo_surface_destroy(b->surface);
     wlr_buffer_finish(&b->base);
     free(b);
 }
 
-static bool text_buffer_begin_data_ptr_access(struct wlr_buffer *wlr_buffer,
-        uint32_t flags, void **data, uint32_t *format, size_t *stride) {
+static bool text_buffer_begin_data_ptr_access(struct wlr_buffer *wlr_buffer, uint32_t flags,
+                                              void **data, uint32_t *format, size_t *stride)
+{
     (void)flags;
-    struct text_wlr_buffer *b =
-        wl_container_of(wlr_buffer, b, base);
+    struct text_wlr_buffer *b = wl_container_of(wlr_buffer, b, base);
     cairo_surface_flush(b->surface);
     *data = cairo_image_surface_get_data(b->surface);
     *format = DRM_FORMAT_ARGB8888;
@@ -57,9 +57,9 @@ static bool text_buffer_begin_data_ptr_access(struct wlr_buffer *wlr_buffer,
     return true;
 }
 
-static void text_buffer_end_data_ptr_access(struct wlr_buffer *wlr_buffer) {
-    struct text_wlr_buffer *b =
-        wl_container_of(wlr_buffer, b, base);
+static void text_buffer_end_data_ptr_access(struct wlr_buffer *wlr_buffer)
+{
+    struct text_wlr_buffer *b = wl_container_of(wlr_buffer, b, base);
     cairo_surface_mark_dirty(b->surface);
 }
 
@@ -70,9 +70,9 @@ static struct wlr_buffer_impl text_buffer_impl = {
 };
 
 /* 创建 1x1 占位 buffer */
-static struct wlr_buffer *text_create_placeholder(void) {
-    cairo_surface_t *surf =
-        cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
+static struct wlr_buffer *text_create_placeholder(void)
+{
+    cairo_surface_t *surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
     struct text_wlr_buffer *b = calloc(1, sizeof(*b));
     if (!b) {
         cairo_surface_destroy(surf);
@@ -85,8 +85,8 @@ static struct wlr_buffer *text_create_placeholder(void) {
 
 /* ==================== 公开 API ==================== */
 
-struct woodland_text_buffer *woodland_text_buffer_create(
-        struct wlr_scene_tree *parent) {
+struct woodland_text_buffer *woodland_text_buffer_create(struct wlr_scene_tree *parent)
+{
     struct woodland_text_buffer *tb = calloc(1, sizeof(*tb));
     if (!tb) {
         return NULL;
@@ -105,7 +105,8 @@ struct woodland_text_buffer *woodland_text_buffer_create(
     return tb;
 }
 
-void woodland_text_buffer_destroy(struct woodland_text_buffer *tb) {
+void woodland_text_buffer_destroy(struct woodland_text_buffer *tb)
+{
     if (!tb) {
         return;
     }
@@ -114,7 +115,8 @@ void woodland_text_buffer_destroy(struct woodland_text_buffer *tb) {
 }
 
 /* 计算文本宽度（逻辑像素），-1 表示空 */
-static int text_measure(const char *text) {
+static int text_measure(const char *text)
+{
     if (!text || !*text) {
         return -1;
     }
@@ -132,9 +134,9 @@ static int text_measure(const char *text) {
     return w;
 }
 
-void woodland_text_buffer_update(struct woodland_text_buffer *tb,
-                                 const char *text, int height,
-                                 const float color[4], float scale) {
+void woodland_text_buffer_update(struct woodland_text_buffer *tb, const char *text, int height,
+                                 const float color[4], float scale)
+{
     if (!tb) {
         return;
     }
@@ -162,11 +164,12 @@ void woodland_text_buffer_update(struct woodland_text_buffer *tb,
 
     int px_w = (int)(logical_w * scale);
     int px_h = (int)(logical_h * scale);
-    if (px_w <= 0) px_w = 1;
-    if (px_h <= 0) px_h = 1;
+    if (px_w <= 0)
+        px_w = 1;
+    if (px_h <= 0)
+        px_h = 1;
 
-    cairo_surface_t *surf =
-        cairo_image_surface_create(CAIRO_FORMAT_ARGB32, px_w, px_h);
+    cairo_surface_t *surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, px_w, px_h);
     cairo_surface_set_device_scale(surf, scale, scale);
     cairo_t *c = cairo_create(surf);
 
@@ -207,53 +210,76 @@ void woodland_text_buffer_update(struct woodland_text_buffer *tb,
     tb->height = logical_h;
 }
 
-void woodland_text_buffer_set_position(struct woodland_text_buffer *tb,
-                                       int x, int y) {
+void woodland_text_buffer_set_position(struct woodland_text_buffer *tb, int x, int y)
+{
     if (!tb) {
         return;
     }
     wlr_scene_node_set_position(&tb->scene_buffer->node, x, y);
 }
 
-int woodland_text_buffer_get_width(const struct woodland_text_buffer *tb) {
+int woodland_text_buffer_get_width(const struct woodland_text_buffer *tb)
+{
     return tb ? tb->width : 0;
 }
 
 /* ==================== 按钮符号（cairo 画线） ==================== */
 
-static struct wlr_buffer *icon_create_buffer(int size, float scale,
-        enum woodland_ssd_button_icon icon) {
+struct wlr_buffer *woodland_button_icon_buffer(enum woodland_ssd_button_icon icon, int size,
+                                               bool inverted)
+{
     if (size <= 0) {
         return NULL;
     }
+    float scale = 1.0f;
     int px = (int)(size * scale);
-    if (px <= 0) px = 1;
+    if (px <= 0)
+        px = 1;
 
-    cairo_surface_t *surf =
-        cairo_image_surface_create(CAIRO_FORMAT_ARGB32, px, px);
+    cairo_surface_t *surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, px, px);
     cairo_surface_set_device_scale(surf, scale, scale);
     cairo_t *c = cairo_create(surf);
 
-    /* 黑色符号，1.5px 线宽 */
-    cairo_set_source_rgba(c, 0.0, 0.0, 0.0, 1.0);
-    cairo_set_line_width(c, 1.5);
+    /* 符号颜色：取 Deepin 风格 #303030，反色（关闭按钮悬停/按压）时为纯白 */
+    if (inverted) {
+        cairo_set_source_rgba(c, 1.0, 1.0, 1.0, 1.0);
+    } else {
+        cairo_set_source_rgba(c, 0.188, 0.188, 0.188, 1.0);
+    }
+    cairo_set_line_width(c, 1.25);
     cairo_set_line_cap(c, CAIRO_LINE_CAP_ROUND);
+    cairo_set_line_join(c, CAIRO_LINE_JOIN_ROUND);
 
-    double pad = size * 0.30;
+    double pad = size * 0.32;
     double s = size - 2 * pad;
 
     switch (icon) {
     case WOODLAND_SSD_ICON_ICONIFY:
-        /* 底部横线 — */
-        cairo_move_to(c, pad, size * 0.6);
-        cairo_line_to(c, size - pad, size * 0.6);
+        /* 居中横线 — */
+        cairo_move_to(c, pad, size * 0.5);
+        cairo_line_to(c, size - pad, size * 0.5);
         break;
     case WOODLAND_SSD_ICON_MAXIMIZE:
-        /* 空心方框 □ */
+        /* 单个方框 □ */
         cairo_rectangle(c, pad, pad, s, s);
         break;
+    case WOODLAND_SSD_ICON_RESTORE: {
+        /* 两个重叠窗口 (restore / unmaximize，参考 GXDE base_light.svg) */
+        double off = s * 0.25;
+        double fw = s - off;
+        /* 前方小窗 */
+        cairo_rectangle(c, pad, pad + off, fw, fw);
+        cairo_stroke(c);
+        /* 后方小窗折线 */
+        cairo_move_to(c, pad + off, pad + off);
+        cairo_line_to(c, pad + off, pad);
+        cairo_line_to(c, pad + s, pad);
+        cairo_line_to(c, pad + s, pad + fw);
+        cairo_line_to(c, pad + fw, pad + fw);
+        break;
+    }
     case WOODLAND_SSD_ICON_CLOSE:
-        /* 叉 × */
+        /* 细十字 × */
         cairo_move_to(c, pad, pad);
         cairo_line_to(c, size - pad, size - pad);
         cairo_move_to(c, size - pad, pad);
@@ -275,10 +301,10 @@ static struct wlr_buffer *icon_create_buffer(int size, float scale,
     return &b->base;
 }
 
-struct wlr_scene_buffer *woodland_button_icon_create(
-        struct wlr_scene_tree *parent, enum woodland_ssd_button_icon icon,
-        int size) {
-    struct wlr_buffer *buf = icon_create_buffer(size, 1.0f, icon);
+struct wlr_scene_buffer *woodland_button_icon_create(struct wlr_scene_tree *parent,
+                                                     enum woodland_ssd_button_icon icon, int size)
+{
+    struct wlr_buffer *buf = woodland_button_icon_buffer(icon, size, false);
     if (!buf) {
         return NULL;
     }

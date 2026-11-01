@@ -14,12 +14,16 @@
 static const float COLOR_TITLEBAR_ACTIVE[4] = {0.882f, 0.871f, 0.859f, 1.0f};   /* #e1dedb */
 static const float COLOR_TITLEBAR_INACTIVE[4] = {0.965f, 0.961f, 0.957f, 1.0f}; /* #f6f5f4 */
 static const float COLOR_BORDER[4] = {0.667f, 0.667f, 0.667f, 1.0f};            /* #aaaaaa */
-static const float COLOR_TITLE_TEXT[4] = {0.0f, 0.0f, 0.0f, 1.0f}; /* #000000 标题文字 */
-/* 按钮态覆盖层：labwc window.button.hover.bg.color = #80808020；
- * labwc 本身没有"按下态"（它靠换一套凹陷图标），这里用同色加深一档
- * 的覆盖层近似（#80808059）。两者都按预乘 alpha 写。 */
-static const float COLOR_BUTTON_HOVER[4] = {0.063f, 0.063f, 0.063f, 0.125f};
-static const float COLOR_BUTTON_PRESSED[4] = {0.176f, 0.176f, 0.176f, 0.349f};
+static const float COLOR_TITLE_TEXT_ACTIVE[4] = {0.188f, 0.188f, 0.188f,
+                                                 1.0f}; /* #303030 Deepin 优雅暗灰 */
+static const float COLOR_TITLE_TEXT_INACTIVE[4] = {0.588f, 0.588f, 0.588f,
+                                                   1.0f}; /* #969696 非激活弱化 */
+
+/* 按钮态高亮覆盖层：GXDE/Deepin 风格，关闭按钮悬停警示红，最小化/最大化轻量暗色半透明 */
+static const float COLOR_BUTTON_HOVER[4] = {0.0f, 0.0f, 0.0f, 0.08f};
+static const float COLOR_BUTTON_PRESSED[4] = {0.0f, 0.0f, 0.0f, 0.18f};
+static const float COLOR_BUTTON_CLOSE_HOVER[4] = {0.91f, 0.16f, 0.18f, 0.90f}; /* #e8292e 警示红 */
+static const float COLOR_BUTTON_CLOSE_PRESSED[4] = {0.78f, 0.12f, 0.14f, 0.95f}; /* #c71f24 深红 */
 
 enum { BORDER_TOP = 0, BORDER_BOTTOM, BORDER_LEFT, BORDER_RIGHT, BORDER_COUNT };
 enum { BUTTON_CLOSE = 0, BUTTON_MAXIMIZE, BUTTON_MINIMIZE, BUTTON_COUNT };
@@ -37,6 +41,7 @@ struct woodland_ssd {
     enum woodland_ssd_part pressed_part; // 按下的按钮（NONE = 无）
     int width;                           /* 内容宽（缓存的几何） */
     int height;                          /* 内容高 */
+    bool maximized;                      /* 缓存的最大化状态 */
 };
 
 /* 内容尺寸来源：走 view 的双后端访问器（xdg base geometry / X11 窗口尺寸） */
@@ -203,15 +208,33 @@ static void ssd_update_buttons(struct woodland_ssd *ssd)
     int pressed = button_index(ssd->pressed_part);
     for (int i = 0; i < BUTTON_COUNT; i++) {
         const float *color = NULL;
-        if (i == pressed) {
-            color = COLOR_BUTTON_PRESSED;
-        } else if (i == hovered) {
-            color = COLOR_BUTTON_HOVER;
+        if (i == BUTTON_CLOSE) {
+            if (i == pressed) {
+                color = COLOR_BUTTON_CLOSE_PRESSED;
+            } else if (i == hovered) {
+                color = COLOR_BUTTON_CLOSE_HOVER;
+            }
+        } else {
+            if (i == pressed) {
+                color = COLOR_BUTTON_PRESSED;
+            } else if (i == hovered) {
+                color = COLOR_BUTTON_HOVER;
+            }
         }
         if (color) {
             wlr_scene_rect_set_color(ssd->button_bg[i], color);
         }
         wlr_scene_node_set_enabled(&ssd->button_bg[i]->node, color != NULL);
+    }
+
+    /* 关闭按钮悬停/按压时切换为鲜明的白色图标 */
+    bool close_active = (hovered == BUTTON_CLOSE || pressed == BUTTON_CLOSE);
+    int bwn = ssd_button_width(ssd->view);
+    struct wlr_buffer *close_buf =
+        woodland_button_icon_buffer(WOODLAND_SSD_ICON_CLOSE, bwn, close_active);
+    if (close_buf) {
+        wlr_scene_buffer_set_buffer(ssd->button[BUTTON_CLOSE], close_buf);
+        wlr_buffer_drop(close_buf);
     }
 }
 
@@ -253,14 +276,16 @@ static void ssd_layout(struct woodland_ssd *ssd)
         x -= gap + bwn;
     }
 
-    /* 标题文字：在左侧留白与右侧按钮区之间居中（labwc window.label.text.justify: center） */
+    /* 标题文字：按 GXDE/Deepin 风格全宽居中，靠右侧按钮过近时向左让位 */
     if (ssd->title_text) {
         int title_w = woodland_text_buffer_get_width(ssd->title_text);
         int right_btns = BUTTON_COUNT * bwn + (BUTTON_COUNT - 1) * gap;
-        int avail = w - right_btns;
-        int tx = (avail - title_w) / 2;
-        if (tx < 0) {
-            tx = 0;
+        int tx = (w - title_w) / 2;
+        if (tx + title_w > w - right_btns - 8) {
+            tx = w - right_btns - 8 - title_w;
+        }
+        if (tx < 8) {
+            tx = 8;
         }
         woodland_text_buffer_set_position(ssd->title_text, tx, -th);
     }
@@ -384,10 +409,25 @@ void woodland_ssd_update(struct woodland_view *view)
     ssd_content_size(view, &w, &h);
     ssd->width = w;
     ssd->height = h;
+    /* 最大化状态切换时更新按钮图标（最大化切换为还原图标，反之亦然） */
+    bool max = view->maximized;
+    if (ssd->maximized != max) {
+        ssd->maximized = max;
+        enum woodland_ssd_button_icon icon =
+            max ? WOODLAND_SSD_ICON_RESTORE : WOODLAND_SSD_ICON_MAXIMIZE;
+        int bwn = ssd_button_width(view);
+        struct wlr_buffer *buf = woodland_button_icon_buffer(icon, bwn, false);
+        if (buf) {
+            wlr_scene_buffer_set_buffer(ssd->button[BUTTON_MAXIMIZE], buf);
+            wlr_buffer_drop(buf);
+        }
+    }
+
     /* 先更新标题文本（内部会重算宽度），再统一布局，保证标题按新宽度居中 */
     if (ssd->title_text) {
+        const float *text_color = ssd->active ? COLOR_TITLE_TEXT_ACTIVE : COLOR_TITLE_TEXT_INACTIVE;
         woodland_text_buffer_update(ssd->title_text, view->title, ssd_titlebar_height(view),
-                                    COLOR_TITLE_TEXT, 1.0f);
+                                    text_color, 1.0f);
     }
     ssd_layout(ssd);
     ssd_apply_state(ssd);
@@ -397,9 +437,10 @@ void woodland_ssd_update(struct woodland_view *view)
 void woodland_ssd_set_active(struct woodland_view *view, bool active)
 {
     struct woodland_ssd *ssd = view->ssd;
-    if (!ssd || ssd->active == active) {
+    if (!ssd) {
         return;
     }
+    bool changed = (ssd->active != active);
     ssd->active = active;
     float tc[4];
     ssd_get_titlebar_color(view, active, tc);
@@ -408,6 +449,12 @@ void woodland_ssd_set_active(struct woodland_view *view, bool active)
     ssd_get_border_color(view, active, bc);
     for (int i = 0; i < BORDER_COUNT; i++) {
         wlr_scene_rect_set_color(ssd->border[i], bc);
+    }
+    /* 激活态改变时，更新标题文字前景色（激活 #303030，非激活弱化为 #969696） */
+    if (changed && ssd->title_text) {
+        const float *text_color = active ? COLOR_TITLE_TEXT_ACTIVE : COLOR_TITLE_TEXT_INACTIVE;
+        woodland_text_buffer_update(ssd->title_text, view->title, ssd_titlebar_height(view),
+                                    text_color, 1.0f);
     }
 }
 

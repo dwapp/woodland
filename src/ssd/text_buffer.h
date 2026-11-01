@@ -12,6 +12,7 @@ struct wlr_scene_buffer;
 enum woodland_ssd_button_icon {
     WOODLAND_SSD_ICON_ICONIFY,
     WOODLAND_SSD_ICON_MAXIMIZE,
+    WOODLAND_SSD_ICON_RESTORE,
     WOODLAND_SSD_ICON_CLOSE,
 };
 
@@ -22,8 +23,7 @@ struct woodland_text_buffer;
  * 创建文本 buffer，挂到 parent 树（内部创建 wlr_scene_buffer 节点）。
  * 初始无内容；用 woodland_text_buffer_update 设置文本。
  */
-struct woodland_text_buffer *woodland_text_buffer_create(
-    struct wlr_scene_tree *parent);
+struct woodland_text_buffer *woodland_text_buffer_create(struct wlr_scene_tree *parent);
 
 /** 销毁文本 buffer（含 scene buffer 节点与 backing wlr_buffer）。 */
 void woodland_text_buffer_destroy(struct woodland_text_buffer *tb);
@@ -36,13 +36,11 @@ void woodland_text_buffer_destroy(struct woodland_text_buffer *tb);
  * @param color    前景色 RGBA（premultiplied，0~1）
  * @param scale    输出缩放（buffer 像素 = 逻辑 * scale）
  */
-void woodland_text_buffer_update(struct woodland_text_buffer *tb,
-                                 const char *text, int height,
+void woodland_text_buffer_update(struct woodland_text_buffer *tb, const char *text, int height,
                                  const float color[4], float scale);
 
 /** 移动文本 buffer 节点。 */
-void woodland_text_buffer_set_position(struct woodland_text_buffer *tb,
-                                       int x, int y);
+void woodland_text_buffer_set_position(struct woodland_text_buffer *tb, int x, int y);
 
 /** 返回文本逻辑宽度（空文本返回 0）。 */
 int woodland_text_buffer_get_width(const struct woodland_text_buffer *tb);
@@ -51,8 +49,13 @@ int woodland_text_buffer_get_width(const struct woodland_text_buffer *tb);
  * 用 cairo 绘制一个黑色按钮符号（—/□/×）并作为 wlr_scene_buffer 挂到 parent。
  * @return 新创建的 scene_buffer 节点（归调用者销毁）；失败返回 NULL。
  */
-struct wlr_scene_buffer *woodland_button_icon_create(
-    struct wlr_scene_tree *parent, enum woodland_ssd_button_icon icon,
-    int size);
+struct wlr_scene_buffer *woodland_button_icon_create(struct wlr_scene_tree *parent,
+                                                     enum woodland_ssd_button_icon icon, int size);
+
+/**
+ * 绘制按钮图标并返回 wlr_buffer（inverted 为 true 时使用白色线条，用于关闭悬停/按下态）。
+ */
+struct wlr_buffer *woodland_button_icon_buffer(enum woodland_ssd_button_icon icon, int size,
+                                               bool inverted);
 
 #endif /* WOODLAND_TEXT_BUFFER_H */
