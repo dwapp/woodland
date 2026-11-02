@@ -13,6 +13,7 @@
 #include <stdlib.h>
 
 #include <wlr/backend.h>
+#include <wlr/types/wlr_gamma_control_v1.h>
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_output_management_v1.h>
@@ -35,6 +36,8 @@ struct woodland_proto_output {
     struct wlr_output_power_manager_v1 *power;
     struct wl_listener power_set_mode;
 
+    struct wlr_gamma_control_manager_v1 *gamma;
+
     struct wl_listener layout_change;
     struct wl_listener output_removed;
 
@@ -50,7 +53,8 @@ struct woodland_proto_output {
  * apply 期间不能发——那时客户端正在等自己那份 config 的结果，中间插
  * 一份新配置会让它以为配置被拒。
  */
-void woodland_proto_output_broadcast(struct woodland_proto *proto) {
+void woodland_proto_output_broadcast(struct woodland_proto *proto)
+{
     struct woodland_proto_output *output = proto ? proto->output : NULL;
     if (!output || !output->manager || output->applying) {
         return;
@@ -60,13 +64,13 @@ void woodland_proto_output_broadcast(struct woodland_proto *proto) {
         return;
     }
 
-    struct wlr_output_configuration_v1 *config =
-        wlr_output_configuration_v1_create();
+    struct wlr_output_configuration_v1 *config = wlr_output_configuration_v1_create();
     if (!config) {
         return;
     }
     struct woodland_output *out;
-    wl_list_for_each(out, &server->outputs, link) {
+    wl_list_for_each(out, &server->outputs, link)
+    {
         struct wlr_output_configuration_head_v1 *head =
             wlr_output_configuration_head_v1_create(config, out->wlr_output);
         if (!head) {
@@ -80,10 +84,9 @@ void woodland_proto_output_broadcast(struct woodland_proto *proto) {
     wlr_output_manager_v1_set_configuration(output->manager, config);
 }
 
-static void output_handle_layout_change(struct wl_listener *listener,
-                                        void *data) {
-    struct woodland_proto_output *output =
-        wl_container_of(listener, output, layout_change);
+static void output_handle_layout_change(struct wl_listener *listener, void *data)
+{
+    struct woodland_proto_output *output = wl_container_of(listener, output, layout_change);
     woodland_proto_output_broadcast(output->owner);
     (void)data;
 }
@@ -96,10 +99,9 @@ static void output_handle_layout_change(struct wl_listener *listener,
  * 自己会发 head.finished，但那份 configuration 的 done 只有合成器能发——
  * 少了它就是一份永远等不到 done 的半截配置，客户端停在旧状态上。
  */
-static void output_handle_output_removed(struct wl_listener *listener,
-                                         void *data) {
-    struct woodland_proto_output *output =
-        wl_container_of(listener, output, output_removed);
+static void output_handle_output_removed(struct wl_listener *listener, void *data)
+{
+    struct woodland_proto_output *output = wl_container_of(listener, output, output_removed);
     woodland_proto_output_broadcast(output->owner);
     (void)data;
 }
@@ -113,13 +115,14 @@ static void output_handle_output_removed(struct wl_listener *listener,
  *
  * 调用方负责 states_finish()（每个 base 是 init 过的，含 buffer 引用）。
  */
-static struct wlr_backend_output_state *config_build_states(
-        struct wlr_output_configuration_v1 *config, size_t *len) {
+static struct wlr_backend_output_state *
+config_build_states(struct wlr_output_configuration_v1 *config, size_t *len)
+{
     return wlr_output_configuration_v1_build_state(config, len);
 }
 
-static void states_finish(struct wlr_backend_output_state *states,
-                          size_t len) {
+static void states_finish(struct wlr_backend_output_state *states, size_t len)
+{
     /* wlr_output_configuration_v1_build_state() 先写 *len = head 数，再
      * calloc；calloc 失败时返回 NULL 但 len 已经大于 0。不判空的话 OOM
      * 路径会在这里解引用空指针——虽然只是 OOM，但那是唯一能走到 NULL
@@ -135,13 +138,14 @@ static void states_finish(struct wlr_backend_output_state *states,
 
 /* 布局不进 output_state：位置是合成器自己的概念，wlr_output_configuration_head_v1
  * 的 x/y 只在合成器侧有效，所以 commit 成功之后单独写回。 */
-static void apply_layout(struct woodland_server *server,
-                         struct wlr_output_configuration_v1 *config) {
+static void apply_layout(struct woodland_server *server, struct wlr_output_configuration_v1 *config)
+{
     struct wlr_output_configuration_head_v1 *head;
-    wl_list_for_each(head, &config->heads, link) {
+    wl_list_for_each(head, &config->heads, link)
+    {
         if (head->state.enabled) {
-            wlr_output_layout_add(server->output_layout, head->state.output,
-                                  head->state.x, head->state.y);
+            wlr_output_layout_add(server->output_layout, head->state.output, head->state.x,
+                                  head->state.y);
         } else {
             /* 禁用要从布局摘除，否则 workarea 会留一块黑洞 */
             wlr_output_layout_remove(server->output_layout, head->state.output);
@@ -158,19 +162,17 @@ static void apply_layout(struct woodland_server *server,
  * 状态就此不一致），而且从不调用 wlr_output_test_state()，任何配置都报成功。
  * 现在 test 只做 backend_test，布局一个字都不动。
  */
-static void output_handle_test(struct wl_listener *listener, void *data) {
-    struct woodland_proto_output *output =
-        wl_container_of(listener, output, test);
+static void output_handle_test(struct wl_listener *listener, void *data)
+{
+    struct woodland_proto_output *output = wl_container_of(listener, output, test);
     struct wlr_output_configuration_v1 *config = data;
 
     size_t len = 0;
-    struct wlr_backend_output_state *states =
-        config_build_states(config, &len);
+    struct wlr_backend_output_state *states = config_build_states(config, &len);
     /* 空配置（没有 head）当成无条件成功：calloc(0) 是否返回 NULL 依实现
      * 而定，别让它决定一次 test 的结论 */
-    bool ok = len == 0
-        || (states != NULL
-            && wlr_backend_test(output->server->backend, states, len));
+    bool ok =
+        len == 0 || (states != NULL && wlr_backend_test(output->server->backend, states, len));
     states_finish(states, len);
 
     if (ok) {
@@ -193,15 +195,14 @@ static void output_handle_test(struct wl_listener *listener, void *data) {
  * 布局放在 commit 成功之后：commit 失败时布局必须保持原样，否则会出现
  * "布局说输出在 (0,0) 且启用，wlr_output 却说没启用"的错位。
  */
-static void output_handle_apply(struct wl_listener *listener, void *data) {
-    struct woodland_proto_output *output =
-        wl_container_of(listener, output, apply);
+static void output_handle_apply(struct wl_listener *listener, void *data)
+{
+    struct woodland_proto_output *output = wl_container_of(listener, output, apply);
     struct wlr_output_configuration_v1 *config = data;
     struct woodland_server *server = output->server;
 
     size_t len = 0;
-    struct wlr_backend_output_state *states =
-        config_build_states(config, &len);
+    struct wlr_backend_output_state *states = config_build_states(config, &len);
 
     bool ok = len == 0;
 
@@ -218,8 +219,8 @@ static void output_handle_apply(struct wl_listener *listener, void *data) {
     output->applying = true;
 
     if (len > 0 && states != NULL) {
-        ok = wlr_backend_test(server->backend, states, len)
-             && wlr_backend_commit(server->backend, states, len);
+        ok = wlr_backend_test(server->backend, states, len) &&
+             wlr_backend_commit(server->backend, states, len);
     }
     if (!ok) {
         wlr_log(WLR_ERROR, "output-management: apply rejected");
@@ -242,23 +243,20 @@ static void output_handle_apply(struct wl_listener *listener, void *data) {
     woodland_proto_output_broadcast(output->owner);
 }
 
-static void output_handle_power_set_mode(struct wl_listener *listener,
-                                         void *data) {
-    struct woodland_proto_output *output =
-        wl_container_of(listener, output, power_set_mode);
+static void output_handle_power_set_mode(struct wl_listener *listener, void *data)
+{
+    struct woodland_proto_output *output = wl_container_of(listener, output, power_set_mode);
     struct wlr_output_power_v1_set_mode_event *event = data;
 
     struct wlr_output_state state;
     wlr_output_state_init(&state);
-    wlr_output_state_set_enabled(&state,
-        event->mode == ZWLR_OUTPUT_POWER_V1_MODE_ON);
+    wlr_output_state_set_enabled(&state, event->mode == ZWLR_OUTPUT_POWER_V1_MODE_ON);
     if (!wlr_output_commit_state(event->output, &state)) {
         /* TODO: 协议要求失败时回 failed 事件，但 wlroots 的 set_mode 信号
          * 只带 wlr_output，拿不到 wlr_output_power_v1 对象，没法回。
          * 需要自己跟踪 power 对象（像 idle 那样挂 destroy 监听）才能补上，
          * 暂时只记日志——别把这里当成已完整实现的反馈路径。 */
-        wlr_log(WLR_ERROR, "output-power: failed to commit state for %s",
-                event->output->name);
+        wlr_log(WLR_ERROR, "output-power: failed to commit state for %s", event->output->name);
     } else {
         /* DPMS 只改 enabled，不触发 layout change，所以布局驱动的广播
          * 不会发；不主动补一次，output-management 客户端看到的 enabled
@@ -268,7 +266,8 @@ static void output_handle_power_set_mode(struct wl_listener *listener,
     wlr_output_state_finish(&state);
 }
 
-bool woodland_proto_output_init(struct woodland_proto *proto) {
+bool woodland_proto_output_init(struct woodland_proto *proto)
+{
     struct woodland_server *server = proto->server;
 
     struct woodland_proto_output *output = calloc(1, sizeof(*output));
@@ -288,7 +287,7 @@ bool woodland_proto_output_init(struct woodland_proto *proto) {
         return false;
     }
     woodland_listener_connect(&output->power_set_mode, &output->power->events.set_mode,
-                          output_handle_power_set_mode, "output.set_mode");
+                              output_handle_power_set_mode, "output.set_mode");
 
     /* 输出配置：wdisplays / kanshi 这类工具靠它读写显示器设置 */
     output->manager = wlr_output_manager_v1_create(server->display);
@@ -296,19 +295,28 @@ bool woodland_proto_output_init(struct woodland_proto *proto) {
         wlr_log(WLR_ERROR, "failed to create output-management");
         return false;
     }
-    woodland_listener_connect(&output->apply, &output->manager->events.apply,
-                          output_handle_apply, "output.apply");
-    woodland_listener_connect(&output->test, &output->manager->events.test,
-                          output_handle_test, "output.test");
+    woodland_listener_connect(&output->apply, &output->manager->events.apply, output_handle_apply,
+                              "output.apply");
+    woodland_listener_connect(&output->test, &output->manager->events.test, output_handle_test,
+                              "output.test");
     woodland_listener_connect(&output->layout_change, &server->output_layout->events.change,
-                          output_handle_layout_change, "output.change");
+                              output_handle_layout_change, "output.change");
     woodland_listener_connect(&output->output_removed, &server->output_removed,
-                          output_handle_output_removed, "output.output_removed");
+                              output_handle_output_removed, "output.output_removed");
+    /* 伽马控制：wlsunset / gammastep 等色温与夜间模式工具 */
+    output->gamma = wlr_gamma_control_manager_v1_create(server->display);
+    if (!output->gamma) {
+        wlr_log(WLR_ERROR, "failed to create gamma-control");
+        return false;
+    }
+    output->gamma->fallback_gamma_size = 256;
+    wlr_scene_set_gamma_control_manager_v1(server->scene, output->gamma);
 
     return true;
 }
 
-void woodland_proto_output_finish(struct woodland_proto *proto) {
+void woodland_proto_output_finish(struct woodland_proto *proto)
+{
     struct woodland_proto_output *output = proto->output;
     if (!output) {
         return;

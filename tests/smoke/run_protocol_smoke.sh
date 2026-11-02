@@ -163,6 +163,7 @@ for iface in zwlr_screencopy_manager_v1 \
              zwp_keyboard_shortcuts_inhibit_manager_v1 \
              zwlr_output_power_manager_v1 \
              zwlr_output_manager_v1 \
+             zwlr_gamma_control_manager_v1 \
              xdg_activation_v1 \
              xdg_toplevel_tag_manager_v1; do
     echo "$output" | grep -q "$iface" || {
