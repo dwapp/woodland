@@ -22,6 +22,7 @@
 
 #include "focus.h"
 #include "selfcheck.h"
+#include "session_lock.h"
 #include "ssd.h"
 #include "trace.h"
 #include "view.h"
@@ -35,15 +36,17 @@
 
 /* ==================== 基础判断 ==================== */
 
-bool woodland_view_focusable(const struct woodland_view *view) {
+bool woodland_view_focusable(const struct woodland_view *view)
+{
     if (!view || !view->server) {
         return false;
     }
-    return view->mapped && !view->minimized && !view->override_redirect
-        && view->workspace == view->server->active_workspace;
+    return view->mapped && !view->minimized && !view->override_redirect &&
+           view->workspace == view->server->active_workspace;
 }
 
-struct woodland_view *woodland_focus_current(struct woodland_server *server) {
+struct woodland_view *woodland_focus_current(struct woodland_server *server)
+{
     if (!server) {
         return NULL;
     }
@@ -55,8 +58,7 @@ struct woodland_view *woodland_focus_current(struct woodland_server *server) {
     if (!server->seat) {
         return NULL;
     }
-    return woodland_view_from_surface(
-        server->seat->keyboard_state.focused_surface);
+    return woodland_view_from_surface(server->seat->keyboard_state.focused_surface);
 }
 
 /*
@@ -70,7 +72,8 @@ struct woodland_view *woodland_focus_current(struct woodland_server *server) {
  *
  * 清外观要看"我们记着谁"，不是"谁现在还能聚焦"。
  */
-static struct woodland_view *focus_recorded(struct woodland_server *server) {
+static struct woodland_view *focus_recorded(struct woodland_server *server)
+{
     struct woodland_view *view = woodland_focus_current(server);
     if (!view) {
         view = server->focused_view;
@@ -78,10 +81,10 @@ static struct woodland_view *focus_recorded(struct woodland_server *server) {
     return view;
 }
 
-static void ft_set_activated(struct woodland_view *view, bool activated) {
+static void ft_set_activated(struct woodland_view *view, bool activated)
+{
     if (view->toplevel_handle) {
-        wlr_foreign_toplevel_handle_v1_set_activated(view->toplevel_handle,
-                                                     activated);
+        wlr_foreign_toplevel_handle_v1_set_activated(view->toplevel_handle, activated);
     }
 }
 
@@ -90,7 +93,8 @@ static void ft_set_activated(struct woodland_view *view, bool activated) {
  * foreign-toplevel 状态。三处必须一起改，否则会出现"标题栏是灰的但
  * 键盘输入在那"的错位。
  */
-static void view_set_focused_look(struct woodland_view *view, bool focused) {
+static void view_set_focused_look(struct woodland_view *view, bool focused)
+{
     woodland_view_set_activated(view, focused);
     woodland_ssd_set_active(view, focused);
     ft_set_activated(view, focused);
@@ -98,7 +102,8 @@ static void view_set_focused_look(struct woodland_view *view, bool focused) {
 
 /* ==================== 模态对话框 ==================== */
 
-static bool view_is_modal(const struct woodland_view *view) {
+static bool view_is_modal(const struct woodland_view *view)
+{
     if (view->type == WOODLAND_VIEW_XDG && view->xdg_toplevel) {
         /* xdg-dialog-v1：GTK4/Qt 的模态对话框走这个扩展 */
         struct wlr_xdg_dialog_v1 *dialog =
@@ -113,7 +118,8 @@ static bool view_is_modal(const struct woodland_view *view) {
     return false;
 }
 
-struct woodland_view *woodland_focus_modal_dialog(struct woodland_view *view) {
+struct woodland_view *woodland_focus_modal_dialog(struct woodland_view *view)
+{
     if (!view || !view->server) {
         return view;
     }
@@ -132,7 +138,8 @@ struct woodland_view *woodland_focus_modal_dialog(struct woodland_view *view) {
      * 这样点父窗口任意位置，焦点都会落到它当前打开的模态对话框上。
      */
     struct woodland_view *it;
-    wl_list_for_each(it, &view->server->views, link) {
+    wl_list_for_each(it, &view->server->views, link)
+    {
         if (!it->mapped || it->minimized || !it->parent) {
             continue;
         }
@@ -152,17 +159,22 @@ struct woodland_view *woodland_focus_modal_dialog(struct woodland_view *view) {
 
 /* ==================== 聚焦入口 ==================== */
 
-static void view_raise(struct woodland_view *view) {
+static void view_raise(struct woodland_view *view)
+{
     wlr_scene_node_raise_to_top(&view->scene_tree->node);
     wl_list_remove(&view->link);
     wl_list_insert(&view->server->views, &view->link);
 }
 
-void woodland_focus_view(struct woodland_view *view, bool raise) {
+void woodland_focus_view(struct woodland_view *view, bool raise)
+{
     if (!view || !view->server) {
         return;
     }
     struct woodland_server *server = view->server;
+    if (woodland_session_lock_is_locked(server)) {
+        return;
+    }
 
     if (view->override_redirect || !view->mapped) {
         return;
@@ -192,8 +204,7 @@ void woodland_focus_view(struct woodland_view *view, bool raise) {
 
     struct wlr_seat *seat = server->seat;
     struct woodland_view *prev = focus_recorded(server);
-    bool already = (prev == view)
-        && (seat->keyboard_state.focused_surface == surface);
+    bool already = (prev == view) && (seat->keyboard_state.focused_surface == surface);
 
     /* toplevel 拿到焦点即 layer 失焦 */
     server->focused_layer = NULL;
@@ -213,18 +224,18 @@ void woodland_focus_view(struct woodland_view *view, bool raise) {
         view_raise(view);
     }
     server->focused_view = view;
-    woodland_trace_add("focus", view->id, "prev=%u raise=%d",
-                       prev ? prev->id : 0, raise ? 1 : 0);
+    woodland_trace_add("focus", view->id, "prev=%u raise=%d", prev ? prev->id : 0, raise ? 1 : 0);
 
     struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(seat);
     if (keyboard != NULL) {
-        wlr_seat_keyboard_notify_enter(seat, surface,
-            keyboard->keycodes, keyboard->num_keycodes, &keyboard->modifiers);
+        wlr_seat_keyboard_notify_enter(seat, surface, keyboard->keycodes, keyboard->num_keycodes,
+                                       &keyboard->modifiers);
     }
     woodland_selfcheck_schedule(server, "focus");
 }
 
-void woodland_focus_none(struct woodland_server *server) {
+void woodland_focus_none(struct woodland_server *server)
+{
     if (!server || !server->seat) {
         return;
     }
@@ -240,7 +251,8 @@ void woodland_focus_none(struct woodland_server *server) {
     woodland_selfcheck_schedule(server, "focus_none");
 }
 
-void woodland_focus_yield_to_layer(struct woodland_server *server) {
+void woodland_focus_yield_to_layer(struct woodland_server *server)
+{
     if (!server) {
         return;
     }
@@ -254,12 +266,14 @@ void woodland_focus_yield_to_layer(struct woodland_server *server) {
     woodland_trace_add("layer_focus", prev ? prev->id : 0, NULL);
 }
 
-struct woodland_view *woodland_focus_topmost(struct woodland_server *server) {
+struct woodland_view *woodland_focus_topmost(struct woodland_server *server)
+{
     if (!server) {
         return NULL;
     }
     struct woodland_view *it;
-    wl_list_for_each(it, &server->views, link) {
+    wl_list_for_each(it, &server->views, link)
+    {
         if (woodland_view_focusable(it)) {
             return it;
         }
@@ -268,15 +282,16 @@ struct woodland_view *woodland_focus_topmost(struct woodland_server *server) {
 }
 
 struct woodland_view *woodland_focus_pick(struct woodland_server *server,
-                                          struct woodland_view *from,
-                                          bool forward) {
+                                          struct woodland_view *from, bool forward)
+{
     if (!server) {
         return NULL;
     }
     struct woodland_view *list[FOCUS_CYCLE_MAX];
     int n = 0;
     struct woodland_view *it;
-    wl_list_for_each(it, &server->views, link) {
+    wl_list_for_each(it, &server->views, link)
+    {
         if (n >= FOCUS_CYCLE_MAX) {
             break;
         }
@@ -306,7 +321,8 @@ struct woodland_view *woodland_focus_pick(struct woodland_server *server,
     return list[next];
 }
 
-void woodland_focus_fallback(struct woodland_server *server) {
+void woodland_focus_fallback(struct woodland_server *server)
+{
     if (!server || !server->seat) {
         return;
     }
@@ -317,9 +333,8 @@ void woodland_focus_fallback(struct woodland_server *server) {
         if (lsurface && lsurface->mapped) {
             struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(server->seat);
             if (keyboard != NULL) {
-                wlr_seat_keyboard_notify_enter(server->seat, lsurface,
-                    keyboard->keycodes, keyboard->num_keycodes,
-                    &keyboard->modifiers);
+                wlr_seat_keyboard_notify_enter(server->seat, lsurface, keyboard->keycodes,
+                                               keyboard->num_keycodes, &keyboard->modifiers);
             }
             return;
         }
@@ -334,13 +349,14 @@ void woodland_focus_fallback(struct woodland_server *server) {
     }
 }
 
-void woodland_focus_cycle(struct woodland_server *server, bool forward) {
+void woodland_focus_cycle(struct woodland_server *server, bool forward)
+{
     if (!server) {
         return;
     }
     /* 先按快照算目标再聚焦：focus_view 会改 z 序，不能边遍历边算 */
-    struct woodland_view *next = woodland_focus_pick(
-        server, woodland_focus_current(server), forward);
+    struct woodland_view *next =
+        woodland_focus_pick(server, woodland_focus_current(server), forward);
     if (next) {
         woodland_focus_view(next, true);
     }

@@ -33,6 +33,7 @@ struct wlr_compositor;
 struct woodland_proto;
 struct woodland_config;
 struct woodland_ime_relay;
+struct woodland_session_lock;
 struct woodland_server {
     struct wl_display *display;
     struct wl_event_loop *event_loop;
@@ -63,12 +64,13 @@ struct woodland_server {
 
     /* seat 与输入 */
     struct wlr_seat *seat;
-    struct wl_list keyboards;                 // struct woodland_keyboard.link 链表头
-    struct wl_listener new_input;             // backend->events.new_input 监听器
-    struct wl_listener request_cursor;        // seat->events.request_set_cursor
-    struct wl_listener request_set_selection; // seat->events.request_set_selection
-    struct wl_listener pointer_focus_change;  // seat->pointer_state.events.focus_change
-    struct woodland_ime_relay *ime;           // 输入法中继器与协议管理
+    struct wl_list keyboards;                   // struct woodland_keyboard.link 链表头
+    struct wl_listener new_input;               // backend->events.new_input 监听器
+    struct wl_listener request_cursor;          // seat->events.request_set_cursor
+    struct wl_listener request_set_selection;   // seat->events.request_set_selection
+    struct wl_listener pointer_focus_change;    // seat->pointer_state.events.focus_change
+    struct woodland_ime_relay *ime;             // 输入法中继器与协议管理
+    struct woodland_session_lock *session_lock; // 会话锁状态与锁屏管理
 
     /* 光标 */
     struct wlr_cursor *cursor;
