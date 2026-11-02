@@ -2,6 +2,9 @@
 #define _GNU_SOURCE
 #define _POSIX_C_SOURCE 200809L
 #include <assert.h>
+#include <cairo.h>
+#include <fontconfig/fontconfig.h>
+#include <pango/pangocairo.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
@@ -332,7 +335,11 @@ int main(void)
     assert(woodland_session_lock_is_locked(&server));
     assert(server.session_lock->lock == NULL);
     assert(!wl_list_empty(&server.session_lock->lock_outputs));
-
+    struct woodland_session_lock_output *abandoned_lo =
+        wl_container_of(server.session_lock->lock_outputs.next, abandoned_lo, link);
+    assert(abandoned_lo->crash_title != NULL);
+    assert(abandoned_lo->crash_sub != NULL);
+    assert(abandoned_lo->crash_hint != NULL);
     /* 新客户端接入接管遗弃锁 */
     int fds3[2];
     assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds3) == 0);
@@ -398,6 +405,9 @@ int main(void)
     server.backend = NULL;
     wl_display_destroy(server.display);
     server.display = NULL;
+    pango_cairo_font_map_set_default(NULL);
+    cairo_debug_reset_static_data();
+    FcFini();
 
     return 0;
 }

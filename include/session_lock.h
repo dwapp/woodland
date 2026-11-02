@@ -12,6 +12,7 @@ struct woodland_view;
 struct wlr_surface;
 struct wlr_scene_tree;
 struct wlr_scene_rect;
+struct woodland_text_buffer;
 
 struct woodland_session_lock_output {
     struct wl_list link; // woodland_session_lock.lock_outputs
@@ -21,6 +22,9 @@ struct woodland_session_lock_output {
     struct wlr_scene_tree *tree;
     struct wlr_scene_rect *background;
     struct wlr_scene_tree *surface_tree;
+    struct woodland_text_buffer *crash_title;
+    struct woodland_text_buffer *crash_sub;
+    struct woodland_text_buffer *crash_hint;
 
     struct wl_listener output_destroy;
     struct wl_listener output_commit;

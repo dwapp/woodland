@@ -136,8 +136,9 @@ if wayland_client_dep.found() and wayland_scanner.found() and wp_datadir != ''
       output: 'ext-session-lock-v1-protocol.c',
       command: [wayland_scanner, 'private-code', session_lock_xml, '@OUTPUT@'])
 
+    fontconfig_dep = dependency('fontconfig', required: false)
     test_session_lock = executable('test_session_lock', test_session_lock_srcs,
-      dependencies: [wlroots, wayland_server, wayland_client_dep, xkbcommon],
+      dependencies: [wlroots, wayland_server, wayland_client_dep, xkbcommon, fontconfig_dep, cairo, pangocairo],
       include_directories: woodland_inc,
       link_with: [session_lock_lib, output_lib, cursor_lib, shell_lib, seat_lib, ime_lib, protocol_lib, workspace_lib, layer_lib, ssd_lib, capture_lib, util_lib])
     test('session_lock', test_session_lock)
