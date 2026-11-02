@@ -24,7 +24,7 @@ struct wlr_input_device;
  *
  *   语义完整：viewporter、presentation-time、primary-selection、
  *             idle-notify、idle-inhibit、keyboard-shortcuts-inhibit、
- *             output-power-management、output-management、
+ *             output-power-management、output-management、gamma-control、
  *             relative-pointer、pointer-gestures、xdg-activation
  *             —— 客户端请求会真的影响合成器行为。
  *   仅记录：  xdg-toplevel-tag（存下来、经 wctl 可见，但暂不参与窗口规则）。
