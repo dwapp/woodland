@@ -46,6 +46,7 @@ struct woodland_session_lock {
     struct wl_listener lock_new_surface;
     struct wl_listener lock_unlock;
     struct wl_listener lock_destroy;
+    struct wl_listener layout_change;
 };
 
 /**

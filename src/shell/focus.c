@@ -253,7 +253,7 @@ void woodland_focus_none(struct woodland_server *server)
 
 void woodland_focus_yield_to_layer(struct woodland_server *server)
 {
-    if (!server) {
+    if (!server || woodland_session_lock_is_locked(server)) {
         return;
     }
     struct woodland_view *prev = focus_recorded(server);
@@ -323,7 +323,7 @@ struct woodland_view *woodland_focus_pick(struct woodland_server *server,
 
 void woodland_focus_fallback(struct woodland_server *server)
 {
-    if (!server || !server->seat) {
+    if (!server || !server->seat || woodland_session_lock_is_locked(server)) {
         return;
     }
 
@@ -351,7 +351,7 @@ void woodland_focus_fallback(struct woodland_server *server)
 
 void woodland_focus_cycle(struct woodland_server *server, bool forward)
 {
-    if (!server) {
+    if (!server || woodland_session_lock_is_locked(server)) {
         return;
     }
     /* 先按快照算目标再聚焦：focus_view 会改 z 序，不能边遍历边算 */

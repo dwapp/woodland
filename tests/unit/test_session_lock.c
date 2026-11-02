@@ -225,6 +225,8 @@ int main(void)
     assert(woodland_session_lock_is_locked(&server));
     assert(c1.locked == true);
     assert(!wl_list_empty(&server.session_lock->lock_outputs));
+    assert(server.seat->pointer_state.focused_surface == NULL);
+    assert(server.cursor_mode == WOODLAND_CURSOR_PASSTHROUGH);
 
     /* 4. 客户端 1 创建锁屏表面并配置尺寸 */
     struct wl_surface *surf = wl_compositor_create_surface(c1.compositor);
@@ -351,11 +353,23 @@ int main(void)
     assert(c3.locked == true);
     assert(woodland_session_lock_is_locked(&server));
 
-    /* 客户端 3 正确解锁 */
-    ext_session_lock_v1_unlock_and_destroy(c3.lock);
+    /* 测试带有已映射锁屏表面的会话在 shutdown 时直接调用 woodland_session_lock_finish 不崩溃 */
+    struct wl_surface *surf3 = wl_compositor_create_surface(c3.compositor);
+    c3.lock_surface = ext_session_lock_v1_get_lock_surface(c3.lock, surf3, c3.output);
+    ext_session_lock_surface_v1_add_listener(c3.lock_surface, &surface_listener, &c3);
     pump_roundtrip(&server, client3_display);
-    assert(!woodland_session_lock_is_locked(&server));
+    struct wl_buffer *buf3 = create_shm_buffer(c3.shm, c3.configure_width, c3.configure_height);
+    wl_surface_attach(surf3, buf3, 0, 0);
+    wl_surface_commit(surf3);
+    pump_roundtrip(&server, client3_display);
+    assert(server.session_lock->focused_surface != NULL);
 
+    woodland_session_lock_finish(&server);
+    assert(server.session_lock == NULL);
+    wl_proxy_destroy((struct wl_proxy *)c3.lock_surface);
+    wl_buffer_destroy(buf3);
+    wl_surface_destroy(surf3);
+    wl_proxy_destroy((struct wl_proxy *)c3.lock);
     /* 9. 清理所有客户端与服务端对象 */
     ext_session_lock_manager_v1_destroy(c3.manager);
     wl_compositor_destroy(c3.compositor);
@@ -363,7 +377,6 @@ int main(void)
     wl_registry_destroy(reg3);
     if (c3.shm)
         wl_shm_destroy(c3.shm);
-    pump_roundtrip(&server, client3_display);
     wl_display_disconnect(client3_display);
     wl_client_destroy(client3);
 
@@ -371,7 +384,6 @@ int main(void)
 
     woodland_cursor_finish_events(&server);
     woodland_shell_finish(&server);
-    woodland_session_lock_finish(&server);
     woodland_seat_finish(&server);
     woodland_cursor_finish(&server);
     woodland_output_finish(&server);
