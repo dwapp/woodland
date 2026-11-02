@@ -10,6 +10,7 @@
 
 #include "layer.h"
 #include "output.h"
+#include "session_lock.h"
 #include "view.h"
 #include "woodland.h"
 
@@ -65,6 +66,10 @@ void woodland_layer_arrange(struct woodland_server *server, struct woodland_outp
 void woodland_layer_try_focus(struct woodland_server *server,
                               struct wlr_layer_surface_v1 *layer_surface)
 {
+    if (woodland_session_lock_is_locked(server)) {
+        return;
+    }
+
     enum zwlr_layer_surface_v1_keyboard_interactivity interactivity =
         layer_surface->current.keyboard_interactive;
     struct wlr_seat *seat = server->seat;

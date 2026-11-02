@@ -289,11 +289,27 @@ static void handle_new_lock(struct wl_listener *listener, void *data)
 
     session_lock->last_focused_view = session_lock->server->focused_view;
     wlr_seat_keyboard_clear_focus(session_lock->server->seat);
+    wlr_seat_pointer_clear_focus(session_lock->server->seat);
+    woodland_cursor_reset_mode(session_lock->server);
 
+    bool output_failed = false;
     struct woodland_output *output;
     wl_list_for_each(output, &session_lock->server->outputs, link)
     {
-        session_lock_output_create(session_lock, output);
+        if (!session_lock_output_create(session_lock, output)) {
+            output_failed = true;
+            break;
+        }
+    }
+
+    if (output_failed) {
+        wlr_log(WLR_ERROR, "failed to create session lock output mask, aborting lock");
+        session_lock_destroy_outputs(session_lock);
+        wlr_session_lock_v1_destroy(lock);
+        if (session_lock->last_focused_view) {
+            woodland_focus_view(session_lock->last_focused_view, false);
+        }
+        return;
     }
 
     woodland_listener_connect(&session_lock->lock_new_surface, &lock->events.new_surface,
@@ -314,6 +330,13 @@ static void handle_manager_destroy(struct wl_listener *listener, void *data)
         wl_container_of(listener, session_lock, manager_destroy);
     (void)data;
     woodland_session_lock_finish(session_lock->server);
+}
+static void handle_layout_change(struct wl_listener *listener, void *data)
+{
+    struct woodland_session_lock *session_lock =
+        wl_container_of(listener, session_lock, layout_change);
+    (void)data;
+    woodland_session_lock_update_layout(session_lock->server);
 }
 
 /* ==================== 对外接口 ==================== */
@@ -338,6 +361,8 @@ bool woodland_session_lock_init(struct woodland_server *server)
     woodland_listener_connect(&session_lock->manager_destroy,
                               &session_lock->wlr_manager->events.destroy, handle_manager_destroy,
                               "session_lock.manager_destroy");
+    woodland_listener_connect(&session_lock->layout_change, &server->output_layout->events.change,
+                              handle_layout_change, "session_lock.layout_change");
 
     server->session_lock = session_lock;
     return true;
@@ -349,7 +374,6 @@ void woodland_session_lock_finish(struct woodland_server *server)
         return;
     }
     struct woodland_session_lock *session_lock = server->session_lock;
-    server->session_lock = NULL;
 
     session_lock_destroy_outputs(session_lock);
 
@@ -362,6 +386,8 @@ void woodland_session_lock_finish(struct woodland_server *server)
 
     wl_list_remove(&session_lock->new_lock.link);
     wl_list_remove(&session_lock->manager_destroy.link);
+    wl_list_remove(&session_lock->layout_change.link);
+    server->session_lock = NULL;
     free(session_lock);
 }
 
@@ -376,7 +402,9 @@ void woodland_session_lock_add_output(struct woodland_server *server,
     if (!woodland_session_lock_is_locked(server)) {
         return;
     }
-    session_lock_output_create(server->session_lock, output);
+    if (!session_lock_output_create(server->session_lock, output)) {
+        wlr_log(WLR_ERROR, "failed to create session lock output for new output");
+    }
 }
 
 void woodland_session_lock_update_layout(struct woodland_server *server)
