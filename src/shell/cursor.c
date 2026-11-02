@@ -16,6 +16,7 @@
 #include "cursor.h"
 #include "focus.h"
 #include "layer.h"
+#include "session_lock.h"
 #include "shell_internal.h"
 #include "ssd.h"
 #include "view.h"
@@ -99,6 +100,20 @@ void woodland_cursor_process_motion(struct woodland_server *server, uint32_t tim
         return;
     } else if (server->cursor_mode == WOODLAND_CURSOR_RESIZE) {
         shell_process_cursor_resize(server);
+        return;
+    }
+    if (woodland_session_lock_is_locked(server)) {
+        double sx = 0, sy = 0;
+        struct wlr_surface *surface = NULL;
+        woodland_session_lock_surface_at(server, server->cursor->x, server->cursor->y, &surface,
+                                         &sx, &sy);
+        if (surface) {
+            wlr_seat_pointer_notify_enter(server->seat, surface, sx, sy);
+            wlr_seat_pointer_notify_motion(server->seat, time, sx, sy);
+        } else {
+            wlr_seat_pointer_clear_focus(server->seat);
+            woodland_cursor_set(server, "default");
+        }
         return;
     }
 
@@ -202,6 +217,9 @@ static void server_cursor_button(struct wl_listener *listener, void *data)
     struct woodland_server *server = wl_container_of(listener, server, cursor_button);
     struct wlr_pointer_button_event *event = data;
     wlr_seat_pointer_notify_button(server->seat, event->time_msec, event->button, event->state);
+    if (woodland_session_lock_is_locked(server)) {
+        return;
+    }
     if (event->state == WL_POINTER_BUTTON_STATE_RELEASED) {
         /* 拖动结束：先决定是否贴边铺满，再清抓取状态（铺满要用 grabbed_view） */
         if (server->cursor_mode == WOODLAND_CURSOR_MOVE && server->grabbed_view) {

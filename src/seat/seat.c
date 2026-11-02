@@ -13,6 +13,7 @@
 #include "ime.h"
 #include "protocol.h"
 #include "seat.h"
+#include "session_lock.h"
 #include "view.h"
 #include "woodland.h"
 #include "woodland_config.h"
@@ -23,6 +24,17 @@
 static void keyboard_handle_modifiers(struct wl_listener *listener, void *data)
 {
     struct woodland_keyboard *keyboard = wl_container_of(listener, keyboard, modifiers);
+    if (woodland_session_lock_is_locked(keyboard->server)) {
+        if (keyboard->server->seat->keyboard_state.focused_surface &&
+            wlr_session_lock_surface_v1_try_from_wlr_surface(
+                keyboard->server->seat->keyboard_state.focused_surface)) {
+            wlr_seat_set_keyboard(keyboard->server->seat, keyboard->wlr_keyboard);
+            wlr_seat_keyboard_notify_modifiers(keyboard->server->seat,
+                                               &keyboard->wlr_keyboard->modifiers);
+        }
+        (void)data;
+        return;
+    }
     if (!woodland_ime_keyboard_grab_modifiers(keyboard->server, keyboard->wlr_keyboard)) {
         wlr_seat_set_keyboard(keyboard->server->seat, keyboard->wlr_keyboard);
         wlr_seat_keyboard_notify_modifiers(keyboard->server->seat,
@@ -89,6 +101,16 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data)
 
     /* 任何按键都算"人还在"，idle 计时从这里续 */
     woodland_protocol_notify_activity(server);
+    /* 锁屏状态下：禁止所有快捷键，按键只能发给锁屏表面 */
+    if (woodland_session_lock_is_locked(server)) {
+        if (seat->keyboard_state.focused_surface &&
+            wlr_session_lock_surface_v1_try_from_wlr_surface(
+                seat->keyboard_state.focused_surface)) {
+            wlr_seat_set_keyboard(seat, keyboard->wlr_keyboard);
+            wlr_seat_keyboard_notify_key(seat, event->time_msec, event->keycode, event->state);
+        }
+        return;
+    }
 
     bool handled = false;
     uint32_t modifiers = wlr_keyboard_get_modifiers(keyboard->wlr_keyboard);

@@ -27,6 +27,7 @@
 #include "seat.h"
 #include "selfcheck.h"
 #include "server.h"
+#include "session_lock.h"
 #include "view.h"
 #include "woodland.h"
 #include "woodland_config.h"
@@ -136,6 +137,7 @@ bool woodland_server_init(struct woodland_server *server)
     server->compositor = wlr_compositor_create(server->display, 5, server->renderer);
     wlr_subcompositor_create(server->display);
     wlr_data_device_manager_create(server->display);
+    wlr_renderer_init_wl_shm(server->renderer, server->display);
 
     /* 补充协议：全部是 wlroots 原生 manager，创建即完成接线。
      * alpha_modifier / single_pixel 由 scene 自动集成；
@@ -170,6 +172,10 @@ bool woodland_server_init(struct woodland_server *server)
 
     if (!woodland_ime_init(server)) {
         wlr_log(WLR_ERROR, "failed to init ime");
+        return false;
+    }
+    if (!woodland_session_lock_init(server)) {
+        wlr_log(WLR_ERROR, "failed to init session lock");
         return false;
     }
     if (!woodland_shell_init(server)) {
@@ -332,6 +338,7 @@ void woodland_server_finish(struct woodland_server *server)
     woodland_layer_finish(server);
     woodland_workspace_finish(server);
     woodland_ime_finish(server);
+    woodland_session_lock_finish(server);
     woodland_seat_finish(server);
     woodland_cursor_finish(server);
     woodland_output_finish(server);

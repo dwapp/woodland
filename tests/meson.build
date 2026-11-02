@@ -1,8 +1,12 @@
 if get_option('test').enabled()
+  fs = import('fs')
   wayland_client_dep = dependency('wayland-client', required: false)
   wp_dep = dependency('wayland-protocols', required: false)
   wayland_scanner = find_program('wayland-scanner', required: false)
-
+  wp_datadir = ''
+  if wp_dep.found()
+    wp_datadir = wp_dep.get_variable(pkgconfig: 'pkgdatadir', internal: 'pkgdatadir')
+  endif
   subdir('unit')
 
   # Xwayland 冒烟用的小客户端：建一个 override-redirect 窗口
@@ -54,7 +58,6 @@ if get_option('test').enabled()
   # 需要 wayland-client 与 wayland-protocols 里的两份 xml：缺任何一样就
   # 不构建探针、不注册测试，免得把构建搞挂。
   if wayland_client_dep.found() and wp_dep.found() and wayland_scanner.found()
-    wp_datadir = wp_dep.get_variable(pkgconfig: 'pkgdatadir')
     idle_inhibit_xml = wp_datadir / 'unstable' / 'idle-inhibit' / 'idle-inhibit-unstable-v1.xml'
     idle_notify_xml = wp_datadir / 'staging' / 'ext-idle-notify' / 'ext-idle-notify-v1.xml'
 
