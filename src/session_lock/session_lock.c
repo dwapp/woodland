@@ -12,6 +12,7 @@
 #include "focus.h"
 #include "output.h"
 #include "seat.h"
+#include "text_buffer.h"
 #include "util/listener.h"
 #include "view.h"
 #include "woodland.h"
@@ -106,6 +107,49 @@ static void handle_output_destroy(struct wl_listener *listener, void *data)
 
 /* ==================== lock_output 管理 ==================== */
 
+static void session_lock_output_show_crash_prompt(struct woodland_session_lock_output *lo)
+{
+    struct woodland_server *server = lo->session_lock->server;
+    struct wlr_box box;
+    wlr_output_layout_get_box(server->output_layout, lo->output->wlr_output, &box);
+
+    if (!lo->crash_title) {
+        lo->crash_title = woodland_text_buffer_create(lo->tree);
+    }
+    if (!lo->crash_sub) {
+        lo->crash_sub = woodland_text_buffer_create(lo->tree);
+    }
+    if (!lo->crash_hint) {
+        lo->crash_hint = woodland_text_buffer_create(lo->tree);
+    }
+    if (!lo->crash_title || !lo->crash_sub || !lo->crash_hint) {
+        return;
+    }
+
+    const float color_title[4] = {1.0f, 0.85f, 0.35f, 1.0f}; // 警告金黄
+    const float color_sub[4] = {0.95f, 0.95f, 0.95f, 1.0f};  // 亮白
+    const float color_hint[4] = {0.70f, 0.70f, 0.70f, 1.0f}; // 辅助灰
+
+    woodland_text_buffer_update(lo->crash_title, "[ Session Locked ]", box.width, 32, color_title,
+                                1.0f);
+    woodland_text_buffer_update(lo->crash_sub,
+                                "The lockscreen process has crashed or terminated unexpectedly.",
+                                box.width, 24, color_sub, 1.0f);
+    woodland_text_buffer_update(
+        lo->crash_hint,
+        "Press Ctrl+Alt+F2..F6 to switch to a TTY to log in and unlock or restart lockscreen.",
+        box.width, 24, color_hint, 1.0f);
+
+    int title_w = woodland_text_buffer_get_width(lo->crash_title);
+    int sub_w = woodland_text_buffer_get_width(lo->crash_sub);
+    int hint_w = woodland_text_buffer_get_width(lo->crash_hint);
+
+    int cy = box.height / 2;
+    woodland_text_buffer_set_position(lo->crash_title, (box.width - title_w) / 2, cy - 50);
+    woodland_text_buffer_set_position(lo->crash_sub, (box.width - sub_w) / 2, cy - 10);
+    woodland_text_buffer_set_position(lo->crash_hint, (box.width - hint_w) / 2, cy + 25);
+}
+
 static void lock_output_reconfigure(struct woodland_session_lock_output *lock_output)
 {
     struct woodland_server *server = lock_output->session_lock->server;
@@ -117,6 +161,9 @@ static void lock_output_reconfigure(struct woodland_session_lock_output *lock_ou
 
     if (lock_output->surface) {
         wlr_session_lock_surface_v1_configure(lock_output->surface, box.width, box.height);
+    }
+    if (lock_output->crash_title) {
+        session_lock_output_show_crash_prompt(lock_output);
     }
 }
 
@@ -169,6 +216,18 @@ static void session_lock_output_destroy(struct woodland_session_lock_output *loc
         if (was_focused) {
             refocus_lock_surfaces(lock_output->session_lock);
         }
+    }
+    if (lock_output->crash_title) {
+        woodland_text_buffer_destroy(lock_output->crash_title);
+        lock_output->crash_title = NULL;
+    }
+    if (lock_output->crash_sub) {
+        woodland_text_buffer_destroy(lock_output->crash_sub);
+        lock_output->crash_sub = NULL;
+    }
+    if (lock_output->crash_hint) {
+        woodland_text_buffer_destroy(lock_output->crash_hint);
+        lock_output->crash_hint = NULL;
     }
     wl_list_remove(&lock_output->output_destroy.link);
     wl_list_remove(&lock_output->output_commit.link);
@@ -268,6 +327,13 @@ static void handle_lock_destroy(struct wl_listener *listener, void *data)
     wl_list_remove(&session_lock->lock_unlock.link);
     wl_list_remove(&session_lock->lock_destroy.link);
     session_lock->lock = NULL;
+
+    /* 在黑屏遮罩中央渲染英文提示，告知用户切 TTY 登录解锁 */
+    struct woodland_session_lock_output *lo;
+    wl_list_for_each(lo, &session_lock->lock_outputs, link)
+    {
+        session_lock_output_show_crash_prompt(lo);
+    }
 }
 
 static void handle_new_lock(struct wl_listener *listener, void *data)
@@ -402,8 +468,14 @@ void woodland_session_lock_add_output(struct woodland_server *server,
     if (!woodland_session_lock_is_locked(server)) {
         return;
     }
-    if (!session_lock_output_create(server->session_lock, output)) {
+    struct woodland_session_lock_output *lo =
+        session_lock_output_create(server->session_lock, output);
+    if (!lo) {
         wlr_log(WLR_ERROR, "failed to create session lock output for new output");
+        return;
+    }
+    if (!server->session_lock->lock) {
+        session_lock_output_show_crash_prompt(lo);
     }
 }
 
