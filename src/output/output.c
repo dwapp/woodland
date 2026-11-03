@@ -14,6 +14,7 @@
 #include "output.h"
 #include "session_lock.h"
 #include "trace.h"
+#include "view.h"
 #include "woodland.h"
 
 static void handle_frame(struct wl_listener *listener, void *data)
@@ -34,6 +35,13 @@ static void handle_request_state(struct wl_listener *listener, void *data)
     const struct wlr_output_event_request_state *event = data;
     wlr_output_commit_state(output->wlr_output, event->state);
     woodland_session_lock_update_layout(output->server);
+    if (output->server->views.next) {
+        struct woodland_view *view;
+        wl_list_for_each(view, &output->server->views, link)
+        {
+            woodland_view_update_outputs(view);
+        }
+    }
 }
 
 static void handle_destroy(struct wl_listener *listener, void *data)
@@ -186,6 +194,13 @@ static void handle_new_output(struct wl_listener *listener, void *data)
     woodland_trace_add("output_add", 0, "%s %dx%d heads=%d", wlr_output->name, wlr_output->width,
                        wlr_output->height, wl_list_length(&server->outputs));
     woodland_session_lock_add_output(server, output);
+    if (server->views.next) {
+        struct woodland_view *view;
+        wl_list_for_each(view, &server->views, link)
+        {
+            woodland_view_update_outputs(view);
+        }
+    }
     return;
 
 err_trees:

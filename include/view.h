@@ -38,7 +38,7 @@ enum woodland_view_type {
 };
 
 struct woodland_view {
-    struct wl_list link;               // woodland_server.views
+    struct wl_list link; // woodland_server.views
     struct woodland_server *server;
     /*
      * 稳定标识（进程内自增）。调试接口里用它指代窗口：指针每次运行都变，
@@ -50,12 +50,12 @@ struct woodland_view {
     struct wlr_xwayland_surface *xwayland_surface; // type == XWAYLAND 时有效
     /* X11 视图的 surface 节点：associate 时建、dissociate 时清（xdg 由 shell 自带） */
     struct wlr_scene_surface *scene_surface;
-    bool override_redirect;            // X11 覆盖重定向窗口：无装饰、不聚焦、不进窗口列表
+    bool override_redirect; // X11 覆盖重定向窗口：无装饰、不聚焦、不进窗口列表
     struct wlr_scene_tree *scene_tree;
-    struct woodland_workspace *workspace;   // 归属工作区
-    struct woodland_view *parent;           // 父视图（transient 对话框）
+    struct woodland_workspace *workspace; // 归属工作区
+    struct woodland_view *parent;         // 父视图（transient 对话框）
     bool mapped;
-    bool placed;                       // 是否已做过首次放置（remap 不再重摆）
+    bool placed; // 是否已做过首次放置（remap 不再重摆）
     bool minimized;
     bool maximized;
     bool fullscreen;
@@ -75,13 +75,13 @@ struct woodland_view {
      * 才能经 wctl 看见，也免得协议变成"绑得上但什么都不发生"。
      */
     char *tag;
-    struct woodland_ssd *ssd;          // 服务端装饰（默认 SSD，见设计）
-    bool deco_csd;                     // 客户端请求 CSD（map 后不建 SSD）
-    bool deco_registered;              // 是否已注册 zxdg_decoration listener
+    struct woodland_ssd *ssd;                    // 服务端装饰（默认 SSD，见设计）
+    bool deco_csd;                               // 客户端请求 CSD（map 后不建 SSD）
+    bool deco_registered;                        // 是否已注册 zxdg_decoration listener
     struct wlr_xdg_toplevel_decoration_v1 *deco; // zxdg decoration 对象
-    struct wl_listener deco_destroy;   // zxdg_decoration 销毁监听器
-    struct wl_listener deco_request_mode; // zxdg_decoration 模式请求监听器
-    struct wlr_box saved_geometry;     // 退出 max/fullscreen 时恢复
+    struct wl_listener deco_destroy;             // zxdg_decoration 销毁监听器
+    struct wl_listener deco_request_mode;        // zxdg_decoration 模式请求监听器
+    struct wlr_box saved_geometry;               // 退出 max/fullscreen 时恢复
     /*
      * 贴边铺满（snap to edge）：
      *   snapped_edges       当前贴住的边（WLR_EDGE_* 位掩码，0 = 未贴边）
@@ -118,7 +118,7 @@ struct woodland_view {
     /* Xwayland 独有事件（type == XWAYLAND 时才接线） */
     struct wl_listener associate;
     struct wl_listener dissociate;
-    struct wl_listener map_request;      // xsurface->events.map_request
+    struct wl_listener map_request; // xsurface->events.map_request
     struct wl_listener request_configure;
     struct wl_listener request_activate;
     struct wl_listener request_close;
@@ -166,9 +166,8 @@ void woodland_view_destroy(struct woodland_view *view);
 void woodland_view_init_handles(struct woodland_view *view);
 
 /** 开始交互式移动/缩放。 */
-void woodland_view_begin_interactive(struct woodland_view *view,
-                                    enum woodland_cursor_mode mode,
-                                    uint32_t edges);
+void woodland_view_begin_interactive(struct woodland_view *view, enum woodland_cursor_mode mode,
+                                     uint32_t edges);
 
 void woodland_view_set_maximized(struct woodland_view *view, bool maximized);
 void woodland_view_set_fullscreen(struct woodland_view *view, bool fullscreen,
@@ -182,17 +181,17 @@ void woodland_view_set_app_id(struct woodland_view *view, const char *app_id);
 void woodland_view_set_tag(struct woodland_view *view, const char *tag);
 
 /** 设置父视图（transient 对话框相对父窗口居中）。 */
-void woodland_view_set_parent(struct woodland_view *view,
-                              struct woodland_view *parent);
+void woodland_view_set_parent(struct woodland_view *view, struct woodland_view *parent);
+
+/** 更新窗口在 foreign-toplevel 中的所属显示器（触发 output_enter/output_leave）。 */
+void woodland_view_update_outputs(struct woodland_view *view);
 
 bool woodland_shell_init(struct woodland_server *server);
 void woodland_shell_finish(struct woodland_server *server);
 
 /** 命中测试：返回 (lx,ly) 处的视图及其 surface 局部坐标。 */
-struct woodland_view *woodland_view_at(struct woodland_server *server,
-                                       double lx, double ly,
-                                       struct wlr_surface **surface,
-                                       double *sx, double *sy);
+struct woodland_view *woodland_view_at(struct woodland_server *server, double lx, double ly,
+                                       struct wlr_surface **surface, double *sx, double *sy);
 
 /** 交互式移动/缩放的指针 motion 处理。 */
 void woodland_cursor_process_motion(struct woodland_server *server, uint32_t time);

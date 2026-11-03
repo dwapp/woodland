@@ -18,20 +18,21 @@
 #include <wlr/util/edges.h>
 #include <wlr/util/log.h>
 #if WOODLAND_HAVE_XWAYLAND
-#include <xcb/xcb_icccm.h>
 #include <wlr/xwayland.h>
+#include <xcb/xcb_icccm.h>
 #endif
 
 #include "output.h"
 #include "placement.h"
-#include "trace.h"
 #include "ssd.h"
+#include "trace.h"
 #include "view.h"
 #include "woodland.h"
 
 /* ==================== 策略名 ==================== */
 
-const char *woodland_placement_policy_name(enum woodland_placement_policy policy) {
+const char *woodland_placement_policy_name(enum woodland_placement_policy policy)
+{
     switch (policy) {
     case WOODLAND_PLACE_CENTER:
         return "center";
@@ -45,8 +46,8 @@ const char *woodland_placement_policy_name(enum woodland_placement_policy policy
     }
 }
 
-bool woodland_placement_policy_parse(const char *name,
-                                     enum woodland_placement_policy *out) {
+bool woodland_placement_policy_parse(const char *name, enum woodland_placement_policy *out)
+{
     if (!name || !out) {
         return false;
     }
@@ -66,21 +67,24 @@ bool woodland_placement_policy_parse(const char *name,
 
 /* ==================== 输出与工作区 ==================== */
 
-struct woodland_output *woodland_output_first(struct woodland_server *server) {
+struct woodland_output *woodland_output_first(struct woodland_server *server)
+{
     if (!server) {
         return NULL;
     }
     struct woodland_output *wo;
-    wl_list_for_each(wo, &server->outputs, link) {
+    wl_list_for_each(wo, &server->outputs, link)
+    {
         return wo;
     }
     return NULL;
 }
 
-struct woodland_output *woodland_output_at(struct woodland_server *server,
-                                           double lx, double ly) {
+struct woodland_output *woodland_output_at(struct woodland_server *server, double lx, double ly)
+{
     struct woodland_output *wo;
-    wl_list_for_each(wo, &server->outputs, link) {
+    wl_list_for_each(wo, &server->outputs, link)
+    {
         struct wlr_box box;
         wlr_output_layout_get_box(server->output_layout, wo->wlr_output, &box);
         if (wlr_box_contains_point(&box, lx, ly)) {
@@ -99,15 +103,17 @@ struct woodland_output *woodland_output_at(struct woodland_server *server,
  * 探就可能探到框外，于是右/下侧的副屏会被误判成主屏。这里直接按每个
  * 输出的布局框算最近点距离，取最小者，边界不用猜。
  */
-struct woodland_output *woodland_output_nearest(struct woodland_server *server,
-                                                double lx, double ly) {
+struct woodland_output *woodland_output_nearest(struct woodland_server *server, double lx,
+                                                double ly)
+{
     if (!server || !server->output_layout) {
         return NULL;
     }
     struct woodland_output *best = NULL;
     double best_dist = 0;
     struct woodland_output *wo;
-    wl_list_for_each(wo, &server->outputs, link) {
+    wl_list_for_each(wo, &server->outputs, link)
+    {
         if (!wo->wlr_output) {
             continue;
         }
@@ -131,7 +137,8 @@ struct woodland_output *woodland_output_nearest(struct woodland_server *server,
 }
 
 /* 外框中心所在的输出；落在输出之间的空隙时退化为最近的输出。 */
-struct woodland_output *woodland_output_for_view(struct woodland_view *view) {
+struct woodland_output *woodland_output_for_view(struct woodland_view *view)
+{
     if (!view || !view->server) {
         return NULL;
     }
@@ -153,15 +160,15 @@ struct woodland_output *woodland_output_for_view(struct woodland_view *view) {
     return woodland_output_first(server);
 }
 
-void woodland_output_workarea(struct woodland_output *output, struct wlr_box *out) {
+void woodland_output_workarea(struct woodland_output *output, struct wlr_box *out)
+{
     memset(out, 0, sizeof(*out));
     if (!output || !output->wlr_output) {
         return;
     }
     /* layout box 是输出在全局布局里的位置，usable_area 是输出局部坐标，
      * 必须加布局偏移才是"布局坐标下的工作区"。 */
-    wlr_output_layout_get_box(output->server->output_layout,
-                              output->wlr_output, out);
+    wlr_output_layout_get_box(output->server->output_layout, output->wlr_output, out);
     if (output->usable_area_valid) {
         out->x += output->usable_area.x;
         out->y += output->usable_area.y;
@@ -170,8 +177,8 @@ void woodland_output_workarea(struct woodland_output *output, struct wlr_box *ou
     }
 }
 
-void woodland_workarea_at(struct woodland_server *server, double lx, double ly,
-                          struct wlr_box *out) {
+void woodland_workarea_at(struct woodland_server *server, double lx, double ly, struct wlr_box *out)
+{
     struct woodland_output *wo = woodland_output_at(server, lx, ly);
     if (!wo) {
         wo = woodland_output_nearest(server, lx, ly);
@@ -183,7 +190,8 @@ void woodland_workarea_at(struct woodland_server *server, double lx, double ly,
 }
 
 struct wlr_box woodland_view_maximized_geometry_on(struct woodland_server *server,
-                                              struct woodland_output *output) {
+                                                   struct woodland_output *output)
+{
     struct wlr_box box = {0};
     if (!output) {
         output = woodland_output_first(server);
@@ -192,13 +200,15 @@ struct wlr_box woodland_view_maximized_geometry_on(struct woodland_server *serve
     return box;
 }
 
-struct wlr_box woodland_view_maximized_geometry(struct woodland_server *server) {
+struct wlr_box woodland_view_maximized_geometry(struct woodland_server *server)
+{
     /* 历史语义：首个输出。业务代码用 _on() 版本按窗口所在输出算。 */
     return woodland_view_maximized_geometry_on(server, NULL);
 }
 
 struct wlr_box woodland_view_fullscreen_geometry(struct woodland_server *server,
-                                                 struct wlr_output *output) {
+                                                 struct wlr_output *output)
+{
     struct wlr_box box = {0};
     if (!output || !server) {
         return box;
@@ -210,7 +220,8 @@ struct wlr_box woodland_view_fullscreen_geometry(struct woodland_server *server,
 
 /* ==================== 外框与约束 ==================== */
 
-void woodland_view_outer_box(const struct woodland_view *view, struct wlr_box *out) {
+void woodland_view_outer_box(const struct woodland_view *view, struct wlr_box *out)
+{
     memset(out, 0, sizeof(*out));
     if (!view || !view->scene_tree) {
         return;
@@ -226,7 +237,8 @@ void woodland_view_outer_box(const struct woodland_view *view, struct wlr_box *o
     out->height = content.height + margins.top + margins.bottom;
 }
 
-void woodland_box_constrain(struct wlr_box *box, const struct wlr_box *area) {
+void woodland_box_constrain(struct wlr_box *box, const struct wlr_box *area)
+{
     if (!box || !area || area->width <= 0 || area->height <= 0) {
         return;
     }
@@ -247,7 +259,8 @@ void woodland_box_constrain(struct wlr_box *box, const struct wlr_box *area) {
     }
 }
 
-void woodland_view_constrain(struct woodland_view *view) {
+void woodland_view_constrain(struct woodland_view *view)
+{
     struct woodland_output *wo = woodland_output_for_view(view);
     if (!wo) {
         return;
@@ -262,17 +275,17 @@ void woodland_view_constrain(struct woodland_view *view) {
     if (outer.x != old_x || outer.y != old_y) {
         /* 外框位移 → 内容原点同量位移 */
         wlr_scene_node_set_position(&view->scene_tree->node,
-            view->scene_tree->node.x + (outer.x - old_x),
-            view->scene_tree->node.y + (outer.y - old_y));
+                                    view->scene_tree->node.x + (outer.x - old_x),
+                                    view->scene_tree->node.y + (outer.y - old_y));
     }
 }
 
 /* ==================== 放置几何 ==================== */
 
-void woodland_view_placement(const struct wlr_box *area,
-                             int content_w, int content_h,
-                             const struct woodland_ssd_margins *margins,
-                             int cascade, struct wlr_box *out) {
+void woodland_view_placement(const struct wlr_box *area, int content_w, int content_h,
+                             const struct woodland_ssd_margins *margins, int cascade,
+                             struct wlr_box *out)
+{
     int outer_w = content_w + margins->left + margins->right;
     int outer_h = content_h + margins->top + margins->bottom;
 
@@ -299,17 +312,19 @@ void woodland_view_placement(const struct wlr_box *area,
     out->height = content_h;
 }
 
-void woodland_placement_center(const struct wlr_box *area,
-                               int content_w, int content_h,
-                               const struct woodland_ssd_margins *margins,
-                               struct wlr_box *out) {
+void woodland_placement_center(const struct wlr_box *area, int content_w, int content_h,
+                               const struct woodland_ssd_margins *margins, struct wlr_box *out)
+{
     int outer_w = content_w + margins->left + margins->right;
     int outer_h = content_h + margins->top + margins->bottom;
     int x = area->x + (area->width - outer_w) / 2;
     int y = area->y + (area->height - outer_h) / 2;
 
     struct wlr_box outer = {
-        .x = x, .y = y, .width = outer_w, .height = outer_h,
+        .x = x,
+        .y = y,
+        .width = outer_w,
+        .height = outer_h,
     };
     woodland_box_constrain(&outer, area);
 
@@ -319,17 +334,18 @@ void woodland_placement_center(const struct wlr_box *area,
     out->height = content_h;
 }
 
-void woodland_placement_cursor(const struct wlr_box *area,
-                               double cursor_x, double cursor_y,
+void woodland_placement_cursor(const struct wlr_box *area, double cursor_x, double cursor_y,
                                int content_w, int content_h,
-                               const struct woodland_ssd_margins *margins,
-                               struct wlr_box *out) {
+                               const struct woodland_ssd_margins *margins, struct wlr_box *out)
+{
     int outer_w = content_w + margins->left + margins->right;
     int outer_h = content_h + margins->top + margins->bottom;
     /* 外框左上角贴光标：这是 labwc "cursor" 策略的语义（不是居中于光标） */
     struct wlr_box outer = {
-        .x = (int)cursor_x, .y = (int)cursor_y,
-        .width = outer_w, .height = outer_h,
+        .x = (int)cursor_x,
+        .y = (int)cursor_y,
+        .width = outer_w,
+        .height = outer_h,
     };
     woodland_box_constrain(&outer, area);
 
@@ -339,21 +355,20 @@ void woodland_placement_cursor(const struct wlr_box *area,
     out->height = content_h;
 }
 
-static int overlap_area(const struct wlr_box *a, const struct wlr_box *b) {
+static int overlap_area(const struct wlr_box *a, const struct wlr_box *b)
+{
     int x1 = a->x > b->x ? a->x : b->x;
     int y1 = a->y > b->y ? a->y : b->y;
-    int x2 = (a->x + a->width) < (b->x + b->width)
-        ? (a->x + a->width) : (b->x + b->width);
-    int y2 = (a->y + a->height) < (b->y + b->height)
-        ? (a->y + a->height) : (b->y + b->height);
+    int x2 = (a->x + a->width) < (b->x + b->width) ? (a->x + a->width) : (b->x + b->width);
+    int y2 = (a->y + a->height) < (b->y + b->height) ? (a->y + a->height) : (b->y + b->height);
     if (x2 <= x1 || y2 <= y1) {
         return 0;
     }
     return (x2 - x1) * (y2 - y1);
 }
 
-static int total_overlap(const struct wlr_box *cand,
-                         const struct wlr_box *obstacles, int n) {
+static int total_overlap(const struct wlr_box *cand, const struct wlr_box *obstacles, int n)
+{
     int sum = 0;
     for (int i = 0; i < n; i++) {
         sum += overlap_area(cand, &obstacles[i]);
@@ -361,11 +376,11 @@ static int total_overlap(const struct wlr_box *cand,
     return sum;
 }
 
-void woodland_placement_autoplace(const struct wlr_box *area,
-                                  int content_w, int content_h,
+void woodland_placement_autoplace(const struct wlr_box *area, int content_w, int content_h,
                                   const struct woodland_ssd_margins *margins,
-                                  const struct wlr_box *obstacles, int n_obstacles,
-                                  int cascade, struct wlr_box *out) {
+                                  const struct wlr_box *obstacles, int n_obstacles, int cascade,
+                                  struct wlr_box *out)
+{
     int outer_w = content_w + margins->left + margins->right;
     int outer_h = content_h + margins->top + margins->bottom;
 
@@ -379,24 +394,20 @@ void woodland_placement_autoplace(const struct wlr_box *area,
 
     int n = 0;
     /* 工作区四角 */
-    cands[n++] = (struct wlr_box){ area->x, area->y, outer_w, outer_h };
-    cands[n++] = (struct wlr_box){
-        area->x + area->width - outer_w, area->y, outer_w, outer_h };
-    cands[n++] = (struct wlr_box){
-        area->x, area->y + area->height - outer_h, outer_w, outer_h };
-    cands[n++] = (struct wlr_box){
-        area->x + area->width - outer_w,
-        area->y + area->height - outer_h, outer_w, outer_h };
+    cands[n++] = (struct wlr_box){area->x, area->y, outer_w, outer_h};
+    cands[n++] = (struct wlr_box){area->x + area->width - outer_w, area->y, outer_w, outer_h};
+    cands[n++] = (struct wlr_box){area->x, area->y + area->height - outer_h, outer_w, outer_h};
+    cands[n++] = (struct wlr_box){area->x + area->width - outer_w, area->y + area->height - outer_h,
+                                  outer_w, outer_h};
     /* 层叠位 */
-    cands[n++] = (struct wlr_box){
-        area->x + cascade, area->y + cascade, outer_w, outer_h };
+    cands[n++] = (struct wlr_box){area->x + cascade, area->y + cascade, outer_w, outer_h};
     /* 每个障碍的右侧/左侧/下方/上方贴靠 */
     for (int i = 0; i < n_obstacles && n + 4 <= cap; i++) {
         const struct wlr_box *o = &obstacles[i];
-        cands[n++] = (struct wlr_box){ o->x + o->width, o->y, outer_w, outer_h };
-        cands[n++] = (struct wlr_box){ o->x - outer_w, o->y, outer_w, outer_h };
-        cands[n++] = (struct wlr_box){ o->x, o->y + o->height, outer_w, outer_h };
-        cands[n++] = (struct wlr_box){ o->x, o->y - outer_h, outer_w, outer_h };
+        cands[n++] = (struct wlr_box){o->x + o->width, o->y, outer_w, outer_h};
+        cands[n++] = (struct wlr_box){o->x - outer_w, o->y, outer_w, outer_h};
+        cands[n++] = (struct wlr_box){o->x, o->y + o->height, outer_w, outer_h};
+        cands[n++] = (struct wlr_box){o->x, o->y - outer_h, outer_w, outer_h};
     }
 
     struct wlr_box best = cands[0];
@@ -414,8 +425,7 @@ void woodland_placement_autoplace(const struct wlr_box *area,
         int dx = cand.x - area->x;
         int dy = cand.y - area->y;
         int dist = dx + dy;
-        if (ov < best_overlap
-                || (ov == best_overlap && dist < best_dist)) {
+        if (ov < best_overlap || (ov == best_overlap && dist < best_dist)) {
             best_overlap = ov;
             best_dist = dist;
             best = cand;
@@ -431,8 +441,9 @@ void woodland_placement_autoplace(const struct wlr_box *area,
 
 /* ==================== 贴边铺满 ==================== */
 
-uint32_t woodland_snap_edges_for(const struct wlr_box *outer,
-                                 const struct wlr_box *area, int threshold) {
+uint32_t woodland_snap_edges_for(const struct wlr_box *outer, const struct wlr_box *area,
+                                 int threshold)
+{
     uint32_t edges = 0;
     if (!outer || !area) {
         return 0;
@@ -463,8 +474,8 @@ uint32_t woodland_snap_edges_for(const struct wlr_box *outer,
     return edges;
 }
 
-bool woodland_snap_tile_box(const struct wlr_box *area, uint32_t edges,
-                            struct wlr_box *out_outer) {
+bool woodland_snap_tile_box(const struct wlr_box *area, uint32_t edges, struct wlr_box *out_outer)
+{
     if (!area || !out_outer) {
         return false;
     }
@@ -512,17 +523,17 @@ bool woodland_snap_tile_box(const struct wlr_box *area, uint32_t edges,
     return true;
 }
 
-void woodland_view_center_on(const struct wlr_box *parent_box,
-                             int content_w, int content_h,
-                             const struct woodland_ssd_margins *margins,
-                             const struct wlr_box *area, struct wlr_box *out) {
+void woodland_view_center_on(const struct wlr_box *parent_box, int content_w, int content_h,
+                             const struct woodland_ssd_margins *margins, const struct wlr_box *area,
+                             struct wlr_box *out)
+{
     int outer_w = content_w + margins->left + margins->right;
     int outer_h = content_h + margins->top + margins->bottom;
 
     int x = parent_box->x + (parent_box->width - outer_w) / 2;
     int y = parent_box->y + (parent_box->height - outer_h) / 2;
 
-    struct wlr_box outer = { x, y, outer_w, outer_h };
+    struct wlr_box outer = {x, y, outer_w, outer_h};
     woodland_box_constrain(&outer, area);
 
     out->x = outer.x + margins->left;
@@ -531,8 +542,9 @@ void woodland_view_center_on(const struct wlr_box *parent_box,
     out->height = content_h;
 }
 
-int woodland_snap_axis(int desired, int size, int lo, int hi,
-                       const int *edges, int n_edges, int threshold) {
+int woodland_snap_axis(int desired, int size, int lo, int hi, const int *edges, int n_edges,
+                       int threshold)
+{
     /* 外框比工作区还大：没有可贴的意义，原样返回 */
     if (size > hi - lo) {
         return desired;
@@ -546,7 +558,7 @@ int woodland_snap_axis(int desired, int size, int lo, int hi,
         if (i > 1) {
             int edge = edges[i - 2];
             int d0 = edge - desired;
-            int d1 = d0 - size;   /* 我们的末边贴到该边 */
+            int d1 = d0 - size; /* 我们的末边贴到该边 */
             if (d0 < 0) {
                 d0 = -d0;
             }
@@ -587,8 +599,8 @@ int woodland_snap_axis(int desired, int size, int lo, int hi,
  * （工作区在 map 时才确定）；此时不能简单比较相等，否则第一个 X11 窗口
  * 永远看不到邻居，层叠偏移恒为 0，新窗口正好盖住旧窗口。
  */
-static bool same_workspace(const struct woodland_view *a,
-                           const struct woodland_view *b) {
+static bool same_workspace(const struct woodland_view *a, const struct woodland_view *b)
+{
     if (!a->workspace || !b->workspace) {
         return true;
     }
@@ -598,12 +610,13 @@ static bool same_workspace(const struct woodland_view *a,
 /* 层叠序号：统计当前工作区其它已映射视图，排除自己。
  * X11 的首次放置发生在 map_request（尚未进链表），xdg 发生在 map
  * （已在链表里），排除自己后两者语义一致。 */
-static int cascade_index(struct woodland_view *view) {
+static int cascade_index(struct woodland_view *view)
+{
     int count = 0;
     struct woodland_view *it;
-    wl_list_for_each(it, &view->server->views, link) {
-        if (it != view && it->mapped && !it->minimized
-                && same_workspace(it, view)) {
+    wl_list_for_each(it, &view->server->views, link)
+    {
+        if (it != view && it->mapped && !it->minimized && same_workspace(it, view)) {
             count++;
         }
     }
@@ -611,12 +624,14 @@ static int cascade_index(struct woodland_view *view) {
 }
 
 /* 收集当前工作区其它已映射视图的外框，供 autoplace 判重叠 */
-static struct wlr_box *collect_obstacles(struct woodland_view *view, int *n_out) {
+static struct wlr_box *collect_obstacles(struct woodland_view *view, int *n_out)
+{
     int n = 0;
     struct woodland_view *it;
-    wl_list_for_each(it, &view->server->views, link) {
-        if (it != view && it->mapped && !it->minimized
-            && !it->fullscreen && same_workspace(it, view)) {
+    wl_list_for_each(it, &view->server->views, link)
+    {
+        if (it != view && it->mapped && !it->minimized && !it->fullscreen &&
+            same_workspace(it, view)) {
             n++;
         }
     }
@@ -630,9 +645,10 @@ static struct wlr_box *collect_obstacles(struct woodland_view *view, int *n_out)
         return NULL;
     }
     int i = 0;
-    wl_list_for_each(it, &view->server->views, link) {
-        if (it != view && it->mapped && !it->minimized
-            && !it->fullscreen && same_workspace(it, view)) {
+    wl_list_for_each(it, &view->server->views, link)
+    {
+        if (it != view && it->mapped && !it->minimized && !it->fullscreen &&
+            same_workspace(it, view)) {
             woodland_view_outer_box(it, &boxes[i++]);
         }
     }
@@ -640,7 +656,8 @@ static struct wlr_box *collect_obstacles(struct woodland_view *view, int *n_out)
     return boxes;
 }
 
-void woodland_view_place_initial(struct woodland_view *view) {
+void woodland_view_place_initial(struct woodland_view *view)
+{
     struct woodland_server *server = view->server;
     struct woodland_ssd_margins margins;
     woodland_ssd_get_margins(view, &margins);
@@ -675,52 +692,47 @@ void woodland_view_place_initial(struct woodland_view *view) {
         /* 对话框/工具窗：以父窗口外框为中心（越界时贴回工作区） */
         struct wlr_box parent_outer;
         woodland_view_outer_box(view->parent, &parent_outer);
-        woodland_view_center_on(&parent_outer, content_w, content_h, &margins,
-                                &area, &geometry);
+        woodland_view_center_on(&parent_outer, content_w, content_h, &margins, &area, &geometry);
     } else {
         switch (server->placement_policy) {
         case WOODLAND_PLACE_CENTER:
-            woodland_placement_center(&area, content_w, content_h, &margins,
-                                      &geometry);
+            woodland_placement_center(&area, content_w, content_h, &margins, &geometry);
             break;
         case WOODLAND_PLACE_CURSOR:
-            woodland_placement_cursor(&area, server->cursor->x, server->cursor->y,
-                                      content_w, content_h, &margins, &geometry);
+            woodland_placement_cursor(&area, server->cursor->x, server->cursor->y, content_w,
+                                      content_h, &margins, &geometry);
             break;
         case WOODLAND_PLACE_AUTOPLACE: {
             int n_obstacles = 0;
             struct wlr_box *obstacles = collect_obstacles(view, &n_obstacles);
-            woodland_placement_autoplace(&area, content_w, content_h, &margins,
-                                         obstacles, n_obstacles,
-                                         cascade_index(view), &geometry);
+            woodland_placement_autoplace(&area, content_w, content_h, &margins, obstacles,
+                                         n_obstacles, cascade_index(view), &geometry);
             free(obstacles);
             break;
         }
         case WOODLAND_PLACE_CASCADE:
         default:
-            woodland_view_placement(&area, content_w, content_h, &margins,
-                                    cascade_index(view), &geometry);
+            woodland_view_placement(&area, content_w, content_h, &margins, cascade_index(view),
+                                    &geometry);
             break;
         }
     }
     wlr_scene_node_set_position(&view->scene_tree->node, geometry.x, geometry.y);
     /* 只记"凭什么放这里"：几何本身 get_tree 里有，写进来是噪音 */
     if (view->parent && view->parent->mapped) {
-        woodland_trace_add("place", view->id, "on parent=%u %dx%d at %d,%d",
-                           view->parent->id, content_w, content_h,
-                           geometry.x, geometry.y);
+        woodland_trace_add("place", view->id, "on parent=%u %dx%d at %d,%d", view->parent->id,
+                           content_w, content_h, geometry.x, geometry.y);
     } else {
         woodland_trace_add("place", view->id, "policy=%s %dx%d at %d,%d",
-                           woodland_placement_policy_name(
-                               server->placement_policy),
-                           content_w, content_h, geometry.x, geometry.y);
+                           woodland_placement_policy_name(server->placement_policy), content_w,
+                           content_h, geometry.x, geometry.y);
     }
 }
 
 /* ==================== 外框几何应用与贴边 ==================== */
 
-void woodland_view_apply_outer_geometry(struct woodland_view *view,
-                                        const struct wlr_box *box) {
+void woodland_view_apply_outer_geometry(struct woodland_view *view, const struct wlr_box *box)
+{
     struct woodland_ssd_margins margins;
     woodland_ssd_get_margins(view, &margins);
     int content_w = box->width - margins.left - margins.right;
@@ -731,12 +743,14 @@ void woodland_view_apply_outer_geometry(struct woodland_view *view,
     if (content_h < 1) {
         content_h = 1;
     }
-    wlr_scene_node_set_position(&view->scene_tree->node,
-        box->x + margins.left, box->y + margins.top);
+    wlr_scene_node_set_position(&view->scene_tree->node, box->x + margins.left,
+                                box->y + margins.top);
     woodland_view_request_size(view, content_w, content_h);
+    woodland_view_update_outputs(view);
 }
 
-void woodland_view_set_tiled(struct woodland_view *view, uint32_t edges) {
+void woodland_view_set_tiled(struct woodland_view *view, uint32_t edges)
+{
 #if WOODLAND_HAVE_XWAYLAND
     if (view->type == WOODLAND_VIEW_XWAYLAND) {
         /* EWMH 没有 tiled 语义，X11 端只靠几何表达 */
@@ -748,7 +762,8 @@ void woodland_view_set_tiled(struct woodland_view *view, uint32_t edges) {
     }
 }
 
-bool woodland_view_snap_to(struct woodland_view *view, uint32_t edges) {
+bool woodland_view_snap_to(struct woodland_view *view, uint32_t edges)
+{
     if (!view || !view->mapped || edges == 0) {
         return false;
     }
@@ -782,12 +797,12 @@ bool woodland_view_snap_to(struct woodland_view *view, uint32_t edges) {
 
 /* ==================== 尺寸限制 ==================== */
 
-void woodland_view_size_limits(const struct woodland_view *view,
-                               int *min_w, int *min_h,
-                               int *max_w, int *max_h) {
+void woodland_view_size_limits(const struct woodland_view *view, int *min_w, int *min_h, int *max_w,
+                               int *max_h)
+{
     *min_w = 1;
     *min_h = 1;
-    *max_w = 0;   /* 0 = 无限制 */
+    *max_w = 0; /* 0 = 无限制 */
     *max_h = 0;
 
     if (view->type == WOODLAND_VIEW_XDG && view->xdg_toplevel) {

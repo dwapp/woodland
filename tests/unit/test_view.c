@@ -1,20 +1,22 @@
 // SPDX-License-Identifier: GPL-2.0-only
+#include "output.h"
+#include "ssd.h"
+#include "view.h"
+#include "woodland.h"
 #include <assert.h>
 #include <wayland-server-core.h>
 #include <wlr/backend.h>
 #include <wlr/backend/headless.h>
 #include <wlr/render/allocator.h>
 #include <wlr/render/wlr_renderer.h>
-#include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_cursor.h>
+#include <wlr/types/wlr_foreign_toplevel_management_v1.h>
+#include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_scene.h>
-#include "output.h"
-#include "ssd.h"
-#include "view.h"
-#include "woodland.h"
 
-int main(void) {
+int main(void)
+{
     struct woodland_server server = {0};
     server.display = wl_display_create();
     assert(server.display);
@@ -46,9 +48,8 @@ int main(void) {
     assert(fs_geo.height == 600);
 
     /* exclusive zone 占用后 maximize 应避开：手动设 usable_area */
-    struct woodland_output *wo =
-        wl_container_of(server.outputs.next, wo, link);
-    wo->usable_area = (struct wlr_box){ .x = 10, .y = 10, .width = 780, .height = 580 };
+    struct woodland_output *wo = wl_container_of(server.outputs.next, wo, link);
+    wo->usable_area = (struct wlr_box){.x = 10, .y = 10, .width = 780, .height = 580};
     wo->usable_area_valid = true;
     struct wlr_box max_geo2 = woodland_view_maximized_geometry(&server);
     assert(max_geo2.x == 10 && max_geo2.y == 10);
@@ -59,7 +60,10 @@ int main(void) {
      * 内容原点必须让出左上边距，否则标题栏会顶到屏幕外。
      */
     struct woodland_ssd_margins margins = {
-        .left = 1, .top = 27, .right = 1, .bottom = 1,
+        .left = 1,
+        .top = 27,
+        .right = 1,
+        .bottom = 1,
     };
     struct wlr_box place;
 
@@ -85,7 +89,7 @@ int main(void) {
      * 贴边吸附（单轴）：工作区 x∈[10,790]，阈值 20。
      * 候选 = 工作区两端 + 外部边（示例 400 / 700）。
      */
-    int edges[] = { 400, 700 };
+    int edges[] = {400, 700};
 
     /* 离边缘远：不动 */
     assert(woodland_snap_axis(300, 200, 10, 790, NULL, 0, 20) == 300);
@@ -112,7 +116,7 @@ int main(void) {
      * transient 居中：外框（内容 + margins）以父窗口内容框为中心，
      * 越界贴回工作区内侧。
      */
-    struct wlr_box parent_box = { .x = 200, .y = 150, .width = 400, .height = 300 };
+    struct wlr_box parent_box = {.x = 200, .y = 150, .width = 400, .height = 300};
 
     /* 居中：外框 202x148 → 父框中心 (400,300) → 外框原点 (299,226) */
     woodland_view_center_on(&parent_box, 200, 120, &margins, &max_geo2, &place);
@@ -120,7 +124,7 @@ int main(void) {
     assert(place.width == 200 && place.height == 120);
 
     /* 父窗口贴右下角：居中会越界，贴回工作区右下 */
-    parent_box = (struct wlr_box){ .x = 770, .y = 560, .width = 400, .height = 300 };
+    parent_box = (struct wlr_box){.x = 770, .y = 560, .width = 400, .height = 300};
     woodland_view_center_on(&parent_box, 200, 120, &margins, &max_geo2, &place);
     assert(place.x == 10 + 780 - 202 + 1);
     assert(place.y == 10 + 580 - 148 + 27);
@@ -140,8 +144,8 @@ int main(void) {
     wl_list_init(&server.views);
 
     struct wlr_xdg_surface drag_base = {0};
-    drag_base.geometry = (struct wlr_box){ .width = 400, .height = 300 };
-    struct wlr_xdg_toplevel drag_toplevel = { .base = &drag_base };
+    drag_base.geometry = (struct wlr_box){.width = 400, .height = 300};
+    struct wlr_xdg_toplevel drag_toplevel = {.base = &drag_base};
     struct woodland_view drag_view = {0};
     drag_view.server = &server;
     drag_view.xdg_toplevel = &drag_toplevel;
@@ -158,10 +162,8 @@ int main(void) {
     server.cursor->x = 13;
     server.cursor->y = 42;
     woodland_cursor_process_motion(&server, 0);
-    assert(drag_view.scene_tree->node.x
-        == 10 + margins.left);       /* 11 */
-    assert(drag_view.scene_tree->node.y
-        == 10 + margins.top);        /* 37 */
+    assert(drag_view.scene_tree->node.x == 10 + margins.left); /* 11 */
+    assert(drag_view.scene_tree->node.y == 10 + margins.top);  /* 37 */
 
     /* 中间空地：x/y 都离候选线 > 阈值 → 不吸附，内容原点=光标位置 */
     server.cursor->x = 300;
@@ -179,8 +181,8 @@ int main(void) {
     /* 贴邻窗：第二个窗口内容 (500,100) 200x200，左外边缘 499；
      * 我们的外框 x 拖到 494（差 5px）→ 吸附到 499 */
     struct wlr_xdg_surface peer_base = {0};
-    peer_base.geometry = (struct wlr_box){ .width = 200, .height = 200 };
-    struct wlr_xdg_toplevel peer_toplevel = { .base = &peer_base };
+    peer_base.geometry = (struct wlr_box){.width = 200, .height = 200};
+    struct wlr_xdg_toplevel peer_toplevel = {.base = &peer_base};
     struct woodland_view peer_view = {0};
     peer_view.server = &server;
     peer_view.xdg_toplevel = &peer_toplevel;
@@ -199,6 +201,64 @@ int main(void) {
     wl_list_remove(&peer_view.link);
     server.grabbed_view = NULL;
     server.cursor_mode = WOODLAND_CURSOR_PASSTHROUGH;
+
+    /* 验证 foreign-toplevel 句柄的 output_enter / output_leave 同步 */
+    server.foreign_toplevel_manager = wlr_foreign_toplevel_manager_v1_create(server.display);
+    assert(server.foreign_toplevel_manager != NULL);
+
+    /* 添加第二个 800x600 输出并排布在 (800, 0) */
+    struct wlr_output *out2 = wlr_headless_add_output(server.backend, 800, 600);
+    assert(out2 != NULL);
+    wl_signal_emit_mutable(&server.backend->events.new_output, out2);
+    wlr_output_layout_add(server.output_layout, out, 0, 0);
+    wlr_output_layout_add(server.output_layout, out2, 800, 0);
+
+    struct wlr_xdg_surface ft_base = {0};
+    ft_base.geometry = (struct wlr_box){.width = 200, .height = 200};
+    struct wlr_xdg_toplevel ft_toplevel = {.base = &ft_base};
+    struct woodland_view ft_view = {0};
+    ft_view.server = &server;
+    ft_view.xdg_toplevel = &ft_toplevel;
+    ft_view.scene_tree = wlr_scene_tree_create(&server.scene->tree);
+    woodland_view_init_handles(&ft_view);
+    assert(ft_view.toplevel_handle != NULL);
+    assert(wl_list_empty(&ft_view.toplevel_handle->outputs));
+
+    /* 映射到输出 1 内部 (100, 100) -> 触发 output 1 enter */
+    ft_view.mapped = true;
+    wlr_scene_node_set_position(&ft_view.scene_tree->node, 100, 100);
+    wl_list_insert(&server.views, &ft_view.link);
+    woodland_view_update_outputs(&ft_view);
+    assert(wl_list_length(&ft_view.toplevel_handle->outputs) == 1);
+    struct wlr_foreign_toplevel_handle_v1_output *tlo =
+        wl_container_of(ft_view.toplevel_handle->outputs.next, tlo, link);
+    assert(tlo->output == out);
+
+    /* 移到输出 2 内部 (900, 100) -> 离开输出 1，进入输出 2 */
+    wlr_scene_node_set_position(&ft_view.scene_tree->node, 900, 100);
+    woodland_view_update_outputs(&ft_view);
+    assert(wl_list_length(&ft_view.toplevel_handle->outputs) == 1);
+    tlo = wl_container_of(ft_view.toplevel_handle->outputs.next, tlo, link);
+    assert(tlo->output == out2);
+
+    /* 跨两个输出 (750, 100) -> 同时存在于输出 1 与输出 2 */
+    wlr_scene_node_set_position(&ft_view.scene_tree->node, 750, 100);
+    woodland_view_update_outputs(&ft_view);
+    assert(wl_list_length(&ft_view.toplevel_handle->outputs) == 2);
+
+    /* 取消映射 -> 离开所有输出 */
+    ft_view.mapped = false;
+    woodland_view_update_outputs(&ft_view);
+    assert(wl_list_empty(&ft_view.toplevel_handle->outputs));
+
+    wl_list_remove(&ft_view.link);
+    wl_list_remove(&ft_view.ft_request_activate.link);
+    wl_list_remove(&ft_view.ft_request_maximize.link);
+    wl_list_remove(&ft_view.ft_request_fullscreen.link);
+    wl_list_remove(&ft_view.ft_request_minimize.link);
+    wl_list_remove(&ft_view.ft_request_close.link);
+    wlr_foreign_toplevel_handle_v1_destroy(ft_view.toplevel_handle);
+    wlr_scene_node_destroy(&ft_view.scene_tree->node);
 
     wlr_cursor_destroy(server.cursor);
     server.cursor = NULL;
