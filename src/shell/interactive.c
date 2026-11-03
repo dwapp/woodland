@@ -248,6 +248,7 @@ void shell_process_cursor_move(struct woodland_server *server)
     }
 
     wlr_scene_node_set_position(&view->scene_tree->node, x + margins.left, y + margins.top);
+    woodland_view_update_outputs(view);
 }
 
 void shell_process_cursor_resize(struct woodland_server *server)
@@ -319,6 +320,7 @@ void shell_process_cursor_resize(struct woodland_server *server)
     wlr_scene_node_set_position(&view->scene_tree->node, new_left - geo_box.x, new_top - geo_box.y);
 
     woodland_view_request_size(view, new_right - new_left, new_bottom - new_top);
+    woodland_view_update_outputs(view);
 }
 
 void woodland_cursor_reset_mode(struct woodland_server *server)

@@ -16,6 +16,7 @@
 
 #include <wlr/types/wlr_ext_foreign_toplevel_list_v1.h>
 #include <wlr/types/wlr_foreign_toplevel_management_v1.h>
+#include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_scene.h>
 #include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/util/log.h>
@@ -50,6 +51,7 @@ void shell_view_apply_geometry(struct woodland_view *view, const struct wlr_box 
     /* 先落位置再改尺寸：X11 的 configure 会把当前位置一并发给客户端 */
     wlr_scene_node_set_position(&view->scene_tree->node, box->x, box->y);
     woodland_view_request_size(view, box->width, box->height);
+    woodland_view_update_outputs(view);
 }
 
 /* X11 的 configure 已由 woodland_view_request_size 直接发出，无需再排程 */
@@ -123,6 +125,7 @@ void woodland_view_set_maximized(struct woodland_view *view, bool maximized)
         wlr_foreign_toplevel_handle_v1_set_maximized(view->toplevel_handle, view->maximized);
         wlr_foreign_toplevel_handle_v1_set_fullscreen(view->toplevel_handle, view->fullscreen);
     }
+    woodland_view_update_outputs(view);
 }
 
 void woodland_view_set_fullscreen(struct woodland_view *view, bool fullscreen,
@@ -163,6 +166,7 @@ void woodland_view_set_fullscreen(struct woodland_view *view, bool fullscreen,
         wlr_foreign_toplevel_handle_v1_set_fullscreen(view->toplevel_handle, view->fullscreen);
         wlr_foreign_toplevel_handle_v1_set_maximized(view->toplevel_handle, view->maximized);
     }
+    woodland_view_update_outputs(view);
 }
 
 void woodland_view_set_minimized(struct woodland_view *view, bool minimized)
@@ -398,6 +402,53 @@ void woodland_view_init_handles(struct woodland_view *view)
             woodland_listener_connect(&view->ext_handle_destroy,
                                       &view->ext_toplevel_handle->events.destroy,
                                       ext_toplevel_handle_destroy, "toplevel_state.destroy");
+        }
+    }
+    woodland_view_update_outputs(view);
+}
+
+void woodland_view_update_outputs(struct woodland_view *view)
+{
+    if (!view || !view->server || !view->toplevel_handle) {
+        return;
+    }
+
+    struct woodland_server *server = view->server;
+    if (!server->output_layout) {
+        return;
+    }
+
+    struct wlr_box view_box = {0};
+    if (view->mapped) {
+        woodland_view_outer_box(view, &view_box);
+    }
+
+    struct woodland_output *primary_wo = NULL;
+    if (view->mapped && (view_box.width <= 0 || view_box.height <= 0)) {
+        primary_wo = woodland_output_for_view(view);
+    }
+
+    struct woodland_output *wo;
+    wl_list_for_each(wo, &server->outputs, link)
+    {
+        if (!wo->wlr_output) {
+            continue;
+        }
+
+        bool on_output = false;
+        if (view->mapped) {
+            if (view_box.width > 0 && view_box.height > 0) {
+                on_output =
+                    wlr_output_layout_intersects(server->output_layout, wo->wlr_output, &view_box);
+            } else if (wo == primary_wo) {
+                on_output = true;
+            }
+        }
+
+        if (on_output) {
+            wlr_foreign_toplevel_handle_v1_output_enter(view->toplevel_handle, wo->wlr_output);
+        } else {
+            wlr_foreign_toplevel_handle_v1_output_leave(view->toplevel_handle, wo->wlr_output);
         }
     }
 }

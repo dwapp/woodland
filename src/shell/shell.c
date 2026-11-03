@@ -233,6 +233,7 @@ void woodland_view_map(struct woodland_view *view)
         woodland_view_place_initial(view);
     }
     woodland_focus_view(view, true);
+    woodland_view_update_outputs(view);
     woodland_selfcheck_schedule(server, "map");
 }
 
@@ -268,6 +269,7 @@ void woodland_view_unmap(struct woodland_view *view)
     if (view->mapped) {
         wl_list_remove(&view->link);
         view->mapped = false;
+        woodland_view_update_outputs(view);
     }
     /* unmap 时销毁 SSD（避免残留空装饰）；remap 时按 deco_csd 重建 */
     if (view->ssd) {
