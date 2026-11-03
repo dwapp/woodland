@@ -10,6 +10,7 @@
 #include <wlr/types/wlr_data_control_v1.h>
 #include <wlr/types/wlr_data_device.h>
 #include <wlr/types/wlr_ext_data_control_v1.h>
+#include <wlr/types/wlr_fixes.h>
 #include <wlr/types/wlr_fractional_scale_v1.h>
 #include <wlr/types/wlr_single_pixel_buffer_v1.h>
 #include <wlr/types/wlr_subcompositor.h>
@@ -148,6 +149,10 @@ bool woodland_server_init(struct woodland_server *server)
     wlr_single_pixel_buffer_manager_v1_create(server->display);
     wlr_fractional_scale_manager_v1_create(server->display, 1);
     wlr_alpha_modifier_v1_create(server->display);
+    /* wl_fixes：核心 wayland.xml 协议补丁（destroy_registry），修 wl_registry
+     * 的生命周期问题。wlroots 0.20.2 只实现 version 1（ack_global_remove 为
+     * since=2），版本号对齐 labwc。 */
+    wlr_fixes_create(server->display, 1);
 
     server->scene = wlr_scene_create();
     if (!server->scene) {
