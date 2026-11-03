@@ -321,6 +321,12 @@ void woodland_proto_output_finish(struct woodland_proto *proto)
     if (!output) {
         return;
     }
+    /*
+     * output->gamma 的生命周期绑定在 wl_display 上（其内部监听 display_destroy 并在
+     * wl_display_destroy 时统一销毁 global 并释放 manager）。
+     * wlr_scene 在 wlr_scene_node_destroy(&scene->tree.node) 析构时会自动移除挂在
+     * gamma->events.destroy 和 set_gamma 上的监听器，不会在 scene 释放后留下野指针。
+     */
     if (output->power_set_mode.link.prev) {
         wl_list_remove(&output->power_set_mode.link);
     }
