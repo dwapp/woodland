@@ -143,20 +143,23 @@ if wayland_client_dep.found() and wayland_scanner.found() and wp_datadir != ''
       link_with: [session_lock_lib, output_lib, cursor_lib, shell_lib, seat_lib, ime_lib, protocol_lib, workspace_lib, layer_lib, ssd_lib, capture_lib, util_lib])
     test('session_lock', test_session_lock)
   endif
+endif
+
 if wayland_client_dep.found() and wayland_scanner.found()
   gamma_xml = meson.project_source_root() + '/subprojects/wlroots/protocol/wlr-gamma-control-unstable-v1.xml'
-  test_gamma_control_srcs = ['test_gamma_control.c']
-  test_gamma_control_srcs += custom_target('wlr-gamma-control-unstable-v1-client-header',
-    output: 'wlr-gamma-control-unstable-v1-client-protocol.h',
-    command: [wayland_scanner, 'client-header', gamma_xml, '@OUTPUT@'])
-  test_gamma_control_srcs += custom_target('wlr-gamma-control-unstable-v1-client-code',
-    output: 'wlr-gamma-control-unstable-v1-protocol.c',
-    command: [wayland_scanner, 'private-code', gamma_xml, '@OUTPUT@'])
+  if fs.exists(gamma_xml)
+    test_gamma_control_srcs = ['test_gamma_control.c']
+    test_gamma_control_srcs += custom_target('wlr-gamma-control-unstable-v1-client-header',
+      output: 'wlr-gamma-control-unstable-v1-client-protocol.h',
+      command: [wayland_scanner, 'client-header', gamma_xml, '@OUTPUT@'])
+    test_gamma_control_srcs += custom_target('wlr-gamma-control-unstable-v1-client-code',
+      output: 'wlr-gamma-control-unstable-v1-protocol.c',
+      command: [wayland_scanner, 'private-code', gamma_xml, '@OUTPUT@'])
 
-  test_gamma_control = executable('test_gamma_control', test_gamma_control_srcs,
-    dependencies: [wlroots, wayland_server, wayland_client_dep],
-    include_directories: woodland_inc,
-    link_with: [protocol_lib, output_lib, cursor_lib, shell_lib, seat_lib, ime_lib, session_lock_lib, workspace_lib, layer_lib, ssd_lib, capture_lib, util_lib])
-  test('gamma_control', test_gamma_control)
-endif
+    test_gamma_control = executable('test_gamma_control', test_gamma_control_srcs,
+      dependencies: [wlroots, wayland_server, wayland_client_dep],
+      include_directories: woodland_inc,
+      link_with: [protocol_lib, output_lib, cursor_lib, shell_lib, seat_lib, ime_lib, session_lock_lib, workspace_lib, layer_lib, ssd_lib, capture_lib, util_lib])
+    test('gamma_control', test_gamma_control)
+  endif
 endif
