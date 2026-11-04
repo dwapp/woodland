@@ -157,6 +157,7 @@ for iface in zwlr_screencopy_manager_v1 \
              wp_presentation \
              zwp_primary_selection_device_manager_v1 \
              zwp_relative_pointer_manager_v1 \
+             zwp_pointer_constraints_v1 \
              zwp_pointer_gestures_v1 \
              zwp_idle_inhibit_manager_v1 \
              ext_idle_notifier_v1 \

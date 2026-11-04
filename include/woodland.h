@@ -34,6 +34,8 @@ struct woodland_proto;
 struct woodland_config;
 struct woodland_ime_relay;
 struct woodland_session_lock;
+struct wlr_pointer_constraints_v1;
+struct wlr_pointer_constraint_v1;
 struct woodland_server {
     struct wl_display *display;
     struct wl_event_loop *event_loop;
@@ -88,6 +90,13 @@ struct woodland_server {
     double drag_start_x, drag_start_y; // 本次拖动起点（判断是否真的拖动了）
     struct wlr_box grab_geobox;
     uint32_t resize_edges;
+
+    /* 指针约束（zwp_pointer_constraints_v1） */
+    struct wlr_pointer_constraints_v1 *pointer_constraints;
+    struct wlr_pointer_constraint_v1 *current_constraint;
+    struct wl_listener new_pointer_constraint;
+    struct wl_listener constraint_destroy;
+    struct wl_listener constraint_commit;
 
     /* SSD 按钮的指针状态：悬停高亮 / 按下（释放时执行动作） */
     struct woodland_view *hover_view;

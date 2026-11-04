@@ -9,6 +9,7 @@
 #include <wlr/types/wlr_scene.h>
 #include <xkbcommon/xkbcommon.h>
 
+#include "cursor.h"
 #include "focus.h"
 #include "ime.h"
 #include "protocol.h"
@@ -237,6 +238,7 @@ static void seat_pointer_focus_change(struct wl_listener *listener, void *data)
     if (event->new_surface == NULL) {
         wlr_cursor_set_xcursor(server->cursor, server->xcursor_manager, "default");
     }
+    woodland_pointer_constraint_recheck(server, event->new_surface);
 }
 
 static void seat_request_set_selection(struct wl_listener *listener, void *data)

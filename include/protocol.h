@@ -26,13 +26,14 @@ struct wlr_output;
  *   语义完整：viewporter、presentation-time、primary-selection、
  *             idle-notify、idle-inhibit、keyboard-shortcuts-inhibit、
  *             output-power-management、output-management、gamma-control、
- *             drm-lease、relative-pointer、pointer-gestures、xdg-activation
+ *             drm-lease、relative-pointer、pointer-constraints、pointer-gestures、
+ *             xdg-activation
  *             —— 客户端请求会真的影响合成器行为。
  *   仅记录：  xdg-toplevel-tag（存下来、经 wctl 可见，但暂不参与窗口规则）。
  *   暂不接线：security-context（无沙箱校验时声明"我是沙箱"反而是假安全）、
  *             tearing-control（要改 scene 的 commit 路径传 tearing 位，
  *             属单独一版）、content-type（scene 不消费）、
- *             session-lock / pointer-constraints / xdg-foreign
+ *             session-lock / xdg-foreign
  *             （各自需要一套独立状态机，见里程碑文档）。
  */
 bool woodland_protocol_init(struct woodland_server *server);

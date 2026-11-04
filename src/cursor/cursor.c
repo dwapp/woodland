@@ -43,11 +43,20 @@ bool woodland_cursor_init(struct woodland_server *server)
         return false;
     }
 
+    if (!woodland_pointer_constraints_init(server)) {
+        wlr_xcursor_manager_destroy(server->xcursor_manager);
+        server->xcursor_manager = NULL;
+        wlr_cursor_destroy(server->cursor);
+        server->cursor = NULL;
+        return false;
+    }
+
     return true;
 }
 
 void woodland_cursor_finish(struct woodland_server *server)
 {
+    woodland_pointer_constraints_finish(server);
     if (server->xcursor_manager) {
         wlr_xcursor_manager_destroy(server->xcursor_manager);
         server->xcursor_manager = NULL;
