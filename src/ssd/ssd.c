@@ -72,6 +72,18 @@ static int ssd_border_width(const struct woodland_view *view)
     return WOODLAND_SSD_BORDER_W;
 }
 
+static int ssd_grab_width(const struct woodland_view *view)
+{
+    int b = ssd_border_width(view);
+    int g = WOODLAND_SSD_RESIZE_GRAB_W;
+    if (view && view->server && view->server->config) {
+        if (view->server->config->ssd.resize_grab_width > 0) {
+            g = view->server->config->ssd.resize_grab_width;
+        }
+    }
+    return b > g ? b : g;
+}
+
 static int ssd_button_width(const struct woodland_view *view)
 {
     if (view && view->server && view->server->config) {
@@ -185,6 +197,42 @@ static void ssd_border_geometry(const struct woodland_ssd *ssd, int index, int *
         *out_y = -th;
         *out_w = b;
         *out_h = th + h;
+        break;
+    }
+}
+
+/* 命中测试边框几何：向外扩展为抓取边距（默认 8px），解决细边框难以拖拽的问题 */
+static void ssd_border_hit_geometry(const struct woodland_ssd *ssd, int index, int *out_x, int *out_y,
+                                    int *out_w, int *out_h)
+{
+    int w = ssd->width;
+    int h = ssd->height;
+    int th = ssd_titlebar_height(ssd->view);
+    int g = ssd_grab_width(ssd->view);
+    switch (index) {
+    case BORDER_TOP:
+        *out_x = -g;
+        *out_y = -th - g;
+        *out_w = w + 2 * g;
+        *out_h = g;
+        break;
+    case BORDER_BOTTOM:
+        *out_x = -g;
+        *out_y = h;
+        *out_w = w + 2 * g;
+        *out_h = g;
+        break;
+    case BORDER_LEFT:
+        *out_x = -g;
+        *out_y = -th - g;
+        *out_w = g;
+        *out_h = th + h + 2 * g;
+        break;
+    default: /* BORDER_RIGHT */
+        *out_x = w;
+        *out_y = -th - g;
+        *out_w = g;
+        *out_h = th + h + 2 * g;
         break;
     }
 }
@@ -554,7 +602,12 @@ static enum woodland_ssd_part ssd_hit_relative(struct woodland_ssd *ssd, double 
         return WOODLAND_SSD_TITLEBAR;
     }
 
-    /* 边框：几何与 ssd_layout() 共用 ssd_border_geometry()，保证所见即所点 */
+    /* 最大化或全屏视图不提供边框缩放 */
+    if (ssd->view && (ssd->view->fullscreen || ssd->view->maximized)) {
+        return WOODLAND_SSD_NONE;
+    }
+
+    /* 边框命中区域：向外扩展至 grab_width（默认 8px），使细边框也易于抓取 */
     static const enum woodland_ssd_part part_of[BORDER_COUNT] = {
         [BORDER_TOP] = WOODLAND_SSD_BORDER_TOP,
         [BORDER_BOTTOM] = WOODLAND_SSD_BORDER_BOTTOM,
@@ -569,7 +622,7 @@ static enum woodland_ssd_part ssd_hit_relative(struct woodland_ssd *ssd, double 
     };
     for (int i = 0; i < BORDER_COUNT; i++) {
         int bx, by, rw, rh;
-        ssd_border_geometry(ssd, i, &bx, &by, &rw, &rh);
+        ssd_border_hit_geometry(ssd, i, &bx, &by, &rw, &rh);
         if (rx >= bx && rx < bx + rw && ry >= by && ry < by + rh) {
             *edges = edge_of[i];
             return part_of[i];

@@ -14,6 +14,8 @@ struct wlr_scene_tree;
 #define WOODLAND_SSD_BUTTON_W 26
 #define WOODLAND_SSD_BUTTON_H 26
 #define WOODLAND_SSD_BUTTON_GAP 0
+#define WOODLAND_SSD_RESIZE_GRAB_W 8
+#define WOODLAND_SSD_CORNER_W 16
 
 /** SSD 可命中区域类型（用于光标交互）。 */
 enum woodland_ssd_part {

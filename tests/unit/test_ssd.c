@@ -77,6 +77,27 @@ int main(void)
     assert(part == WOODLAND_SSD_BORDER_BOTTOM);
     assert(edges == WLR_EDGE_BOTTOM);
 
+
+    /* 抓取外边距（8px）：在 1px 细边框之外（如 -5px、+5px）依然能灵敏命中 */
+    part = woodland_ssd_at(&view, 100 - 5.0, 100 + 150, &edges);
+    assert(part == WOODLAND_SSD_BORDER_LEFT);
+    assert(edges == WLR_EDGE_LEFT);
+
+    part = woodland_ssd_at(&view, 100 + 405.0, 100 + 150, &edges);
+    assert(part == WOODLAND_SSD_BORDER_RIGHT);
+    assert(edges == WLR_EDGE_RIGHT);
+
+    part = woodland_ssd_at(&view, 100 + 200, 100 + 305.0, &edges);
+    assert(part == WOODLAND_SSD_BORDER_BOTTOM);
+    assert(edges == WLR_EDGE_BOTTOM);
+
+    part = woodland_ssd_at(&view, 100 + 200, 100 - 30.0, &edges);
+    assert(part == WOODLAND_SSD_BORDER_TOP);
+    assert(edges == WLR_EDGE_TOP);
+
+    /* 超出抓取外边距（> 8px）则不命中 */
+    part = woodland_ssd_at(&view, 100 - 15.0, 100 + 150, &edges);
+    assert(part == WOODLAND_SSD_NONE);
     /* 内容区不命中 SSD */
     part = woodland_ssd_at(&view, 100 + 200, 100 + 150, &edges);
     assert(part == WOODLAND_SSD_NONE);

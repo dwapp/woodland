@@ -73,6 +73,7 @@ void woodland_config_default_init(struct woodland_config *config)
     config->ssd.titlebar_height = WOODLAND_SSD_TITLEBAR_H;
     config->ssd.border_width = WOODLAND_SSD_BORDER_W;
     config->ssd.button_width = WOODLAND_SSD_BUTTON_W;
+    config->ssd.resize_grab_width = WOODLAND_SSD_RESIZE_GRAB_W;
     config->ssd.font = strdup("sans 10");
     config->ssd.active_title_color = 0xFFE1DEDB;    /* #e1dedb */
     config->ssd.inactive_title_color = 0xFFF7F6F4;  /* #f7f6f4 */
@@ -254,6 +255,10 @@ struct woodland_config *woodland_config_parse_string(const char *content, size_t
         int64_t btn_w = toml_get_int(ssd, "button_width", cfg->ssd.button_width);
         if (btn_w > 0 && btn_w < 200) {
             cfg->ssd.button_width = (int32_t)btn_w;
+        }
+        int64_t rgw = toml_get_int(ssd, "resize_grab_width", cfg->ssd.resize_grab_width);
+        if (rgw >= 0 && rgw < 50) {
+            cfg->ssd.resize_grab_width = (int32_t)rgw;
         }
         const char *font_str = toml_get_string(ssd, "font", NULL);
         if (font_str) {
@@ -498,6 +503,7 @@ void woodland_config_dump_json(const struct woodland_config *config, struct wood
     woodland_json_obj_int(&ssd, "titlebar_height", config->ssd.titlebar_height);
     woodland_json_obj_int(&ssd, "border_width", config->ssd.border_width);
     woodland_json_obj_int(&ssd, "button_width", config->ssd.button_width);
+    woodland_json_obj_int(&ssd, "resize_grab_width", config->ssd.resize_grab_width);
     woodland_json_obj_str(&ssd, "font", config->ssd.font);
     woodland_json_obj_int(&ssd, "active_title_color", config->ssd.active_title_color);
     woodland_json_obj_int(&ssd, "inactive_title_color", config->ssd.inactive_title_color);
