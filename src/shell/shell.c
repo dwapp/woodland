@@ -153,13 +153,21 @@ struct woodland_view *woodland_view_from_surface(struct wlr_surface *surface)
     if (!surface) {
         return NULL;
     }
-    struct wlr_xdg_toplevel *toplevel = wlr_xdg_toplevel_try_from_wlr_surface(surface);
-    if (toplevel) {
-        struct wlr_scene_tree *tree = toplevel->base->data;
+    struct wlr_surface *root = wlr_surface_get_root_surface(surface);
+    struct wlr_xdg_surface *xdg_surface = wlr_xdg_surface_try_from_wlr_surface(root);
+    while (xdg_surface && xdg_surface->role == WLR_XDG_SURFACE_ROLE_POPUP && xdg_surface->popup) {
+        if (!xdg_surface->popup->parent) {
+            break;
+        }
+        root = wlr_surface_get_root_surface(xdg_surface->popup->parent);
+        xdg_surface = wlr_xdg_surface_try_from_wlr_surface(root);
+    }
+    if (xdg_surface && xdg_surface->role == WLR_XDG_SURFACE_ROLE_TOPLEVEL && xdg_surface->toplevel) {
+        struct wlr_scene_tree *tree = xdg_surface->data;
         return tree ? tree->node.data : NULL;
     }
 #if WOODLAND_HAVE_XWAYLAND
-    struct wlr_xwayland_surface *xsurface = wlr_xwayland_surface_try_from_wlr_surface(surface);
+    struct wlr_xwayland_surface *xsurface = wlr_xwayland_surface_try_from_wlr_surface(root);
     return xsurface ? xsurface->data : NULL;
 #else
     return NULL;
@@ -181,11 +189,7 @@ struct woodland_view *woodland_view_at(struct woodland_server *server, double lx
         return NULL;
     }
     *surface = scene_surface->surface;
-    struct wlr_scene_tree *tree = node->parent;
-    while (tree != NULL && tree->node.data == NULL) {
-        tree = tree->node.parent;
-    }
-    return tree->node.data;
+    return woodland_view_from_surface(scene_surface->surface);
 }
 
 /* ==================== toplevel 视图事件 ==================== */
