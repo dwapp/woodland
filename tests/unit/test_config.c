@@ -25,6 +25,7 @@ static void test_default_config(void)
     assert(cfg->ssd.titlebar_height == 26);
     assert(cfg->ssd.border_width == 1);
     assert(cfg->ssd.button_width == 26);
+    assert(cfg->ssd.resize_grab_width == 8);
     assert(strcmp(cfg->ssd.font, "sans 10") == 0);
     assert(cfg->ssd.active_title_color == 0xFFE1DEDB);
     assert(cfg->ssd.inactive_title_color == 0xFFF7F6F4);

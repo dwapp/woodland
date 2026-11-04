@@ -136,6 +136,7 @@ void woodland_config_apply(struct woodland_server *server, struct woodland_confi
         (new_config->ssd.titlebar_height != old_config->ssd.titlebar_height) ||
         (new_config->ssd.border_width != old_config->ssd.border_width) ||
         (new_config->ssd.button_width != old_config->ssd.button_width) ||
+        (new_config->ssd.resize_grab_width != old_config->ssd.resize_grab_width) ||
         (new_config->ssd.active_title_color != old_config->ssd.active_title_color) ||
         (new_config->ssd.inactive_title_color != old_config->ssd.inactive_title_color) ||
         (new_config->ssd.active_border_color != old_config->ssd.active_border_color) ||

@@ -27,6 +27,7 @@ struct woodland_config_decorations {
     int32_t titlebar_height;
     int32_t border_width;
     int32_t button_width;
+    int32_t resize_grab_width;
     char *font;
     uint32_t active_title_color; /* 0xAARRGGBB */
     uint32_t inactive_title_color;
