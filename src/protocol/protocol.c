@@ -21,6 +21,7 @@
 #include <stdlib.h>
 
 #include <wlr/types/wlr_input_device.h>
+#include <wlr/types/wlr_linux_drm_syncobj_v1.h>
 #include <wlr/types/wlr_presentation_time.h>
 #include <wlr/types/wlr_viewporter.h>
 #include <wlr/util/log.h>
@@ -44,7 +45,7 @@ bool woodland_protocol_init(struct woodland_server *server) {
     /* 先挂上去：后面任何一步失败，finish 都能顺着它回收 */
     server->proto = proto;
 
-    /* 无状态的两个：客户端能不能用的分水岭在这里 */
+    /* 无状态的一组：客户端能不能用的分水岭在这里 */
     proto->viewporter = wlr_viewporter_create(server->display);
     if (!proto->viewporter) {
         wlr_log(WLR_ERROR, "failed to create viewporter");
@@ -58,6 +59,21 @@ bool woodland_protocol_init(struct woodland_server *server) {
     if (!proto->presentation) {
         wlr_log(WLR_ERROR, "failed to create presentation-time");
         return false;
+    }
+
+    /* linux-drm-syncobj-v1：显式同步。同步点与释放围栏由 wlr_scene 在
+     * commit 与 output_sample 时原生消费（types/scene/surface.c），这里
+     * 创建即完成。门控条件与 labwc 对齐：硬件与后端都支持 timeline 且
+     * 能拿到 DRM fd 才暴露；不支持时 create 本身也会因 eventfd 检查失败
+     * 而返回 NULL，不是错误，静默跳过即可。 */
+    int drm_fd = wlr_renderer_get_drm_fd(server->renderer);
+    if (server->renderer->features.timeline && server->backend->features.timeline &&
+            drm_fd >= 0) {
+        proto->linux_drm_syncobj =
+            wlr_linux_drm_syncobj_manager_v1_create(server->display, 1, drm_fd);
+        if (proto->linux_drm_syncobj) {
+            wlr_log(WLR_INFO, "linux-drm-syncobj-v1 enabled (explicit sync)");
+        }
     }
 
     /*

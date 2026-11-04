@@ -27,7 +27,7 @@ struct wlr_output;
  *             idle-notify、idle-inhibit、keyboard-shortcuts-inhibit、
  *             output-power-management、output-management、gamma-control、
  *             drm-lease、relative-pointer、pointer-constraints、pointer-gestures、
- *             xdg-activation
+ *             linux-drm-syncobj、xdg-activation
  *             —— 客户端请求会真的影响合成器行为。
  *   仅记录：  xdg-toplevel-tag（存下来、经 wctl 可见，但暂不参与窗口规则）。
  *   暂不接线：security-context（无沙箱校验时声明"我是沙箱"反而是假安全）、

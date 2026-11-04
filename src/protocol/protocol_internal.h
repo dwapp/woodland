@@ -14,6 +14,7 @@ struct woodland_proto_drm_lease;
 struct wlr_output;
 struct wlr_viewporter;
 struct wlr_presentation;
+struct wlr_linux_drm_syncobj_manager_v1;
 
 /*
  * 协议层内部聚合状态（只在 src/protocol 内部可见）。
@@ -33,6 +34,7 @@ struct woodland_proto {
      */
     struct wlr_viewporter *viewporter;
     struct wlr_presentation *presentation;
+    struct wlr_linux_drm_syncobj_manager_v1 *linux_drm_syncobj;
 
     /* 有状态的四族，混在一起会互相拖累得看不出边界 */
     struct woodland_proto_idle *idle;      /* idle.c   */
