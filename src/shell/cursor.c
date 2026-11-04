@@ -12,6 +12,7 @@
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_scene.h>
 #include <wlr/types/wlr_seat.h>
+#include <wlr/types/wlr_pointer_constraints_v1.h>
 
 #include "cursor.h"
 #include "focus.h"
@@ -204,7 +205,20 @@ static void server_cursor_motion(struct wl_listener *listener, void *data)
     woodland_listener_count(listener);
     struct woodland_server *server = wl_container_of(listener, server, cursor_motion);
     struct wlr_pointer_motion_event *event = data;
-    wlr_cursor_move(server->cursor, &event->pointer->base, event->delta_x, event->delta_y);
+    if (server->current_constraint &&
+        server->current_constraint->type == WLR_POINTER_CONSTRAINT_V1_LOCKED &&
+        server->seat->pointer_state.focused_surface == server->current_constraint->surface) {
+        return;
+    }
+
+    double dx = event->delta_x;
+    double dy = event->delta_y;
+    if (server->current_constraint &&
+        server->current_constraint->type == WLR_POINTER_CONSTRAINT_V1_CONFINED) {
+        woodland_pointer_constraint_apply(server, &dx, &dy);
+    }
+
+    wlr_cursor_move(server->cursor, &event->pointer->base, dx, dy);
     woodland_cursor_process_motion(server, event->time_msec);
 }
 

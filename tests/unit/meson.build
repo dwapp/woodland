@@ -101,6 +101,12 @@ test_drm_lease = executable('test_drm_lease', 'test_drm_lease.c',
   link_with: [protocol_lib, output_lib, cursor_lib, shell_lib, seat_lib, session_lock_lib, ime_lib, workspace_lib, layer_lib, ssd_lib, capture_lib, util_lib])
 test('drm_lease', test_drm_lease)
 
+test_pointer_constraints = executable('test_pointer_constraints', 'test_pointer_constraints.c',
+  dependencies: [wlroots, wayland_server],
+  include_directories: woodland_inc,
+  link_with: [cursor_lib, protocol_lib, output_lib, shell_lib, seat_lib, session_lock_lib, ime_lib, workspace_lib, layer_lib, ssd_lib, capture_lib, util_lib])
+test('pointer_constraints', test_pointer_constraints)
+
 test_config = executable('test_config', 'test_config.c',
   dependencies: [wlroots, wayland_server, xkbcommon],
   include_directories: woodland_inc,
