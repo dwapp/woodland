@@ -104,6 +104,13 @@ static void handle_new_output(struct wl_listener *listener, void *data)
         }
     }
 
+    /* 非桌面显示设备（如 VR 头显），不加入桌面输出布局与渲染，留给 DRM lease 租用 */
+    if (wlr_output->non_desktop) {
+        wlr_log(WLR_INFO, "output %s is non-desktop, skipping desktop configuration",
+                wlr_output->name);
+        return;
+    }
+
     /* ---- 1. 建壳：分配 woodland_output 并接通渲染 ---- */
     output = calloc(1, sizeof(*output));
     if (!output) {

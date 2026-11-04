@@ -73,10 +73,13 @@ static void handle_request_set_shape(struct wl_listener *listener, void *data)
 static void handle_new_output_broadcast(struct wl_listener *listener, void *data)
 {
     struct woodland_server *server = wl_container_of(listener, server, new_output_broadcast);
+    struct wlr_output *wlr_output = data;
+    if (wlr_output && wlr_output->non_desktop) {
+        return;
+    }
     /* 协议层可能还没初始化（headless 的首个输出早于 protocol init），
      * 那种情况由 woodland_protocol_init 末尾的补广播覆盖 */
     woodland_protocol_output_changed(server);
-    (void)data;
 }
 
 bool woodland_server_init(struct woodland_server *server)

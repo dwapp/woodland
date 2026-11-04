@@ -10,6 +10,8 @@ struct woodland_proto_idle;
 struct woodland_proto_output;
 struct woodland_proto_input;
 struct woodland_proto_window;
+struct woodland_proto_drm_lease;
+struct wlr_output;
 struct wlr_viewporter;
 struct wlr_presentation;
 
@@ -37,6 +39,7 @@ struct woodland_proto {
     struct woodland_proto_output *output;  /* output.c */
     struct woodland_proto_input *input;    /* input.c  */
     struct woodland_proto_window *window;  /* window.c */
+    struct woodland_proto_drm_lease *drm_lease; /* drm_lease.c */
 };
 
 /* 空闲与抑制族（idle.c）：idle-notify / idle-inhibit / keyboard-shortcuts-inhibit */
@@ -60,5 +63,13 @@ void woodland_proto_input_attach_device(struct woodland_proto *proto,
 /* 窗口族（window.c）：xdg-activation / xdg-toplevel-tag */
 bool woodland_proto_window_init(struct woodland_proto *proto);
 void woodland_proto_window_finish(struct woodland_proto *proto);
+
+/* DRM 租借族（drm_lease.c）：wp_drm_lease_device_v1 */
+bool woodland_proto_drm_lease_init(struct woodland_proto *proto);
+void woodland_proto_drm_lease_finish(struct woodland_proto *proto);
+void woodland_proto_drm_lease_offer_output(struct woodland_proto *proto,
+                                           struct wlr_output *output);
+void woodland_proto_drm_lease_withdraw_output(struct woodland_proto *proto,
+                                              struct wlr_output *output);
 
 #endif
