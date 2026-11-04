@@ -95,6 +95,12 @@ test_listener = executable('test_listener', 'test_listener.c',
   link_with: util_lib)
 test('listener', test_listener)
 
+test_drm_lease = executable('test_drm_lease', 'test_drm_lease.c',
+  dependencies: [wlroots, wayland_server],
+  include_directories: woodland_inc,
+  link_with: [protocol_lib, output_lib, cursor_lib, shell_lib, seat_lib, session_lock_lib, ime_lib, workspace_lib, layer_lib, ssd_lib, capture_lib, util_lib])
+test('drm_lease', test_drm_lease)
+
 test_config = executable('test_config', 'test_config.c',
   dependencies: [wlroots, wayland_server, xkbcommon],
   include_directories: woodland_inc,

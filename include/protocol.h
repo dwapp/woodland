@@ -6,6 +6,7 @@
 
 struct woodland_server;
 struct wlr_input_device;
+struct wlr_output;
 
 /*
  * 上游协议接线（src/protocol）。
@@ -25,13 +26,13 @@ struct wlr_input_device;
  *   语义完整：viewporter、presentation-time、primary-selection、
  *             idle-notify、idle-inhibit、keyboard-shortcuts-inhibit、
  *             output-power-management、output-management、gamma-control、
- *             relative-pointer、pointer-gestures、xdg-activation
+ *             drm-lease、relative-pointer、pointer-gestures、xdg-activation
  *             —— 客户端请求会真的影响合成器行为。
  *   仅记录：  xdg-toplevel-tag（存下来、经 wctl 可见，但暂不参与窗口规则）。
  *   暂不接线：security-context（无沙箱校验时声明"我是沙箱"反而是假安全）、
  *             tearing-control（要改 scene 的 commit 路径传 tearing 位，
  *             属单独一版）、content-type（scene 不消费）、
- *             session-lock / pointer-constraints / xdg-foreign / drm-lease
+ *             session-lock / pointer-constraints / xdg-foreign
  *             （各自需要一套独立状态机，见里程碑文档）。
  */
 bool woodland_protocol_init(struct woodland_server *server);
@@ -60,4 +61,12 @@ bool woodland_protocol_shortcuts_inhibited(struct woodland_server *server);
  */
 void woodland_protocol_output_changed(struct woodland_server *server);
 
+
+/** 将 DRM 输出提议给 DRM lease 管理器 */
+void woodland_protocol_offer_drm_lease(struct woodland_server *server,
+                                       struct wlr_output *output);
+
+/** 从 DRM lease 管理器撤回 DRM 输出提议 */
+void woodland_protocol_withdraw_drm_lease(struct woodland_server *server,
+                                          struct wlr_output *output);
 #endif

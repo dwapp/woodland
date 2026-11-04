@@ -66,6 +66,17 @@ int main(void) {
     wl_list_for_each(o, &server.outputs, link) n++;
     assert(n == 1);
 
+    /* 非桌面输出（如 VR 头显）：不应配置为桌面输出 */
+    struct wlr_output *vr_out = wlr_headless_add_output(server.backend, 1440, 1600);
+    assert(vr_out != NULL);
+    vr_out->non_desktop = true;
+    wl_signal_emit_mutable(&server.backend->events.new_output, vr_out);
+    assert(vr_out->data == NULL);
+    size_t n_after_vr = 0;
+    wl_list_for_each(o, &server.outputs, link) n_after_vr++;
+    assert(n_after_vr == 1);
+    wlr_output_destroy(vr_out);
+
     /* 拔除：信号必须发出一次，且发出时该输出已不在链表里 */
     struct removed_probe probe = { .server = &server };
     probe.listener.notify = handle_removed;

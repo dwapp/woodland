@@ -77,6 +77,9 @@ bool woodland_protocol_init(struct woodland_server *server) {
     if (!woodland_proto_window_init(proto)) {
         return false;
     }
+    if (!woodland_proto_drm_lease_init(proto)) {
+        return false;
+    }
 
     /* 已有输出可能早于本模块建好，补一次广播让客户端看到初始状态 */
     woodland_proto_output_broadcast(proto);
@@ -90,6 +93,7 @@ void woodland_protocol_finish(struct woodland_server *server) {
     }
 
     /* 逆序拆：与 init 对称，后建的先摘 */
+    woodland_proto_drm_lease_finish(proto);
     woodland_proto_window_finish(proto);
     woodland_proto_input_finish(proto);
     woodland_proto_output_finish(proto);
@@ -118,4 +122,20 @@ void woodland_protocol_output_changed(struct woodland_server *server) {
         return;
     }
     woodland_proto_output_broadcast(server->proto);
+}
+
+void woodland_protocol_offer_drm_lease(struct woodland_server *server,
+                                       struct wlr_output *output) {
+    if (!server || !server->proto) {
+        return;
+    }
+    woodland_proto_drm_lease_offer_output(server->proto, output);
+}
+
+void woodland_protocol_withdraw_drm_lease(struct woodland_server *server,
+                                          struct wlr_output *output) {
+    if (!server || !server->proto) {
+        return;
+    }
+    woodland_proto_drm_lease_withdraw_output(server->proto, output);
 }
