@@ -38,12 +38,13 @@ meson test -C build --print-errorlogs  # 跑全部测试
 
 ### scenefx 必读（常开，不是可选特性）
 
-场景库固定是 scenefx 0.5，它**自带一套同名 `wlr_scene_*`** 符号（链接顺序 `scene_deps = [scenefx, wlroots]`），带来 blur / 圆角 / 阴影节点。想"关掉特效"是**运行期**的事（`[effects] enabled=false`），不存在只编一套的构建。四条硬约束：
+场景库固定是 scenefx 0.5，它**自带一套同名 `wlr_scene_*`** 符号（链接顺序 `scene_deps = [scenefx, wlroots]`），带来 blur / 圆角 / 阴影节点。想"关掉特效"是**运行期**的事（`[effects] enabled=false`），不存在只编一套的构建。五条硬约束：
 
 1. **`.c` 里只 `#include "scene.h"`，不要直接 include `wlr/types/wlr_scene.h` 或 `scenefx/...`。** `include/scene.h` 是唯一入口，混用会让同一个结构体在两个 TU 里有不同布局。
 2. **不要再加 `#if WOODLAND_HAVE_EFFECTS` 这类编译期分支。** 宏已经不存在；新增"要不要画"的判断一律走 `woodland_effect_server_enabled()` / `woodland_effect_server_blur_enabled()`。曾经因为宏判断写在 `#include "config.h"` 之前、`#if` 恒假，整段代码被静默编掉（X11 的 context destroy 监听器没了，留下悬空 view）。
 3. **场景节点坐标是"相对父节点"的，算位置时只累计子节点的偏移。** `view->scene_tree` 的原点就是内容原点（SSD 的标题栏/边框在负坐标上），把 tree 自己的 `x/y` 也加进去等于把标题栏高度算两遍——blur 节点会整体下沉一个标题栏（27px），肉眼像"模糊糊到了标题栏以外的位置"。`dump_scene` 里 `blur pos` 与内容 `buffer pos` 对不上就是这个。
 4. **`server->renderer` 必须是 `fx_renderer_create()`。** scenefx 的 `wlr_scene_output_commit()` 把 render pass 强转成自己的 `fx_render_pass`，塞 wlroots 的 pixman/gles2 renderer 进去会在 `fx_get_render_pass` 里断言死（`test_session_lock` 就是这么挂的）。它只走 EGL/GLES2：没有 DRM 渲染节点时（容器 / 纯 headless）`server.c` 会自动 `WLR_RENDERER_FORCE_SOFTWARE=1` 重试一次，落到 llvmpipe 的 surfaceless EGL。**回退不到 pixman**——scene 只认 fx render pass。
+5. **别在 1px 细条上设圆角。** `corner_radii` 按 rect 自身尺寸裁剪，1px 宽/高的边框条会把半径 clamp 掉，角上不是没线就是留直角尖角（窗口圆了、外框还是方的）。圆角描边要用一个覆盖整个外框的 rect + `clipped_region` 挖空内框：外半径 `R+b`、内半径 `R`，见 `src/ssd/ssd.c:ssd_apply_frame_corners()`。`wctl dump_scene` 的 rect 带 `corners` / `clip` 可直接核对。
 
 配置只切"画不画"，不切"记不记"：`wctl get_tree` 的 `bg_effect`、`deco.rendered`、`--trace` 在开关两侧都要能查。`[effects]` 关掉后 `get_tree` 的 `effects` / `effects_blur` 为 false、`deco.rendered` 里没有 `corner_radius`、`dump_scene` 里没有 blur 节点、ext-background-effect 的 capability 报 0（已连接的客户端会在 `reload_config` 后收到重播）。想确认"到底画没画"，查这几处，不要靠截图猜。
 
