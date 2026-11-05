@@ -75,7 +75,7 @@ struct woodland_config_cursor {
 /*
  * [effects]：圆角与模糊。
  *
- * 渲染能力是编译期固定的（scenefx 常开），这三个字段全是**运行期**开关：
+ * 编译期由 -Deffects 控制，启用时这三个字段是运行期开关：
  *
  *   enabled        总开关。false 时圆角按 0 算、不建 blur 节点、capability 报 0，
  *                  等价于"这台机器不画任何特效"，但协议状态照常记录。
