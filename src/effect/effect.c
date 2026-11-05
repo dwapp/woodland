@@ -170,6 +170,8 @@ void woodland_effect_set_blur_region(struct woodland_view *view, const pixman_re
 
 
 /* ==================== scenefx 落地 ==================== */
+#if WOODLAND_HAVE_EFFECTS
+
 
 /*
  * 这个 surface 是不是 root 自己，或者它的（可多层嵌套的）subsurface。
@@ -476,3 +478,38 @@ void woodland_effect_update(struct woodland_view *view)
     update_corners(view);
     update_blur(view);
 }
+
+#else /* !WOODLAND_HAVE_EFFECTS */
+
+void woodland_effect_update(struct woodland_view *view)
+{
+    (void)view;
+}
+
+void woodland_effect_blur_clear(struct wlr_scene_tree *tree)
+{
+    (void)tree;
+}
+
+bool woodland_effect_blur_apply(struct wlr_scene_tree *tree, struct wlr_surface *surface, int x,
+                                int y, int width, int height, const struct wlr_box *region,
+                                const struct woodland_effect_corners *corners)
+{
+    (void)tree;
+    (void)surface;
+    (void)x;
+    (void)y;
+    (void)width;
+    (void)height;
+    (void)region;
+    (void)corners;
+    return false;
+}
+
+void woodland_effect_layer_blur(struct woodland_layer_surface *layer, const struct wlr_box *region)
+{
+    (void)layer;
+    (void)region;
+}
+
+#endif

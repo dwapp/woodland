@@ -1,3 +1,5 @@
+option('effects', type: 'feature', value: 'disabled',
+       description: 'Enable scenefx-based blur/corner/shadow effects')
 option('tiling-layout', type: 'feature', value: 'disabled',
        description: 'Enable non-stacking layout modes')
 option('xwayland', type: 'feature', value: 'enabled',

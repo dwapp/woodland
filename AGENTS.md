@@ -4,7 +4,7 @@
 
 - `woodland` 是**纯 C + wlroots** 的通用轻量 Wayland 合成器，目标是**兼容 treeland 生态（主要是协议）**，但**不复刻 treeland 的全部逻辑**。单体结构（sway/labwc 风格），单用户、运行在用户 session 内。
 - 无 Qt/QML 依赖。渲染默认走 `wlr_scene` 直出；特效经 scenefx 实现且**默认关闭**。
-- wlroots 经 meson wrap 下载，**锁定 tag 0.20.2**（不跟随 master）；scenefx 锁 0.5，**是硬依赖**（scene 实现固定走它）。两者都**不 vendored**。
+- wlroots 经 meson wrap 下载，**锁定 tag 0.20.2**（不跟随 master）；scenefx 锁定 0.5（随 `effects` 选项启用）。两者都**不 vendored**。
 - 许可证：GPL-2.0-only。
 
 ## 代码在哪里
@@ -29,24 +29,22 @@ meson test -C build --print-errorlogs  # 跑全部测试
 ```
 
 - 编译选项：`c_std=c11`、`warning_level=2` + `werror=true`（**警告即错误**）、`-DWLR_USE_UNSTABLE -D_POSIX_C_SOURCE=200809L`。
-- 特性开关在 `meson_options.txt`：`tiling-layout`（默认 false）、`xwayland`（默认 true）、`test`（默认 false，跑测试要开）。**没有 `effects` 选项**——scenefx 常开，见下一节。
+- 特性开关在 `meson_options.txt`：`effects`（默认 false）、`tiling-layout`（默认 false）、`xwayland`（默认 true）、`test`（默认 false，跑测试要开）。
 - 特性开关经 `configure_file` 生成 `build/config.h`，用 `WOODLAND_HAVE_*` 宏。
-- 冒烟测试用 headless 后端：`tests/smoke/run_headless.sh` 内部以 `WLR_BACKENDS=headless` 后台启动 + `kill -TERM` + 等退出码 0（M1 起追加 `WLR_HEADLESS_OUTPUTS=1`）。ASan 验证用 `meson setup build-asan -Db_sanitize=address,undefined -Dtest=enabled`。`WLR_RENDERER=pixman` 已经没用，不要以为写它会切渲染器。
+- 冒烟测试用 headless 后端：`tests/smoke/run_headless.sh` 内部以 `WLR_BACKENDS=headless WLR_RENDERER=pixman` 后台启动 + `kill -TERM` + 等退出码 0（M1 起追加 `WLR_HEADLESS_OUTPUTS=1`）。ASan 验证用 `meson setup build-asan -Db_sanitize=address,undefined -Dtest=enabled`。
 - **冒烟脚本一律先 `. tests/smoke/lib.sh` 再 `smoke_init <名字>`。** 失败时它把现场落到 `build/meson-logs/smoke/<名字>/`：`compositor.log`、`meta.txt`（参数 / socket / 退出码），有 `WCTL` 和 `SOCK` 时还会抓 `get_tree` / `get_focus` / `self_check` / `get_trace` / `dump_scene` 的 JSON 和一张 `screenshot.png`。脚本自己的收尾写成 `smoke_cleanup()`（dump 之后才调用），断言失败用 `smoke_fail "..."`。**不要再用 `cat 日志; exit 1`**——那正是"只有一行结论、没有现场"的老写法。
 - **CI 跑在 `archlinux:base-devel`，不要换回 `debian:stable`。** wlroots 0.20 要 wayland >= 1.24、libdrm >= 2.4.129、xkbcommon >= 1.8、pixman >= 0.43，bookworm 一个都不满足，meson 会退到 wrap 里逐个编 fallback，链条断在第一个 wayland 子项目（`Dependency "expat" not found`）。缺 expat 只是表象，补它只会把失败推到下一个依赖。
 - **顶层 `meson.build` 里给 `wlroots` 包的那层 `declare_dependency` 别删。** wlroots 作为子项目构建时，`wayland-scanner` 生成的协议头落在 `build/subprojects/wlroots/protocol/`，而它自己只导出 `include/`，于是 `wlr/types/wlr_layer_shell_v1.h` 里 `#include "wlr-layer-shell-unstable-v1-protocol.h"` 直接编译失败。系统装过 wlroots 的机器上 `/usr/include` 有这个头，问题会被掩盖——**本地能编不代表能编**。
 
-### scenefx 必读（常开，不是可选特性）
+### scenefx 必读（随 -Deffects=enabled 编译期启用）
 
-场景库固定是 scenefx 0.5，它**自带一套同名 `wlr_scene_*`** 符号（链接顺序 `scene_deps = [scenefx, wlroots]`），带来 blur / 圆角 / 阴影节点。想"关掉特效"是**运行期**的事（`[effects] enabled=false`），不存在只编一套的构建。五条硬约束：
+启用特效构建（`-Deffects=enabled`）时使用 scenefx 0.5，它**自带一套同名 `wlr_scene_*`** 符号（链接顺序 `scene_deps = [scenefx, wlroots]`），带来 blur / 圆角 / 阴影节点。在启用了 effects 的构建中，运行期还可通过 `[effects] enabled=false` 动态关闭效果。五条硬约束：
 
-1. **`.c` 里只 `#include "scene.h"`，不要直接 include `wlr/types/wlr_scene.h` 或 `scenefx/...`。** `include/scene.h` 是唯一入口，混用会让同一个结构体在两个 TU 里有不同布局。
-2. **不要再加 `#if WOODLAND_HAVE_EFFECTS` 这类编译期分支。** 宏已经不存在；新增"要不要画"的判断一律走 `woodland_effect_server_enabled()` / `woodland_effect_server_blur_enabled()`。曾经因为宏判断写在 `#include "config.h"` 之前、`#if` 恒假，整段代码被静默编掉（X11 的 context destroy 监听器没了，留下悬空 view）。
-3. **场景节点坐标是"相对父节点"的，算位置时只累计子节点的偏移。** `view->scene_tree` 的原点就是内容原点（SSD 的标题栏/边框在负坐标上），把 tree 自己的 `x/y` 也加进去等于把标题栏高度算两遍——blur 节点会整体下沉一个标题栏（27px），肉眼像"模糊糊到了标题栏以外的位置"。`dump_scene` 里 `blur pos` 与内容 `buffer pos` 对不上就是这个。
-4. **`server->renderer` 必须是 `fx_renderer_create()`。** scenefx 的 `wlr_scene_output_commit()` 把 render pass 强转成自己的 `fx_render_pass`，塞 wlroots 的 pixman/gles2 renderer 进去会在 `fx_get_render_pass` 里断言死（`test_session_lock` 就是这么挂的）。它只走 EGL/GLES2：没有 DRM 渲染节点时（容器 / 纯 headless）`server.c` 会自动 `WLR_RENDERER_FORCE_SOFTWARE=1` 重试一次，落到 llvmpipe 的 surfaceless EGL。**回退不到 pixman**——scene 只认 fx render pass。
-5. **别在 1px 细条上设圆角。** `corner_radii` 按 rect 自身尺寸裁剪，1px 宽/高的边框条会把半径 clamp 掉，角上不是没线就是留直角尖角（窗口圆了、外框还是方的）。圆角描边要用一个覆盖整个外框的 rect + `clipped_region` 挖空内框：外半径 `R+b`、内半径 `R`，见 `src/ssd/ssd.c:ssd_apply_frame_corners()`。`wctl dump_scene` 的 rect 带 `corners` / `clip` 可直接核对。
-
-配置只切"画不画"，不切"记不记"：`wctl get_tree` 的 `bg_effect`、`deco.rendered`、`--trace` 在开关两侧都要能查。`[effects]` 关掉后 `get_tree` 的 `effects` / `effects_blur` 为 false、`deco.rendered` 里没有 `corner_radius`、`dump_scene` 里没有 blur 节点、ext-background-effect 的 capability 报 0（已连接的客户端会在 `reload_config` 后收到重播）。想确认"到底画没画"，查这几处，不要靠截图猜。
+1. **`.c` 里只 `#include "scene.h"`，不要直接 include `wlr/types/wlr_scene.h` 或 `scenefx/...`。** `include/scene.h` 是唯一入口，按 `WOODLAND_HAVE_EFFECTS` 宏切入正确的场景头文件。
+2. **宏判断必须在 `#include "config.h"` 之后。** 避免未定义宏直接参与 `#if` 判断被当作 0 处理。
+3. **场景节点坐标是"相对父节点"的，算位置时只累计子节点的偏移。** `view->scene_tree` 的原点就是内容原点（SSD 的标题栏/边框在负坐标上），把 tree 自己的 `x/y` 也加进去等于把标题栏高度算两遍——blur 节点会整体下沉一个标题栏（27px）。
+4. **启用 effects 时 `server->renderer` 必须是 `fx_renderer_create()`。** scenefx 的 `wlr_scene_output_commit()` 把 render pass 强转成自己的 `fx_render_pass`，塞 wlroots 的 pixman/gles2 renderer 进去会在 `fx_get_render_pass` 里断言死。未启用 effects 构建时则走 `wlr_renderer_autocreate()` 直出 pixman/gles2。
+5. **别在 1px 细条上设圆角。** `corner_radii` 按 rect 自身尺寸裁剪，1px 宽/高的边框条会把半径 clamp 掉，角上不是没线就是留直角尖角。圆角描边在 effects 构建下用覆盖整个外框的 rect + `clipped_region` 挖空内框：外半径 `R+b`、内半径 `R`，见 `src/ssd/ssd.c:ssd_apply_frame_corners()`。
 
 ## 调试接口（wctl）
 

@@ -72,7 +72,8 @@ static const struct ipc_field_doc get_tree_fields[] = {
     {"ipc", "str", "debug socket path"},
     {"placement_policy", "str", "cascade | center | cursor | autoplace"},
     {"self_check", "bool", "--self-check was given at startup"},
-    {"effects", "bool", "[effects] enabled && blur: runtime blur capability"},
+    {"effects", "bool", "[effects] enabled: runtime effects master switch"},
+    {"effects_blur", "bool", "[effects] enabled && blur: runtime blur capability"},
     {"outputs", "obj[]",
      "name, enabled, box[x,y,w,h], workarea, width, "
      "height, scale (per-mille)"},
@@ -421,11 +422,13 @@ static void append_view_details(struct woodland_server *server, struct woodland_
         woodland_json_arr_sep(&rendered);
         woodland_json_string(out, "titlebar");
     }
+#if WOODLAND_HAVE_EFFECTS
     if (view->ssd_overrides.corner_radius_set &&
         woodland_effect_server_enabled(view->server)) {
         woodland_json_arr_sep(&rendered);
         woodland_json_string(out, "corner_radius");
     }
+#endif
     woodland_json_arr_close(&rendered);
     woodland_json_obj_close(&deco);
 
@@ -462,9 +465,15 @@ static void ipc_get_tree(struct woodland_server *server, struct woodland_json *o
     woodland_json_obj_bool(&obj, "self_check", server->self_check);
     /* 这台合成器此刻会不会画圆角/模糊：脚本据此决定 deco.rendered 的期望值。
      * 编译期没有开关了，这里是 [effects] enabled 的实时值。 */
+#if WOODLAND_HAVE_EFFECTS
     woodland_json_obj_bool(&obj, "effects", woodland_effect_server_enabled(server));
     woodland_json_obj_bool(&obj, "effects_blur",
                            woodland_effect_server_blur_enabled(server));
+#else
+    (void)server;
+    woodland_json_obj_bool(&obj, "effects", false);
+    woodland_json_obj_bool(&obj, "effects_blur", false);
+#endif
 
     woodland_json_obj_key(&obj, "outputs");
     append_outputs(server, out);
@@ -557,6 +566,7 @@ static void dump_node(struct scene_dump_ctx *ctx, struct wlr_scene_node *node, i
     case WLR_SCENE_NODE_BUFFER:
         woodland_json_obj_str(&obj, "type", "buffer");
         break;
+#if WOODLAND_HAVE_EFFECTS
     /*
      * 模糊节点只在客户端声明了 blur 时才存在。dump_scene 是排查"画了但看不见"
      * 的第一现场，所以宁可把 blur 节点的尺寸/四角也吐出来，也不要让它掉进
@@ -568,6 +578,7 @@ static void dump_node(struct scene_dump_ctx *ctx, struct wlr_scene_node *node, i
     case WLR_SCENE_NODE_OPTIMIZED_BLUR:
         woodland_json_obj_str(&obj, "type", "optimized_blur");
         break;
+#endif
     default:
         woodland_json_obj_str(&obj, "type", "unknown");
         break;
@@ -588,6 +599,7 @@ static void dump_node(struct scene_dump_ctx *ctx, struct wlr_scene_node *node, i
         }
         woodland_json_obj_key(&obj, "rgba");
         woodland_json_int_array(out, rgba, 4);
+#if WOODLAND_HAVE_EFFECTS
         /*
          * 圆角描边的两半：外圆角 + 挖空内框。边框"看着还是直角"时先看这里
          * ——只在 1px 细条上设 corners 会被尺寸 clamp 掉，必须有 clip 才是描边。
@@ -609,13 +621,16 @@ static void dump_node(struct scene_dump_ctx *ctx, struct wlr_scene_node *node, i
         woodland_json_obj_key(&clip, "corners");
         woodland_json_int_array(out, clip_corners, 4);
         woodland_json_obj_close(&clip);
+#endif
     } else if (node->type == WLR_SCENE_NODE_BUFFER) {
         struct wlr_scene_buffer *buffer = wlr_scene_buffer_from_node(node);
         woodland_json_obj_int(&obj, "w", buffer->dst_width);
         woodland_json_obj_int(&obj, "h", buffer->dst_height);
         woodland_json_obj_int(&obj, "opacity", (int)(buffer->opacity * 100.0f + 0.5f));
         woodland_json_obj_bool(&obj, "has_buffer", buffer->buffer != NULL);
-    } else if (node->type == WLR_SCENE_NODE_BLUR) {
+    }
+#if WOODLAND_HAVE_EFFECTS
+    else if (node->type == WLR_SCENE_NODE_BLUR) {
         struct wlr_scene_blur *blur = wlr_scene_blur_from_node(node);
         woodland_json_obj_int(&obj, "w", blur->width);
         woodland_json_obj_int(&obj, "h", blur->height);
@@ -624,6 +639,7 @@ static void dump_node(struct scene_dump_ctx *ctx, struct wlr_scene_node *node, i
         woodland_json_obj_key(&obj, "corners");
         woodland_json_int_array(out, corners, 4);
     }
+#endif
 
     if (node->type == WLR_SCENE_NODE_TREE && depth < ctx->max_depth) {
         struct wlr_scene_tree *tree = wlr_scene_tree_from_node(node);

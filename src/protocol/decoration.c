@@ -255,12 +255,17 @@ static void context_set_corner_radius(struct wl_client *client, struct wl_resour
      * 圆角能不能真的画出来取决于运行期配置（[effects] enabled）。轨迹里写清楚
      * 是哪一种，免得排查的人以为是自己没生效。
      */
+#if WOODLAND_HAVE_EFFECTS
     if (woodland_effect_server_enabled(view->server)) {
         woodland_trace_add("deco", view->id, "corner_radius=%u", radius);
     } else {
         woodland_trace_add("deco", view->id,
                            "corner_radius=%u recorded (effects disabled)", radius);
     }
+#else
+    woodland_trace_add("deco", view->id,
+                       "corner_radius=%u recorded (no render backend)", radius);
+#endif
     context_apply(ctx);
 }
 
@@ -382,6 +387,8 @@ static void context_resource_destroy(struct wl_resource *resource)
         view->ssd_overrides.shadow_set = false;
         woodland_trace_add("deco", view->id, "context destroyed, border/radius/shadow reverted");
         woodland_ssd_deco_changed(view);
+        /* CSD 视图没有 SSD，ssd_update 不会替它重算圆角 */
+        woodland_effect_update(view);
     }
     if (ctx->surface_destroy.link.prev) {
         wl_list_remove(&ctx->surface_destroy.link);

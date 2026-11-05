@@ -423,6 +423,7 @@ int main(int argc, char *argv[])
 
     /* 上下文建在 map 之前：覆盖值要在 SSD 创建那一刻就读到 */
     int want_dup = 0;
+    int want_inert_error = 0;
     int no_context = 0;
     int drop_context = 0;
     int drop_effect = 0;
@@ -535,6 +536,8 @@ int main(int argc, char *argv[])
             treeland_decoration_context_v1_set_shadow(deco_ctx, radius, dx, dy, r, g, b, a);
         } else if (strcmp(argv[i], "dup") == 0) {
             want_dup = 1;
+        } else if (strcmp(argv[i], "inert-error") == 0) {
+            want_inert_error = 1;
         } else {
             fprintf(stderr, "unknown argument: %s\n", argv[i]);
             return 1;
@@ -552,6 +555,26 @@ int main(int argc, char *argv[])
         print_protocol_error();
         return 3;
     }
+    /* surface 销毁后设 blur region：合成器必须报 surface_destroyed 协议错误 */
+    if (want_inert_error) {
+        if (!bg_effect_manager) {
+            fprintf(stderr, "ext_background_effect_manager_v1 not advertised\n");
+            return 1;
+        }
+        struct wl_surface *bare = wl_compositor_create_surface(compositor);
+        struct ext_background_effect_surface_v1 *bare_bg =
+            ext_background_effect_manager_v1_get_background_effect(bg_effect_manager, bare);
+        wl_surface_destroy(bare);
+        ext_background_effect_surface_v1_set_blur_region(bare_bg, NULL);
+        wl_display_flush(display);
+        if (pump(1000) == 0) {
+            fprintf(stderr, "FAIL: set_blur_region on destroyed surface was accepted\n");
+            return 1;
+        }
+        print_protocol_error();
+        return 3;
+    }
+
 
     /* 等 configure → ack → 上 buffer：这一步之后窗口才算 map 了 */
     wl_surface_commit(surface);

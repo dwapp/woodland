@@ -14,9 +14,9 @@ add_project_arguments([
   '-D_POSIX_C_SOURCE=200809L',
 ], language: 'c')
 
-# scenefx 是硬依赖：scene 实现固定走它（模糊/圆角是否生效由 [effects] 运行期决定，
-# 不再有编译期开关）。它和 wlroots 的 scene 符号同名，链接顺序决定谁生效。
-scenefx = dependency('scenefx-0.5', fallback: 'scenefx')
+# scenefx（随 effects 选项，默认不启用；wrap 文件保留作占位）
+scenefx = dependency('scenefx-0.5', fallback: 'scenefx',
+                     required: get_option('effects'))
 # wlroots（锁定 0.20.x）
 wlroots_version = ['>=0.20.0', '<0.21.0']
 wlroots_sub = subproject('wlroots', default_options: ['examples=false'],
@@ -49,13 +49,18 @@ conf_data = configuration_data()
 conf_data.set10('WOODLAND_HAVE_XWAYLAND',
                 get_option('xwayland').allowed())
 
+conf_data.set10('WOODLAND_HAVE_EFFECTS',
+                get_option('effects').enabled() and scenefx.found())
 conf_data.set10('WOODLAND_HAVE_LIBRSVG', rsvg_dep.found())
 configure_file(output: 'config.h', configuration: conf_data)
 
-# scenefx 换掉 wlroots 的 scene 与 renderer，两边符号同名，链接顺序决定谁生效
-# ——scenefx 必须排在 wlroots 之前。需要 scene 的模块统一依赖 scene_deps，
-# 不要在各自的 meson.build 里写死 wlroots。
-scene_deps = [scenefx, wlroots]
+# scene 走哪套实现由 effects 决定：scenefx 换掉 wlroots 的 scene 与 renderer，
+# 两边的符号同名，链接顺序决定谁生效——scenefx 必须排在 wlroots 之前。
+# 需要 scene 的模块统一依赖 scene_deps，不要在各自的 meson.build 里写死 wlroots。
+scene_deps = [wlroots]
+if get_option('effects').enabled() and scenefx.found()
+  scene_deps = [scenefx, wlroots]
+endif
 
 subdir('include')
 subdir('src')
