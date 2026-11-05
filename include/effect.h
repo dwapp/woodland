@@ -6,7 +6,10 @@
 #include <stdbool.h>
 #include <wlr/util/box.h>
 
+struct woodland_layer_surface;
 struct woodland_view;
+struct wlr_scene_tree;
+struct wlr_surface;
 
 /*
  * 四角圆角半径。顺序与 scenefx 的 fx_corner_radii 一致（顺时针），
@@ -37,6 +40,43 @@ struct woodland_effect_state {
  * 优先级：客户端的 treeland-decoration 覆盖 > [effects] corner_radius。
  */
 int woodland_effect_corner_radius(const struct woodland_view *view);
+
+/**
+ * 单个 buffer 在这一块窗口里该用哪几个角（纯函数）。
+ *
+ * 一个窗口不止一块 buffer：客户端用 subsurface 放视频、放输入法、放菜单时，
+ * 那些 buffer 画在内容之上，会把父 surface 的圆角重新盖成直角——右下角有
+ * 一块全屏大小的 subsurface，窗口右下就露一个尖角。所以每个 buffer 单独算：
+ * 只有它自己贴到窗口的那条边上的角才跟着圆，中间的 buffer 一律直角。
+ *
+ * x/y/width/height 是这个 buffer 在窗口坐标系里的位置与尺寸，
+ * window_width/window_height 是窗口（surface）尺寸。越界按贴边算。
+ */
+void woodland_effect_buffer_corners(const struct woodland_effect_corners *window_corners, int x,
+                                    int y, int width, int height, int window_width,
+                                    int window_height, struct woodland_effect_corners *out);
+
+/**
+ * 给任意 scene tree 挂/更新一块模糊（view 与 layer surface 共用，见 effect.c）。
+ *
+ * x/y/width/height 是 blur 节点在 tree 里的位置与尺寸，region 是 surface 局部
+ * 坐标的裁剪区（NULL = 关掉模糊），corners 为 NULL 表示直角。返回是否真的
+ * 画了（默认构建里恒为 false）。
+ */
+bool woodland_effect_blur_apply(struct wlr_scene_tree *tree, struct wlr_surface *surface, int x,
+                                int y, int width, int height, const struct wlr_box *region,
+                                const struct woodland_effect_corners *corners);
+
+/** 关掉 tree 上那块模糊（节点留着，下次不用重建）。 */
+void woodland_effect_blur_clear(struct wlr_scene_tree *tree);
+
+/**
+ * layer surface 的模糊（面板、Dock、启动器这些没有装饰的 surface）。
+ *
+ * region 是 surface 局部坐标的包围盒，NULL = 撤掉。layer surface 没有标题栏，
+ * 也不圆角，所以这里只处理"糊哪一块"。
+ */
+void woodland_effect_layer_blur(struct woodland_layer_surface *layer, const struct wlr_box *region);
 
 /**
  * 把半径摊到四个角上（纯函数，单测直接喂参数）。

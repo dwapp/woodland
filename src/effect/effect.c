@@ -15,14 +15,20 @@
  *   有标题栏 → 上沿被标题栏盖住，内容只圆下角，上角由 SSD 的矩形自己圆；
  *   无标题栏 / CSD → 四角都圆；
  *   最大化 / 全屏 → 直角（否则屏幕边缘会透出后面的画面）。
+ *
+ * 模糊单独由客户端经 ext-background-effect 声明（view 与 layer surface 都有，
+ * 见 woodland_effect_blur_apply）；"用哪个 surface 做遮罩"这类判断也在这里，
+ * 协议层只管交一个 surface 局部坐标的 region。
  */
 #include <string.h>
 
 #include <wlr/types/wlr_compositor.h>
+#include <wlr/types/wlr_subcompositor.h>
 #include <wlr/util/box.h>
 #include <wlr/util/log.h>
 
 #include "effect.h"
+#include "layer.h"
 #include "scene.h"
 #include "ssd.h"
 #include "view.h"
@@ -78,6 +84,30 @@ void woodland_effect_corners(const struct woodland_view *view, struct woodland_e
     }
 }
 
+void woodland_effect_buffer_corners(const struct woodland_effect_corners *window_corners, int x,
+                                    int y, int width, int height, int window_width,
+                                    int window_height, struct woodland_effect_corners *out)
+{
+    if (!out) {
+        return;
+    }
+    struct woodland_effect_corners none = {0};
+    if (!window_corners || width <= 0 || height <= 0) {
+        *out = none;
+        return;
+    }
+    /* 贴边算"<=/>="，subsurface 可以比父 surface 稍微越界 */
+    bool at_left = x <= 0;
+    bool at_top = y <= 0;
+    bool at_right = x + width >= window_width;
+    bool at_bottom = y + height >= window_height;
+
+    out->top_left = (at_left && at_top) ? window_corners->top_left : 0;
+    out->top_right = (at_right && at_top) ? window_corners->top_right : 0;
+    out->bottom_right = (at_right && at_bottom) ? window_corners->bottom_right : 0;
+    out->bottom_left = (at_left && at_bottom) ? window_corners->bottom_left : 0;
+}
+
 bool woodland_effect_blur_box(const pixman_region32_t *region, int width, int height,
                               struct wlr_box *out)
 {
@@ -124,21 +154,50 @@ void woodland_effect_set_blur_region(struct woodland_view *view, const pixman_re
     woodland_effect_update(view);
 }
 
+
 /* ==================== scenefx 落地 ==================== */
 
 #if WOODLAND_HAVE_EFFECTS
 
-/* 内容 surface 在 scene 树里的那个 buffer 节点（xdg 与 x11 布局不同，按 surface 认） */
-static struct wlr_scene_buffer *find_surface_buffer(struct wlr_scene_node *node,
-                                                    struct wlr_surface *surface, int depth)
+/*
+ * 这个 surface 是不是 root 自己，或者它的（可多层嵌套的）subsurface。
+ * 圆角要按 buffer 算，就得先确认哪些 buffer 属于这个窗口——同一棵树里
+ * 还可能有 popup 之类的别人的东西。
+ */
+static bool surface_belongs_to(struct wlr_surface *surface, struct wlr_surface *root)
 {
-    if (depth > 3) {
-        return NULL; /* xdg 树最深两层，再深就不是内容节点了 */
+    for (int depth = 0; surface && depth < 4; depth++) {
+        if (surface == root) {
+            return true;
+        }
+        struct wlr_subsurface *sub = wlr_subsurface_try_from_wlr_surface(surface);
+        if (!sub) {
+            return false;
+        }
+        surface = sub->parent;
     }
+    return false;
+}
+
+/*
+ * 内容 surface 在 scene 树里的那个 buffer 节点（xdg 与 x11 布局不同，按 surface 认）。
+ * 顺带把它的绝对坐标带出去：blur 节点要贴在 buffer 上，而 buffer->node.x 只是
+ * 相对父节点的偏移，CSD 客户端（geometry 与 surface 原点不同）照着摆会偏。
+ */
+static struct wlr_scene_buffer *find_surface_buffer_at(struct wlr_scene_node *node,
+                                                       struct wlr_surface *surface, int base_x,
+                                                       int base_y, int *out_x, int *out_y)
+{
     if (node->type == WLR_SCENE_NODE_BUFFER) {
         struct wlr_scene_buffer *buffer = wlr_scene_buffer_from_node(node);
         struct wlr_scene_surface *scene_surface = wlr_scene_surface_try_from_buffer(buffer);
         if (scene_surface && scene_surface->surface == surface) {
+            if (out_x) {
+                *out_x = base_x + node->x;
+            }
+            if (out_y) {
+                *out_y = base_y + node->y;
+            }
             return buffer;
         }
         return NULL;
@@ -150,7 +209,8 @@ static struct wlr_scene_buffer *find_surface_buffer(struct wlr_scene_node *node,
     struct wlr_scene_node *child;
     wl_list_for_each(child, &tree->children, link)
     {
-        struct wlr_scene_buffer *found = find_surface_buffer(child, surface, depth + 1);
+        struct wlr_scene_buffer *found = find_surface_buffer_at(
+            child, surface, base_x + node->x, base_y + node->y, out_x, out_y);
         if (found) {
             return found;
         }
@@ -158,13 +218,37 @@ static struct wlr_scene_buffer *find_surface_buffer(struct wlr_scene_node *node,
     return NULL;
 }
 
-static struct wlr_scene_blur *find_blur_node(struct woodland_view *view)
+/*
+ * 在 tree 里找内容 buffer，坐标相对于 tree 自身（不是相对场景根）。
+ *
+ * 从"tree 的子节点"开始走而不是从 tree 本身：tree 自己的 x/y 就是这个坐标系
+ * 的原点，把它加进去会让 blur 节点整体偏移一个标题栏（曾经真的这么偏过）。
+ */
+static struct wlr_scene_buffer *find_surface_buffer(struct wlr_scene_tree *tree,
+                                                    struct wlr_surface *surface, int *out_x,
+                                                    int *out_y)
 {
-    if (!view->scene_tree) {
+    if (!tree) {
+        return NULL;
+    }
+    struct wlr_scene_node *child;
+    wl_list_for_each(child, &tree->children, link)
+    {
+        struct wlr_scene_buffer *found = find_surface_buffer_at(child, surface, 0, 0, out_x, out_y);
+        if (found) {
+            return found;
+        }
+    }
+    return NULL;
+}
+
+static struct wlr_scene_blur *find_blur_node(struct wlr_scene_tree *tree)
+{
+    if (!tree) {
         return NULL;
     }
     struct wlr_scene_node *node;
-    wl_list_for_each(node, &view->scene_tree->children, link)
+    wl_list_for_each(node, &tree->children, link)
     {
         if (node->type == WLR_SCENE_NODE_BLUR) {
             return wlr_scene_blur_from_node(node);
@@ -179,18 +263,66 @@ static struct fx_corner_radii to_fx(const struct woodland_effect_corners *corner
                             corners->bottom_left);
 }
 
+/*
+ * 逐 buffer 下发圆角。父 surface 的 buffer 通常占满窗口，四个角都对得上；
+ * subsurface（视频、输入法、自带子窗口的客户端）画在它上面，如果原样留直角，
+ * 窗口边缘就会露出一块尖角——所以每个 buffer 只圆自己贴边的那几个角。
+ */
+static void apply_corners_at(struct wlr_scene_node *node, struct wlr_surface *root, int base_x,
+                             int base_y, int width, int height,
+                             const struct woodland_effect_corners *corners)
+{
+    if (node->type == WLR_SCENE_NODE_BUFFER) {
+        struct wlr_scene_buffer *buffer = wlr_scene_buffer_from_node(node);
+        struct wlr_scene_surface *scene_surface = wlr_scene_surface_try_from_buffer(buffer);
+        if (!scene_surface || !surface_belongs_to(scene_surface->surface, root)) {
+            return;
+        }
+        struct woodland_effect_corners per_buffer;
+        woodland_effect_buffer_corners(corners, base_x + node->x, base_y + node->y,
+                                       scene_surface->surface->current.width,
+                                       scene_surface->surface->current.height, width, height,
+                                       &per_buffer);
+        wlr_scene_buffer_set_corner_radii(buffer, to_fx(&per_buffer));
+        return;
+    }
+    if (node->type != WLR_SCENE_NODE_TREE) {
+        return;
+    }
+    struct wlr_scene_tree *tree = wlr_scene_tree_from_node(node);
+    struct wlr_scene_node *child;
+    wl_list_for_each(child, &tree->children, link)
+    {
+        apply_corners_at(child, root, base_x + node->x, base_y + node->y, width, height, corners);
+    }
+}
+
+/* 同样以 tree 自身的原点为基准：半径判定要用"相对窗口"的坐标 */
+static void apply_corners_in_tree(struct wlr_scene_tree *tree, struct wlr_surface *root, int width,
+                                  int height, const struct woodland_effect_corners *corners)
+{
+    if (!tree || !root) {
+        return;
+    }
+    struct wlr_scene_node *child;
+    wl_list_for_each(child, &tree->children, link)
+    {
+        apply_corners_at(child, root, 0, 0, width, height, corners);
+    }
+}
+
 static void update_corners(struct woodland_view *view)
 {
+    if (!view->scene_tree) {
+        return;
+    }
     struct woodland_effect_corners corners;
     woodland_effect_corners(view, &corners);
 
     struct wlr_surface *surface = woodland_view_surface(view);
-    if (surface && view->scene_tree) {
-        struct wlr_scene_buffer *buffer =
-            find_surface_buffer(&view->scene_tree->node, surface, 0);
-        if (buffer) {
-            wlr_scene_buffer_set_corner_radii(buffer, to_fx(&corners));
-        }
+    if (surface) {
+        apply_corners_in_tree(view->scene_tree, surface, surface->current.width,
+                              surface->current.height, &corners);
     }
 
     /*
@@ -206,12 +338,11 @@ static void update_corners(struct woodland_view *view)
 
 static void update_blur(struct woodland_view *view)
 {
-    struct wlr_scene_blur *blur = find_blur_node(view);
-    if (!view->effect.blur || !view->scene_tree) {
-        /* 没有区域：节点留着（下次再模糊不用重建），只是不画 */
-        if (blur) {
-            wlr_scene_node_set_enabled(&blur->node, false);
-        }
+    if (!view->scene_tree) {
+        return;
+    }
+    if (!view->effect.blur) {
+        woodland_effect_blur_clear(view->scene_tree);
         return;
     }
 
@@ -221,50 +352,106 @@ static void update_blur(struct woodland_view *view)
         return;
     }
 
-    /*
-     * 节点要贴在 surface 上，而不是 scene_tree 的原点：XDG 的 geometry 原点
-     * 与 surface 原点可以不同（CSD 客户端会把阴影算进 geometry），拿 geometry
-     * 的 x/y 当位置就会整体偏。直接问真正的 buffer 节点在哪最准。
-     */
+    struct wlr_surface *surface = woodland_view_surface(view);
     int origin_x = 0;
     int origin_y = 0;
-    struct wlr_surface *surface = woodland_view_surface(view);
     if (surface) {
-        struct wlr_scene_buffer *buffer = find_surface_buffer(&view->scene_tree->node, surface, 0);
-        if (buffer) {
-            origin_x = buffer->node.x;
-            origin_y = buffer->node.y;
+        /* 只为了把 node 的绝对坐标带出来；找不到 buffer 就退回 (0,0) */
+        find_surface_buffer(view->scene_tree, surface, &origin_x, &origin_y);
+    }
+
+    struct woodland_effect_corners corners;
+    woodland_effect_corners(view, &corners);
+
+    woodland_effect_blur_apply(view->scene_tree, surface, origin_x, origin_y, content.width,
+                               content.height, &view->effect.blur_region, &corners);
+}
+
+void woodland_effect_blur_clear(struct wlr_scene_tree *tree)
+{
+    struct wlr_scene_blur *blur = find_blur_node(tree);
+    if (blur) {
+        wlr_scene_node_set_enabled(&blur->node, false);
+    }
+}
+
+bool woodland_effect_blur_apply(struct wlr_scene_tree *tree, struct wlr_surface *surface, int x,
+                                int y, int width, int height, const struct wlr_box *region,
+                                const struct woodland_effect_corners *corners)
+{
+    if (!tree) {
+        return false;
+    }
+    struct wlr_scene_blur *blur = find_blur_node(tree);
+    if (!region || width <= 0 || height <= 0) {
+        if (blur) {
+            wlr_scene_node_set_enabled(&blur->node, false);
         }
+        return false;
     }
 
     if (!blur) {
-        blur = wlr_scene_blur_create(view->scene_tree, content.width, content.height);
+        blur = wlr_scene_blur_create(tree, width, height);
         if (!blur) {
             wlr_log(WLR_ERROR, "failed to create blur node");
-            return;
+            return false;
         }
         /* 必须画在内容之前：blur 采样的是"已经画上去的东西" */
         wlr_scene_node_lower_to_bottom(&blur->node);
     }
-    wlr_scene_node_set_position(&blur->node, origin_x, origin_y);
-    wlr_scene_blur_set_size(blur, content.width, content.height);
+    wlr_scene_node_set_position(&blur->node, x, y);
+    wlr_scene_blur_set_size(blur, width, height);
 
-    struct woodland_effect_corners corners;
-    woodland_effect_corners(view, &corners);
-    wlr_scene_blur_set_corner_radii(blur, to_fx(&corners));
+    if (corners) {
+        wlr_scene_blur_set_corner_radii(blur, to_fx(corners));
+    } else {
+        wlr_scene_blur_set_corner_radii(blur, corner_radii_none());
+    }
 
     /*
-     * 协议区域是 surface 局部坐标，blur 节点也贴在 surface 原点上，两者同一个
+     * region 是 surface 局部坐标，blur 节点也贴在 surface 原点上，两者同一个
      * 坐标系，所以直接照搬——别再减 content 的原点，那会把区域整体推偏。
      * 盖满整个内容时给空裁剪区（scenefx 的语义：空 = 不裁剪）。
      */
     struct clipped_region clip = clipped_region_get_default();
-    struct wlr_box full = {.x = 0, .y = 0, .width = content.width, .height = content.height};
-    if (!wlr_box_equal(&view->effect.blur_region, &full)) {
-        clip.area = view->effect.blur_region;
+    struct wlr_box full = {.x = 0, .y = 0, .width = width, .height = height};
+    if (!wlr_box_equal(region, &full)) {
+        clip.area = *region;
     }
     wlr_scene_blur_set_clipped_region(blur, clip);
+
+    /*
+     * 只在客户端真的画了东西的地方糊：遮罩用内容 buffer 的 alpha，scenefx 据此
+     * 打一张 stencil（完全透明的像素不画模糊）。
+     *
+     * 区域是客户端自己声明的，但声明得比画得大很常见——CSD 窗口的可视范围里
+     * 有一圈是"阴影预留"的全透明边，整个 surface 声明成 blur 区域时，那一圈
+     * 会在窗口外面糊出一圈毛边。没有遮罩就只能靠客户端自己算准。
+     */
+    struct wlr_scene_buffer *mask = NULL;
+    if (surface) {
+        mask = find_surface_buffer(tree, surface, NULL, NULL);
+    }
+    wlr_scene_blur_set_transparency_mask_source(blur, mask);
+
     wlr_scene_node_set_enabled(&blur->node, true);
+    return true;
+}
+
+void woodland_effect_layer_blur(struct woodland_layer_surface *layer, const struct wlr_box *region)
+{
+    if (!layer || !layer->scene_layer_surface || !layer->layer_surface) {
+        return;
+    }
+    struct wlr_scene_tree *tree = layer->scene_layer_surface->tree;
+    struct wlr_surface *surface = layer->layer_surface->surface;
+    if (!region) {
+        woodland_effect_blur_clear(tree);
+        return;
+    }
+    /* layer surface 没有装饰：从 (0,0) 起铺满自己，四角直角 */
+    woodland_effect_blur_apply(tree, surface, 0, 0, surface->current.width,
+                               surface->current.height, region, NULL);
 }
 
 void woodland_effect_update(struct woodland_view *view)
@@ -282,6 +469,32 @@ void woodland_effect_update(struct woodland_view *view)
 void woodland_effect_update(struct woodland_view *view)
 {
     (void)view;
+}
+
+void woodland_effect_blur_clear(struct wlr_scene_tree *tree)
+{
+    (void)tree;
+}
+
+bool woodland_effect_blur_apply(struct wlr_scene_tree *tree, struct wlr_surface *surface, int x,
+                                int y, int width, int height, const struct wlr_box *region,
+                                const struct woodland_effect_corners *corners)
+{
+    (void)tree;
+    (void)surface;
+    (void)x;
+    (void)y;
+    (void)width;
+    (void)height;
+    (void)region;
+    (void)corners;
+    return false;
+}
+
+void woodland_effect_layer_blur(struct woodland_layer_surface *layer, const struct wlr_box *region)
+{
+    (void)layer;
+    (void)region;
 }
 
 #endif

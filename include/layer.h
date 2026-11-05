@@ -44,4 +44,8 @@ struct wlr_layer_surface_v1 *woodland_layer_surface_at(
     struct woodland_server *server, double lx, double ly,
     struct wlr_surface **surface, double *sx, double *sy);
 
+/* surface → layer surface 对象；不是 layer surface 时返回 NULL */
+struct woodland_layer_surface *woodland_layer_surface_from_wlr_surface(
+    struct wlr_surface *surface);
+
 #endif

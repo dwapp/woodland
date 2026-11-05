@@ -122,6 +122,23 @@ struct wlr_layer_surface_v1 *woodland_layer_surface_at(struct woodland_server *s
     return wlr_layer_surface_v1_try_from_wlr_surface(scene_surface->surface);
 }
 
+/*
+ * surface → layer surface 对象。背景模糊要按 surface 找"该把 blur 节点挂在
+ * 哪棵树上"，顶层窗口走 view，其余能挂的只有 layer surface。
+ * 对象在 handle_node_destroy 里会先清 layer_surface->data，所以这里拿到
+ * 非 NULL 就说明 scene 树还活着。
+ */
+struct woodland_layer_surface *woodland_layer_surface_from_wlr_surface(
+    struct wlr_surface *surface)
+{
+    struct wlr_layer_surface_v1 *layer_surface =
+        wlr_layer_surface_v1_try_from_wlr_surface(surface);
+    if (!layer_surface) {
+        return NULL;
+    }
+    return layer_surface->data;
+}
+
 /* ==================== layer surface 事件 ==================== */
 
 static void handle_map(struct wl_listener *listener, void *data)
