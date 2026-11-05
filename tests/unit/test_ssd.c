@@ -142,6 +142,66 @@ int main(void)
     assert(margins.left == 0 && margins.top == 0 && margins.right == 0 && margins.bottom == 0);
     view.deco_csd = false;
 
+    /* ==================== treeland-decoration 的覆盖值 ==================== */
+
+    /*
+     * 标题栏 hide：边距的 top 只剩边框，且原来标题栏那一带不再是 SSD 区域
+     * （否则用户还能拖一条看不见的标题栏）。这是"半 CSD 半 SSD"的基础。
+     */
+    view.ssd_overrides.titlebar_set = true;
+    view.ssd_overrides.titlebar_hidden = true;
+    woodland_ssd_deco_changed(&view);
+    woodland_ssd_get_margins(&view, &margins);
+    assert(margins.top == WOODLAND_SSD_BORDER_W);
+    assert(margins.left == WOODLAND_SSD_BORDER_W);
+    assert(margins.bottom == WOODLAND_SSD_BORDER_W);
+    assert(margins.right == WOODLAND_SSD_BORDER_W);
+    /* 内容原点上方 12px 原本是标题栏（可拖动），隐藏后不该再命中 */
+    assert(woodland_ssd_at(&view, 100 + 200, 100 - 12, &edges) == WOODLAND_SSD_NONE);
+    /* 标题栏隐藏不影响边框：顶部 1px 仍然可抓 */
+    assert(woodland_ssd_at(&view, 100 + 200, 100 - 0.5, &edges) == WOODLAND_SSD_BORDER_TOP);
+    assert(edges == WLR_EDGE_TOP);
+
+    /* 边框覆盖：宽度进边距（顶部仍无标题栏），颜色随覆盖值走 */
+    view.ssd_overrides.border_set = true;
+    view.ssd_overrides.border_width = 4;
+    view.ssd_overrides.border_rgba = 0xff0000ff; /* r=255 g=0 b=0 a=255 */
+    woodland_ssd_deco_changed(&view);
+    woodland_ssd_get_margins(&view, &margins);
+    assert(margins.left == 4 && margins.right == 4 && margins.bottom == 4);
+    assert(margins.top == 4);
+    /* 4px 边框：相对 x ∈ [-4,0) 命中左边缘 */
+    assert(woodland_ssd_at(&view, 100 - 2, 100 + 150, &edges) == WOODLAND_SSD_BORDER_LEFT);
+    /* 边框之外的 5px 处不再命中（抓取宽度 8 仍然向外扩，这里验证的是
+     * 边框本身的几何已经跟着覆盖值走） */
+    assert(woodland_ssd_at(&view, 100 + 200, 100 + 150, &edges) == WOODLAND_SSD_NONE);
+
+    /* 边框 0：不画边框，边距归零（隐藏标题栏 + 零边框 = 完全没有装饰） */
+    view.ssd_overrides.border_width = 0;
+    woodland_ssd_deco_changed(&view);
+    woodland_ssd_get_margins(&view, &margins);
+    assert(margins.left == 0 && margins.top == 0 && margins.right == 0 && margins.bottom == 0);
+
+    /* 恢复标题栏 + 不覆盖边框：回到配置默认（26 + 1） */
+    view.ssd_overrides.titlebar_hidden = false;
+    view.ssd_overrides.border_set = false;
+    woodland_ssd_deco_changed(&view);
+    woodland_ssd_get_margins(&view, &margins);
+    assert(margins.top == WOODLAND_SSD_TITLEBAR_H + WOODLAND_SSD_BORDER_W);
+    assert(margins.left == WOODLAND_SSD_BORDER_W);
+    /* 标题栏回来，命中区域一并恢复 */
+    assert(woodland_ssd_at(&view, 100 + 200, 100 - 12, &edges) == WOODLAND_SSD_TITLEBAR);
+
+    /* 最大化 + 隐藏标题栏：什么都不剩（原来是"只留标题栏"） */
+    view.ssd_overrides.titlebar_hidden = true;
+    view.maximized = true;
+    woodland_ssd_deco_changed(&view);
+    woodland_ssd_get_margins(&view, &margins);
+    assert(margins.left == 0 && margins.top == 0 && margins.right == 0 && margins.bottom == 0);
+    view.maximized = false;
+    view.ssd_overrides.titlebar_hidden = false;
+    woodland_ssd_deco_changed(&view);
+
     /* destroy：view->ssd 置空，scene 树级联释放 */
     woodland_ssd_destroy(&view);
     assert(view.ssd == NULL);
