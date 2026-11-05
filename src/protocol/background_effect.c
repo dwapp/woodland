@@ -23,6 +23,7 @@
 #include <wlr/util/log.h>
 
 #include "effect.h"
+#include "layer.h"
 #include "protocol_internal.h"
 #include "trace.h"
 #include "view.h"
@@ -82,6 +83,58 @@ static void bg_state_move(void *dst_data, void *src_data)
 }
 
 /*
+ * 把 current 区域推给渲染端。
+ *
+ * 目标不一定是顶层窗口：面板、Dock、启动器这些 layer surface 同样会用这个
+ * 协议（"把我身后那块糊掉"），它们没有 view 对象，得走 effect 模块的另一条
+ * 入口。两条都不匹配（cursor、输入法这类没有可挂 blur 的树）时写一条 trace
+ * 说明被忽略了，而不是让客户端以为设了就有用。
+ */
+static void bg_apply(struct woodland_bg_surface *bg)
+{
+    struct woodland_view *view = woodland_view_from_surface(bg->surface);
+    if (view) {
+        /*
+         * 状态已经落到 current：把"要糊哪一块"推给渲染端。协议层不碰 scenefx，
+         * 只交一个 surface 局部坐标的 region，换算与裁剪由 effect 模块负责。
+         */
+        woodland_effect_set_blur_region(view, &bg->current.blur_region,
+                                        bg->surface->current.width,
+                                        bg->surface->current.height);
+        woodland_trace_add("bg_effect", view->id, "blur=%s", view->effect.blur ? "on" : "off");
+        return;
+    }
+
+    struct woodland_layer_surface *layer =
+        woodland_layer_surface_from_wlr_surface(bg->surface);
+    if (layer) {
+        struct wlr_box box = {0};
+        bool on = woodland_effect_blur_box(&bg->current.blur_region, bg->surface->current.width,
+                                           bg->surface->current.height, &box);
+        woodland_effect_layer_blur(layer, on ? &box : NULL);
+        woodland_trace_add("bg_effect", 0, "layer blur=%s", on ? "on" : "off");
+        return;
+    }
+
+    woodland_trace_add("bg_effect", 0, "ignored (surface has no view or layer)");
+}
+
+/* 撤掉效果：view 清状态，layer surface 直接关掉 blur 节点 */
+static void bg_clear(struct woodland_bg_surface *bg)
+{
+    struct woodland_view *view = woodland_view_from_surface(bg->surface);
+    if (view) {
+        woodland_effect_set_blur_region(view, NULL, 0, 0);
+        return;
+    }
+    struct woodland_layer_surface *layer =
+        woodland_layer_surface_from_wlr_surface(bg->surface);
+    if (layer) {
+        woodland_effect_layer_blur(layer, NULL);
+    }
+}
+
+/*
  * 提交后：区域已经变成 current，让渲染端重算这个窗口的模糊。
  *
  * 这里没有再判断"区域变没变"：比较两个 region 的成本和重算一次 blur 节点
@@ -90,17 +143,7 @@ static void bg_state_move(void *dst_data, void *src_data)
 static void bg_state_commit(struct wlr_surface_synced *synced)
 {
     struct woodland_bg_surface *bg = wl_container_of(synced, bg, synced);
-    struct woodland_view *view = woodland_view_from_surface(bg->surface);
-    if (!view) {
-        return;
-    }
-    /*
-     * 状态已经落到 current：把"要糊哪一块"推给渲染端。协议层不碰 scenefx，
-     * 只交一个 surface 局部坐标的 region，换算与裁剪由 effect 模块负责。
-     */
-    woodland_effect_set_blur_region(view, &bg->current.blur_region, bg->surface->current.width,
-                                    bg->surface->current.height);
-    woodland_trace_add("bg_effect", view->id, "blur=%s", view->effect.blur ? "on" : "off");
+    bg_apply(bg);
 }
 
 static const struct wlr_surface_synced_impl surface_synced_impl = {
@@ -150,11 +193,8 @@ static void bg_addon_destroy(struct wlr_addon *addon)
 {
     struct woodland_bg_surface *bg = wl_container_of(addon, bg, addon);
     /* 区域随 surface 一起消失，窗口上的模糊也要跟着撤掉 */
-    struct woodland_view *view = woodland_view_from_surface(bg->surface);
     bg->inert = true;
-    if (view) {
-        woodland_effect_set_blur_region(view, NULL, 0, 0);
-    }
+    bg_clear(bg);
     bg_destroy(bg);
 }
 
@@ -169,12 +209,9 @@ static void bg_handle_resource_destroy(struct wl_resource *resource)
     if (!bg) {
         return; /* 已经随 surface 回收过了 */
     }
-    struct woodland_view *view = woodland_view_from_surface(bg->surface);
+    bg_clear(bg);
     bg_destroy(bg);
-    if (view) {
-        /* 客户端主动撤掉对象：效果立即消失（协议：区域下次提交时移除） */
-        woodland_effect_set_blur_region(view, NULL, 0, 0);
-    }
+    /* 客户端主动撤掉对象：效果立即消失（协议：区域下次提交时移除） */
 }
 
 /* ==================== surface 请求 ==================== */
