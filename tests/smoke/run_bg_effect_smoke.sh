@@ -191,6 +191,48 @@ TREE="$("$WCTL" -s "$SOCK" get_tree)" || smoke_fail "get_tree failed (drop)"
 expect '.views[0].bg_effect.blur == false' "destroyed effect must not keep blurring"
 stop_probe
 
+echo "== layer surface：面板/Dock 也能声明模糊 =="
+# 这条路径没有 view 对象：合成器得按 surface 认出 layer surface，把 blur 节点
+# 挂到它自己的场景树里。用 dump_scene 断言"到底建没建"，因为 get_tree 只列顶层窗口。
+LAYER_OUT="$XDG_RUNTIME_DIR/probe.layer.log"
+"$PROBE" --layer blur 0 0 400 300 --hold 3000 >"$LAYER_OUT" 2>&1 &
+probe_pid=$!
+i=0
+while [ "$i" -lt 120 ]; do
+    grep -q '^READY' "$LAYER_OUT" 2>/dev/null && break
+    if ! kill -0 "$probe_pid" 2>/dev/null; then
+        echo "--- layer probe output:" >&2
+        cat "$LAYER_OUT" >&2 || true
+        smoke_fail "layer probe exited before READY"
+    fi
+    sleep 0.05; i=$((i+1))
+done
+grep -q '^READY' "$LAYER_OUT" 2>/dev/null || smoke_fail "layer probe never became ready"
+[ "$(view_count)" = "0" ] || smoke_fail "layer probe must not create a toplevel view"
+LAYER_SCENE="$("$WCTL" -s "$SOCK" dump_scene)" || smoke_fail "dump_scene failed (layer)"
+layer_blur="$(echo "$LAYER_SCENE" | jq '[.. | objects | select(.type == "blur")] | length')"
+if [ "$EFFECTS" = "true" ]; then
+    [ "$layer_blur" = "1" ] || smoke_fail "layer blur must create exactly one blur node (got $layer_blur)"
+    echo "$LAYER_SCENE" | jq -e '[.. | objects | select(.type == "blur")
+        | select(.w == 400 and .h == 300 and .corners == [0, 0, 0, 0])] | length == 1' >/dev/null \
+        || smoke_fail "layer blur node must cover the surface with square corners"
+else
+    [ "$layer_blur" = "0" ] || smoke_fail "non-effects build must not blur layer surfaces"
+fi
+kill -TERM "$probe_pid" 2>/dev/null || true
+wait "$probe_pid" 2>/dev/null || true
+probe_pid=""
+# surface 没了，blur 节点必须跟着走（挂在 layer 的场景树上，不该留下悬空节点）
+i=0
+layer_blur="?"
+while [ "$i" -lt 100 ]; do
+    layer_blur="$("$WCTL" -s "$SOCK" dump_scene 2>/dev/null \
+        | jq '[.. | objects | select(.type == "blur")] | length')" || layer_blur="?"
+    [ "$layer_blur" = "0" ] && break
+    sleep 0.05; i=$((i+1))
+done
+[ "$layer_blur" = "0" ] || smoke_fail "layer blur node must go away with its surface"
+
 echo "== 决策轨迹与不变量 =="
 "$WCTL" -s "$SOCK" get_trace | jq -e '
     [.entries[] | select(.what == "bg_effect")] | length >= 3' >/dev/null \

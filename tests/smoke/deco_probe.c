@@ -24,6 +24,8 @@
  *   --caps                       打印 CAPS <flags>（bit0 = blur）
  *   --alpha <0-255>              buffer 用 ARGB8888，按该 alpha 预乘
  *   --pattern                    buffer 画彩条（不画纯灰：纯色模糊前后一样，看不出效果）
+ *   --pad <n>                    边缘 n 像素全透明（客户端"声明得比画得大"的样子）
+ *   --layer                      不建顶层窗口，改建一个 layer surface（面板/Dock 的形态）
  *
  * 退出码：0 = 正常；1 = 环境/协商失败；3 = 收到了协议错误（dup 用例）。
  */
@@ -42,6 +44,7 @@
 #include "xdg-decoration-unstable-v1-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
 #include "ext-background-effect-v1-client-protocol.h"
+#include "wlr-layer-shell-unstable-v1-client-protocol.h"
 
 #define WIDTH 400
 #define HEIGHT 300
@@ -60,6 +63,8 @@ static int want_caps;
 static struct wl_surface *surface;
 static struct xdg_surface *xdg_surface;
 static struct xdg_toplevel *toplevel;
+static struct zwlr_layer_shell_v1 *layer_shell;
+static struct zwlr_layer_surface_v1 *layer_surface_handle;
 static struct zxdg_toplevel_decoration_v1 *xdg_deco;
 static struct treeland_decoration_context_v1 *deco_ctx;
 static struct ext_background_effect_surface_v1 *bg_effect;
@@ -67,6 +72,8 @@ static int configured;
 /* buffer 外观：alpha < 255 才能看出"后面被糊了"，pattern 让模糊前后有区别 */
 static uint32_t buffer_alpha = 255;
 static int buffer_pattern;
+/* 边缘留多少像素完全不画（模拟 CSD 客户端的阴影预留区：surface 比可视区大） */
+static int buffer_pad;
 
 static const struct ext_background_effect_manager_v1_listener bg_listener;
 
@@ -132,6 +139,31 @@ static const struct xdg_toplevel_listener toplevel_listener = {
     .wm_capabilities = toplevel_wm_capabilities,
 };
 
+/*
+ * layer surface 的 configure：必须 ack 之后才能上 buffer。
+ * 尺寸用我们 set_size 申请的值，合成器可能改（这里不关心，照着 ack 即可）。
+ */
+static void layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *layer_surface,
+                                    uint32_t serial, uint32_t width, uint32_t height)
+{
+    (void)data;
+    (void)width;
+    (void)height;
+    zwlr_layer_surface_v1_ack_configure(layer_surface, serial);
+    configured = 1;
+}
+
+static void layer_surface_closed(void *data, struct zwlr_layer_surface_v1 *layer_surface)
+{
+    (void)data;
+    (void)layer_surface;
+}
+
+static const struct zwlr_layer_surface_v1_listener layer_surface_listener = {
+    .configure = layer_surface_configure,
+    .closed = layer_surface_closed,
+};
+
 static void registry_global(void *data, struct wl_registry *registry, uint32_t name,
                             const char *interface, uint32_t version)
 {
@@ -154,6 +186,9 @@ static void registry_global(void *data, struct wl_registry *registry, uint32_t n
                                              &ext_background_effect_manager_v1_interface,
                                              version < 1 ? version : 1);
         ext_background_effect_manager_v1_add_listener(bg_effect_manager, &bg_listener, NULL);
+    } else if (strcmp(interface, zwlr_layer_shell_v1_interface.name) == 0) {
+        layer_shell = wl_registry_bind(registry, name, &zwlr_layer_shell_v1_interface,
+                                       version < 4 ? version : 4);
     }
 }
 
@@ -250,6 +285,13 @@ static struct wl_buffer *create_buffer(void)
     uint32_t *pixels = data;
     for (int y = 0; y < HEIGHT; y++) {
         for (int x = 0; x < WIDTH; x++) {
+            if (buffer_pad > 0 &&
+                (x < buffer_pad || y < buffer_pad || x >= WIDTH - buffer_pad ||
+                 y >= HEIGHT - buffer_pad)) {
+                /* 整像素 0（预乘 ARGB 的全透明）：客户端声明了区域但没画这块 */
+                pixels[y * WIDTH + x] = 0;
+                continue;
+            }
             uint32_t r = 0x80, g = 0x80, b = 0x80;
             if (buffer_pattern) {
                 if (((x / 40) + (y / 40)) % 2 == 0) {
@@ -329,22 +371,54 @@ int main(int argc, char *argv[])
         return 77;
     }
 
-    surface = wl_compositor_create_surface(compositor);
-    xdg_surface = xdg_wm_base_get_xdg_surface(wm_base, surface);
-    xdg_surface_add_listener(xdg_surface, &xdg_surface_listener, NULL);
-    toplevel = xdg_surface_get_toplevel(xdg_surface);
-    xdg_toplevel_add_listener(toplevel, &toplevel_listener, NULL);
-    xdg_toplevel_set_title(toplevel, "deco-probe");
-
     /*
-     * 先谈 SSD：协议要求客户端先经 xdg-decoration 协商服务端装饰，这些
-     * set_* 才有意义。woodland 默认就是 SSD，这里仍然走一遍——把"默认
-     * 能work"和"协商后能work"混为一谈，换个合成器就露馅。
+     * --layer：换成 layer surface。面板/Dock 这类客户端没有顶层窗口对象，
+     * 但一样能用 ext-background-effect——合成器得按 surface 分辨该把 blur
+     * 节点挂在哪棵树上，这条路径只能靠真客户端走一遍。
+     * 参数要在建 surface 之前就知道，所以先扫一遍。
      */
-    if (xdg_deco_manager) {
-        xdg_deco = zxdg_decoration_manager_v1_get_toplevel_decoration(xdg_deco_manager, toplevel);
-        zxdg_toplevel_decoration_v1_set_mode(
-            xdg_deco, ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
+    int use_layer = 0;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--layer") == 0) {
+            use_layer = 1;
+        }
+    }
+
+    surface = wl_compositor_create_surface(compositor);
+    if (use_layer) {
+        if (!layer_shell) {
+            fprintf(stderr, "zwlr_layer_shell_v1 not advertised\n");
+            return 77;
+        }
+        layer_surface_handle = zwlr_layer_shell_v1_get_layer_surface(
+            layer_shell, surface, NULL, ZWLR_LAYER_SHELL_V1_LAYER_TOP, "deco-probe-layer");
+        zwlr_layer_surface_v1_add_listener(layer_surface_handle, &layer_surface_listener, NULL);
+        zwlr_layer_surface_v1_set_anchor(layer_surface_handle,
+                                         ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP |
+                                             ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT);
+        zwlr_layer_surface_v1_set_size(layer_surface_handle, WIDTH, HEIGHT);
+        /* 不要 exclusive zone、不要键盘：纯背景块 */
+        zwlr_layer_surface_v1_set_exclusive_zone(layer_surface_handle, 0);
+        zwlr_layer_surface_v1_set_keyboard_interactivity(
+            layer_surface_handle, ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE);
+    } else {
+        xdg_surface = xdg_wm_base_get_xdg_surface(wm_base, surface);
+        xdg_surface_add_listener(xdg_surface, &xdg_surface_listener, NULL);
+        toplevel = xdg_surface_get_toplevel(xdg_surface);
+        xdg_toplevel_add_listener(toplevel, &toplevel_listener, NULL);
+        xdg_toplevel_set_title(toplevel, "deco-probe");
+
+        /*
+         * 先谈 SSD：协议要求客户端先经 xdg-decoration 协商服务端装饰，这些
+         * set_* 才有意义。woodland 默认就是 SSD，这里仍然走一遍——把"默认
+         * 能work"和"协商后能work"混为一谈，换个合成器就露馅。
+         */
+        if (xdg_deco_manager) {
+            xdg_deco =
+                zxdg_decoration_manager_v1_get_toplevel_decoration(xdg_deco_manager, toplevel);
+            zxdg_toplevel_decoration_v1_set_mode(
+                xdg_deco, ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
+        }
     }
 
     /* 上下文建在 map 之前：覆盖值要在 SSD 创建那一刻就读到 */
@@ -361,6 +435,8 @@ int main(int argc, char *argv[])
             drop_effect = 1;
         } else if (strcmp(argv[i], "--caps") == 0) {
             want_caps = 1;
+        } else if (strcmp(argv[i], "--layer") == 0) {
+            /* 已在上面处理 */
         } else if (strcmp(argv[i], "--alpha") == 0 && i + 1 < argc) {
             buffer_alpha = (uint32_t)atoi(argv[++i]);
             if (buffer_alpha > 255) {
@@ -368,7 +444,18 @@ int main(int argc, char *argv[])
             }
         } else if (strcmp(argv[i], "--pattern") == 0) {
             buffer_pattern = 1;
+        } else if (strcmp(argv[i], "--pad") == 0 && i + 1 < argc) {
+            buffer_pad = atoi(argv[++i]);
+            if (buffer_pad < 0) {
+                buffer_pad = 0;
+            }
+            if (buffer_pad > WIDTH / 4) {
+                buffer_pad = WIDTH / 4;
+            }
         }
+    }
+    if (use_layer) {
+        no_context = 1; /* layer surface 没有装饰可谈 */
     }
     if (!no_context) {
         deco_ctx = treeland_decoration_manager_v1_get_decoration_context(deco_manager, surface);
@@ -396,9 +483,12 @@ int main(int argc, char *argv[])
             /* 已在上面处理 */
         } else if (strcmp(argv[i], "--drop-effect") == 0) {
             /* 已在上面处理 */
-        } else if (strcmp(argv[i], "--caps") == 0 || strcmp(argv[i], "--pattern") == 0) {
+        } else if (strcmp(argv[i], "--caps") == 0 || strcmp(argv[i], "--pattern") == 0 ||
+                   strcmp(argv[i], "--layer") == 0) {
             /* 已在上面处理 */
         } else if (strcmp(argv[i], "--alpha") == 0 && i + 1 < argc) {
+            i++;
+        } else if (strcmp(argv[i], "--pad") == 0 && i + 1 < argc) {
             i++;
         } else if (strcmp(argv[i], "blur") == 0 && i + 4 < argc) {
             /*
@@ -474,7 +564,8 @@ int main(int argc, char *argv[])
         waited += 50;
     }
     if (!configured) {
-        fprintf(stderr, "no xdg_surface.configure in 3s\n");
+        fprintf(stderr, "no surface configure in 3s (%s)\n",
+                use_layer ? "zwlr_layer_surface_v1" : "xdg_surface");
         return 1;
     }
     struct wl_buffer *buffer = create_buffer();
@@ -531,8 +622,15 @@ int main(int argc, char *argv[])
         ext_background_effect_surface_v1_destroy(bg_effect);
     }
     wl_buffer_destroy(buffer);
-    xdg_toplevel_destroy(toplevel);
-    xdg_surface_destroy(xdg_surface);
+    if (layer_surface_handle) {
+        zwlr_layer_surface_v1_destroy(layer_surface_handle);
+    }
+    if (toplevel) {
+        xdg_toplevel_destroy(toplevel);
+    }
+    if (xdg_surface) {
+        xdg_surface_destroy(xdg_surface);
+    }
     wl_surface_destroy(surface);
     wl_display_flush(display);
     wl_display_disconnect(display);

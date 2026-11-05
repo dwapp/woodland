@@ -132,6 +132,10 @@ if get_option('test').enabled()
        'treeland-decoration-unstable-v1.xml', 'treeland-decoration-unstable-v1'],
       [wp_datadir / 'staging' / 'ext-background-effect' / 'ext-background-effect-v1.xml',
        'ext-background-effect-v1'],
+      # layer surface 也能用 ext-background-effect（面板/Dock），探针 --layer 走这条。
+      # 用仓库里的副本：Meson 不让 tests/ 引用嵌套子项目里的文件。
+      [meson.project_source_root() / 'protocols' / 'tests' /
+       'wlr-layer-shell-unstable-v1.xml', 'wlr-layer-shell-unstable-v1'],
     ]
     deco_xml_ok = true
     foreach p : deco_xmls
