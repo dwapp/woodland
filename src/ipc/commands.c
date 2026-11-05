@@ -82,7 +82,10 @@ static const struct ipc_field_doc get_tree_fields[] = {
      "fullscreen, override_redirect, csd, focused, "
      "activated, focusable, scene_visible, parent, "
      "outer[x,y,w,h], content[x,y,w,h], "
-     "ssd{present,active,margins}, limits, snapped[]"},
+     "ssd{present,active,margins}, "
+     "deco{managed,titlebar,border_width,border_rgba,"
+     "corner_radius,shadow_radius,shadow_offset,"
+     "shadow_rgba,rendered[]}, limits, snapped[]"},
     {"count", "int", "number of views"},
 };
 
@@ -365,6 +368,58 @@ static void append_view_details(struct woodland_server *server, struct woodland_
     woodland_json_obj_key(&ssd, "margins");
     woodland_json_int_array(out, margin_values, 4);
     woodland_json_obj_close(&ssd);
+
+    /*
+     * treeland-decoration 的每窗口覆盖。只回"客户端接管了什么"：
+     * 没 set 过的属性不出现（协议里每个属性都是 opt-in），这样
+     * `jq '.views[0].deco'` 一眼能看出这个窗口被改了什么。
+     */
+    woodland_json_obj_key(&obj, "deco");
+    struct woodland_json_obj deco;
+    woodland_json_obj_open(&deco, out);
+    woodland_json_obj_bool(&deco, "managed", view->ssd_overrides.managed);
+    if (view->ssd_overrides.titlebar_set) {
+        woodland_json_obj_str(&deco, "titlebar",
+                              view->ssd_overrides.titlebar_hidden ? "hidden" : "shown");
+    }
+    if (view->ssd_overrides.border_set) {
+        int rgba[4] = {(int)(view->ssd_overrides.border_rgba >> 24) & 0xFF,
+                       (int)(view->ssd_overrides.border_rgba >> 16) & 0xFF,
+                       (int)(view->ssd_overrides.border_rgba >> 8) & 0xFF,
+                       (int)view->ssd_overrides.border_rgba & 0xFF};
+        woodland_json_obj_int(&deco, "border_width", view->ssd_overrides.border_width);
+        woodland_json_obj_key(&deco, "border_rgba");
+        woodland_json_int_array(out, rgba, 4);
+    }
+    if (view->ssd_overrides.corner_radius_set) {
+        woodland_json_obj_int(&deco, "corner_radius", view->ssd_overrides.corner_radius);
+    }
+    if (view->ssd_overrides.shadow_set) {
+        int offset[2] = {view->ssd_overrides.shadow_dx, view->ssd_overrides.shadow_dy};
+        int rgba[4] = {(int)(view->ssd_overrides.shadow_rgba >> 24) & 0xFF,
+                       (int)(view->ssd_overrides.shadow_rgba >> 16) & 0xFF,
+                       (int)(view->ssd_overrides.shadow_rgba >> 8) & 0xFF,
+                       (int)view->ssd_overrides.shadow_rgba & 0xFF};
+        woodland_json_obj_int(&deco, "shadow_radius", view->ssd_overrides.shadow_radius);
+        woodland_json_obj_key(&deco, "shadow_offset");
+        woodland_json_int_array(out, offset, 2);
+        woodland_json_obj_key(&deco, "shadow_rgba");
+        woodland_json_int_array(out, rgba, 4);
+    }
+    /* 真正会改变画面的属性：圆角/阴影只记录，别在断言里当它们生效 */
+    woodland_json_obj_key(&deco, "rendered");
+    struct woodland_json_arr rendered;
+    woodland_json_arr_open(&rendered, out);
+    if (view->ssd_overrides.border_set) {
+        woodland_json_arr_sep(&rendered);
+        woodland_json_string(out, "border");
+    }
+    if (view->ssd_overrides.titlebar_set) {
+        woodland_json_arr_sep(&rendered);
+        woodland_json_string(out, "titlebar");
+    }
+    woodland_json_arr_close(&rendered);
+    woodland_json_obj_close(&deco);
 
     int min_w = 0, min_h = 0, max_w = 0, max_h = 0;
     woodland_view_size_limits(view, &min_w, &min_h, &max_w, &max_h);

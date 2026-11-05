@@ -58,6 +58,16 @@ static void ssd_content_size(struct woodland_view *view, int *w, int *h)
 
 static int ssd_titlebar_height(const struct woodland_view *view)
 {
+    /*
+     * treeland-decoration 的 titlebar_mode=hide：把标题栏高度当成 0。
+     *
+     * 不去改 config（那是全局的），而是在这里"折"掉：边距、边框几何、命中
+     * 测试、按钮排版全都走这个函数或 ssd_border_width()，改一处就全线生效，
+     * 不会出现"标题栏没了但边距还留着 26px"这种只改一半的状态。
+     */
+    if (view && view->ssd_overrides.titlebar_hidden) {
+        return 0;
+    }
     if (view && view->server && view->server->config) {
         return view->server->config->ssd.titlebar_height;
     }
@@ -66,6 +76,10 @@ static int ssd_titlebar_height(const struct woodland_view *view)
 
 static int ssd_border_width(const struct woodland_view *view)
 {
+    /* 客户端接管宽度后，配置里的 border_width 对这个窗口失效（协议 §opt-in） */
+    if (view && view->ssd_overrides.border_set) {
+        return view->ssd_overrides.border_width;
+    }
     if (view && view->server && view->server->config) {
         return view->server->config->ssd.border_width;
     }
@@ -104,6 +118,19 @@ static void color_to_rgba_float(uint32_t argb, float out[4])
     out[3] = a;
 }
 
+/* 0xRRGGBBAA（协议里 r,g,b,a 的书写顺序）→ premultiplied RGBA float */
+static void rgba_to_rgba_float(uint32_t rgba, float out[4])
+{
+    float a = (rgba & 0xFF) / 255.0f;
+    float r = (((rgba >> 24) & 0xFF) / 255.0f) * a;
+    float g = (((rgba >> 16) & 0xFF) / 255.0f) * a;
+    float b = (((rgba >> 8) & 0xFF) / 255.0f) * a;
+    out[0] = r;
+    out[1] = g;
+    out[2] = b;
+    out[3] = a;
+}
+
 static void ssd_get_titlebar_color(const struct woodland_view *view, bool active, float out[4])
 {
     if (view && view->server && view->server->config && view->server->config->loaded_path) {
@@ -118,6 +145,15 @@ static void ssd_get_titlebar_color(const struct woodland_view *view, bool active
 
 static void ssd_get_border_color(const struct woodland_view *view, bool active, float out[4])
 {
+    /*
+     * 协议只给一个颜色（没有激活/非激活两套），所以覆盖后两个状态同色：
+     * 客户端要的是"我指定的边框"，不是"我指定了激活色"。想区分状态就
+     * 不发 set_border，用配置里的两套色。
+     */
+    if (view && view->ssd_overrides.border_set) {
+        rgba_to_rgba_float(view->ssd_overrides.border_rgba, out);
+        return;
+    }
     if (view && view->server && view->server->config && view->server->config->loaded_path) {
         uint32_t c = active ? view->server->config->ssd.active_border_color
                             : view->server->config->ssd.inactive_border_color;
@@ -257,6 +293,11 @@ static void ssd_update_buttons(struct woodland_ssd *ssd)
 {
     int hovered = button_index(ssd->hover_part);
     int pressed = button_index(ssd->pressed_part);
+    /* 标题栏被隐藏后按钮不存在：残留的 hover 不能让关闭键"亮着" */
+    if (ssd_titlebar_height(ssd->view) <= 0) {
+        hovered = -1;
+        pressed = -1;
+    }
     for (int i = 0; i < BUTTON_COUNT; i++) {
         const float *color = NULL;
         if (i == BUTTON_CLOSE) {
@@ -289,14 +330,22 @@ static void ssd_update_buttons(struct woodland_ssd *ssd)
     }
 }
 
-/* 重新摆放所有组件（标题栏/边框/按钮） */
+/*
+ * 重新摆放所有组件（标题栏/边框/按钮）。
+ *
+ * th == 0（客户端 set_titlebar_mode(hide)）时标题栏那一整段整个跳过：这些
+ * 节点的尺寸还停在上一次的值，位置也还在内容上方，让它们留在那儿只会被
+ * 上一个分支（ssd_apply_state）关掉，重排反而会把 0 高的矩形算进去。
+ */
 static void ssd_layout(struct woodland_ssd *ssd)
 {
     int w = ssd->width;
     int th = ssd_titlebar_height(ssd->view);
-    /* 标题栏：内容顶部上方 */
-    wlr_scene_node_set_position(&ssd->titlebar->node, 0, -th);
-    wlr_scene_rect_set_size(ssd->titlebar, w, th);
+    if (th > 0) {
+        /* 标题栏：内容顶部上方 */
+        wlr_scene_node_set_position(&ssd->titlebar->node, 0, -th);
+        wlr_scene_rect_set_size(ssd->titlebar, w, th);
+    }
 
     /* 边框：包住内容 + 标题栏，构成完整外框（负坐标） */
     for (int i = 0; i < BORDER_COUNT; i++) {
@@ -304,6 +353,10 @@ static void ssd_layout(struct woodland_ssd *ssd)
         ssd_border_geometry(ssd, i, &bx, &by, &rw, &rh);
         wlr_scene_node_set_position(&ssd->border[i]->node, bx, by);
         wlr_scene_rect_set_size(ssd->border[i], rw, rh);
+    }
+
+    if (th <= 0) {
+        return;
     }
 
     /* 按钮：labwc 默认 titleLayout "icon:iconify,max,close" 的右段，
@@ -489,12 +542,21 @@ static void ssd_apply_state(struct woodland_ssd *ssd)
     for (int i = 0; i < BORDER_COUNT; i++) {
         wlr_scene_node_set_enabled(&ssd->border[i]->node, !maximized);
     }
-    wlr_scene_node_set_enabled(&ssd->titlebar->node, true);
+    /* 标题栏被客户端隐藏时，标题栏本体/按钮/图标/文字一起收掉——
+     * 只不是"高度设成 0"，是为了不留下 0 尺寸的节点参与命中与渲染 */
+    bool titlebar = ssd_titlebar_height(view) > 0;
+    wlr_scene_node_set_enabled(&ssd->titlebar->node, titlebar);
     for (int i = 0; i < BUTTON_COUNT; i++) {
-        wlr_scene_node_set_enabled(&ssd->button[i]->node, true);
+        wlr_scene_node_set_enabled(&ssd->button[i]->node, titlebar);
+        if (!titlebar) {
+            wlr_scene_node_set_enabled(&ssd->button_bg[i]->node, false);
+        }
     }
     if (ssd->title_icon) {
-        wlr_scene_node_set_enabled(&ssd->title_icon->node, true);
+        wlr_scene_node_set_enabled(&ssd->title_icon->node, titlebar);
+    }
+    if (ssd->title_text) {
+        woodland_text_buffer_set_enabled(ssd->title_text, titlebar);
     }
 }
 
@@ -527,6 +589,38 @@ void woodland_ssd_update(struct woodland_view *view)
     ssd_layout(ssd);
     ssd_apply_state(ssd);
     woodland_ssd_set_active(view, ssd->active);
+}
+
+/*
+ * 装饰覆盖值变了：重排几何、刷新颜色、清掉可能指向已经消失的按钮的高亮。
+ *
+ * 为什么不是"调用方自己调 update()"：覆盖值会改变边距（标题栏在不在、
+ * 边框多宽），三处状态必须一起收敛——几何（ssd_layout）、可见性
+ * （ssd_apply_state，被 update 带上）、颜色（set_active）。漏掉任何一处
+ * 的表现都是"改了但没反应"，而且只对某个属性出现，很难一次看全。
+ */
+void woodland_ssd_deco_changed(struct woodland_view *view)
+{
+    struct woodland_ssd *ssd = view ? view->ssd : NULL;
+    if (!ssd) {
+        /* 还没 map：覆盖值已经记在 view 上，SSD 创建时会读到 */
+        return;
+    }
+    if (view->server) {
+        /* 服务器侧也记着"哪个窗口的哪个按钮亮着"，一起清掉 */
+        if (view->server->hover_view == view) {
+            view->server->hover_view = NULL;
+            view->server->hover_part = WOODLAND_SSD_NONE;
+        }
+        if (view->server->pressed_view == view) {
+            view->server->pressed_view = NULL;
+            view->server->pressed_part = WOODLAND_SSD_NONE;
+        }
+    }
+    ssd->hover_part = WOODLAND_SSD_NONE;
+    ssd->pressed_part = WOODLAND_SSD_NONE;
+    woodland_ssd_update(view); /* layout + apply_state + set_active */
+    ssd_update_buttons(ssd);
 }
 
 void woodland_ssd_set_active(struct woodland_view *view, bool active)

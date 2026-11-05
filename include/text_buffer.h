@@ -42,6 +42,14 @@ void woodland_text_buffer_update(struct woodland_text_buffer *tb, const char *te
 /** 移动文本 buffer 节点。 */
 void woodland_text_buffer_set_position(struct woodland_text_buffer *tb, int x, int y);
 
+/**
+ * 显示/隐藏文本节点（不销毁内容）。
+ *
+ * 标题栏被 treeland-decoration 隐藏时用：节点还在、只是不画，
+ * 重新显示时不用重排版。
+ */
+void woodland_text_buffer_set_enabled(struct woodland_text_buffer *tb, bool enabled);
+
 /** 返回文本逻辑宽度（空文本返回 0）。 */
 int woodland_text_buffer_get_width(const struct woodland_text_buffer *tb);
 
