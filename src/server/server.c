@@ -158,7 +158,12 @@ bool woodland_server_init(struct woodland_server *server)
     server->compositor = wlr_compositor_create(server->display, 5, server->renderer);
     wlr_subcompositor_create(server->display);
     wlr_data_device_manager_create(server->display);
-    wlr_renderer_init_wl_shm(server->renderer, server->display);
+    /*
+     * wl_shm 不用单独建：上面 wlr_renderer_init_wl_display() 内部已经调过
+     * wlr_renderer_init_wl_shm()。再调一次会出现**两个 wl_shm 全局**
+     * （wayland-info 能看到 name 1 和 name 5），客户端会按名字各绑一个，
+     * 谁都不是"唯一的那份"；冒烟探针里也表现为绑第二个时把第一个代理泄漏掉。
+     */
 
     /* 补充协议：全部是 wlroots 原生 manager，创建即完成接线。
      * alpha_modifier / single_pixel 由 scene 自动集成；
