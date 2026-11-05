@@ -22,7 +22,7 @@ command -v wlr-randr >/dev/null 2>&1 || {
 
 unset WAYLAND_DISPLAY
 export XDG_RUNTIME_DIR="$(mktemp -d)"
-export WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_HEADLESS_OUTPUTS=2
+export WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=2
 
 SMOKE_LOG="$XDG_RUNTIME_DIR/log"
 "$BIN" >"$SMOKE_LOG" 2>&1 &

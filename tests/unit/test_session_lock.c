@@ -23,11 +23,8 @@
 #include "scene.h"
 #include <wlr/types/wlr_seat.h>
 
-/* 宏在 config.h 里；effects 构建要用 scenefx 的 renderer（见 main） */
-#include "config.h"
-#if WOODLAND_HAVE_EFFECTS
+/* scenefx 的 scene 只认 fx_renderer（见 main） */
 #include <scenefx/render/fx_renderer/fx_renderer.h>
-#endif
 
 #include "cursor.h"
 #include "ext-session-lock-v1-client-protocol.h"
@@ -156,8 +153,6 @@ static void pump_roundtrip(struct woodland_server *server, struct wl_display *cl
 
 int main(void)
 {
-    setenv("WLR_RENDERER", "pixman", 1);
-
     struct woodland_server server = {0};
     server.display = wl_display_create();
     assert(server.display != NULL);
@@ -169,21 +164,21 @@ int main(void)
     assert(server.backend != NULL);
 
     /*
-     * 和 src/server/server.c 走同一条路：effects 构建里 scene 是 scenefx 的，
-     * 它提交 output 时会把自己的 render pass 强转成 fx_render_pass；塞一个
-     * wlroots 的 pixman renderer 进去会在 fx_get_render_pass 里断言死
-     * （render_pass->impl != &render_pass_impl）。FX renderer 只有 GLES2 一条
-     * 路，没 DRM 节点的机器上建不出来——那种环境跳过，不伪装成通过。
+     * 和 src/server/server.c 走同一条路：scene 是 scenefx 的，它提交 output 时
+     * 会把自己的 render pass 强转成 fx_render_pass；塞一个 wlroots 的 pixman
+     * renderer 进去会在 fx_get_render_pass 里断言死（render_pass->impl !=
+     * &render_pass_impl）。FX renderer 只有 GLES2 一条路；没有 DRM 渲染节点时
+     * 和 server.c 一样退到 llvmpipe，两者都不行的环境跳过，不伪装成通过。
      */
-#if WOODLAND_HAVE_EFFECTS
     server.renderer = fx_renderer_create(server.backend);
     if (server.renderer == NULL) {
-        fprintf(stderr, "no GLES2/DRM device for fx_renderer, skip\n");
+        setenv("WLR_RENDERER_FORCE_SOFTWARE", "1", 0);
+        server.renderer = fx_renderer_create(server.backend);
+    }
+    if (server.renderer == NULL) {
+        fprintf(stderr, "no GLES2 device for fx_renderer, skip\n");
         return 77;
     }
-#else
-    server.renderer = wlr_renderer_autocreate(server.backend);
-#endif
     assert(server.renderer != NULL);
 
     server.allocator = wlr_allocator_autocreate(server.backend, server.renderer);

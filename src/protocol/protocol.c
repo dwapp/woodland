@@ -109,7 +109,15 @@ bool woodland_protocol_init(struct woodland_server *server) {
     return true;
 }
 
-void woodland_protocol_finish(struct woodland_server *server) {
+void woodland_protocol_refresh_background_effect(struct woodland_server *server)
+{
+    if (server && server->proto) {
+        woodland_proto_bg_effect_refresh(server->proto);
+    }
+}
+
+void woodland_protocol_finish(struct woodland_server *server)
+{
     struct woodland_proto *proto = server->proto;
     if (!proto) {
         return;

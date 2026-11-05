@@ -11,8 +11,9 @@
  * （和 wlroots 上游实现同一条路），state 结构里的 pixman region 由它负责
  * 初始化/拷贝/释放。
  *
- * 能力位按构建决定：没编 effects（没有 scenefx）时 capabilities 是 0，
- * 客户端据此知道"这台的合成器不会模糊"，而不是设了区域一点反应都没有。
+ * 能力位跟着**运行期配置**（[effects] enabled/blur）走，不跟编译期：scenefx 一定
+ * 在，但关掉模糊时如实报 capability=0，客户端据此知道"这台的合成器不会模糊"，
+ * 而不是设了区域一点反应都没有。bind 时现算，配置热重载后再广播一次。
  */
 #include <pixman.h>
 #include <stdlib.h>
@@ -53,8 +54,26 @@ struct woodland_bg_surface {
 struct woodland_proto_bg_effect {
     struct woodland_server *server;
     struct wl_global *global;
-    uint32_t capabilities; /* ext_background_effect_manager_v1_capability 位或 */
+    /*
+     * 已 bind 的 manager 资源。配置热重载可能把模糊关掉，能力位得再发一次
+     * （协议允许重复发送，客户端以最后一条为准），所以要留住资源引用。
+     * 不能用 wl_resource->link：那个字段属于 client 的资源链表。
+     */
+    struct wl_list managers;
 };
+
+struct bg_manager {
+    struct wl_list link;
+    struct wl_resource *resource;
+    struct woodland_proto_bg_effect *family;
+};
+
+static uint32_t bg_capabilities(struct woodland_proto_bg_effect *family)
+{
+    return woodland_effect_server_blur_enabled(family->server)
+               ? EXT_BACKGROUND_EFFECT_MANAGER_V1_CAPABILITY_BLUR
+               : 0;
+}
 
 static const struct ext_background_effect_manager_v1_interface manager_impl;
 static const struct ext_background_effect_surface_v1_interface surface_impl;
@@ -269,7 +288,13 @@ static void manager_handle_get_background_effect(struct wl_client *client,
         wl_resource_post_no_memory(manager_resource);
         return;
     }
-    bg->family = wl_resource_get_user_data(manager_resource);
+    struct bg_manager *manager = wl_resource_get_user_data(manager_resource);
+    bg->family = manager ? manager->family : NULL;
+    if (!bg->family) {
+        free(bg);
+        wl_resource_post_no_memory(manager_resource);
+        return;
+    }
     bg->surface = surface;
 
     if (!wlr_surface_synced_init(&bg->synced, surface, &surface_synced_impl, &bg->pending,
@@ -296,6 +321,16 @@ static const struct ext_background_effect_manager_v1_interface manager_impl = {
     .get_background_effect = manager_handle_get_background_effect,
 };
 
+static void manager_resource_destroy(struct wl_resource *resource)
+{
+    struct bg_manager *manager = wl_resource_get_user_data(resource);
+    if (!manager) {
+        return;
+    }
+    wl_list_remove(&manager->link);
+    free(manager);
+}
+
 static void manager_bind(struct wl_client *client, void *data, uint32_t version, uint32_t id)
 {
     struct woodland_proto_bg_effect *family = data;
@@ -305,9 +340,36 @@ static void manager_bind(struct wl_client *client, void *data, uint32_t version,
         wl_client_post_no_memory(client);
         return;
     }
-    wl_resource_set_implementation(resource, &manager_impl, family, NULL);
-    /* 能力位在 bind 时发一次（协议：bonud 时以及能力变化时） */
-    ext_background_effect_manager_v1_send_capabilities(resource, family->capabilities);
+    struct bg_manager *manager = calloc(1, sizeof(*manager));
+    if (!manager) {
+        wl_resource_destroy(resource);
+        wl_client_post_no_memory(client);
+        return;
+    }
+    manager->resource = resource;
+    manager->family = family;
+    wl_list_insert(&family->managers, &manager->link);
+    wl_resource_set_implementation(resource, &manager_impl, manager,
+                                   manager_resource_destroy);
+    /*
+     * 能力位在 bind 时现算一次（协议：bind 时以及能力变化时发）。这里不能读
+     * 初始化时的快照——全局在配置加载之前就建好了，那时 server->config 还是 NULL。
+     */
+    ext_background_effect_manager_v1_send_capabilities(resource, bg_capabilities(family));
+}
+
+void woodland_proto_bg_effect_refresh(struct woodland_proto *proto)
+{
+    struct woodland_proto_bg_effect *family = proto ? proto->bg_effect : NULL;
+    if (!family) {
+        return;
+    }
+    uint32_t caps = bg_capabilities(family);
+    struct bg_manager *manager;
+    wl_list_for_each(manager, &family->managers, link)
+    {
+        ext_background_effect_manager_v1_send_capabilities(manager->resource, caps);
+    }
 }
 
 /* ==================== 族初始化 ==================== */
@@ -322,16 +384,13 @@ bool woodland_proto_bg_effect_init(struct woodland_proto *proto)
         return false;
     }
     family->server = server;
+    wl_list_init(&family->managers);
     proto->bg_effect = family;
 
     /*
-     * 没有 scenefx 就如实报"不支持模糊"：capability=0。
-     * 全局照样注册，客户端的 get_background_effect 不会报错，只是设了区域
-     * 也不会有效果——协议允许这样（capability 决定客户端要不要用）。
+     * 全局无条件注册，能力位按当次的 [effects] 现算（见 manager_bind）：
+     * 关掉模糊时客户端拿到 0，不会去设区域，但也不会因为协议缺失而失败。
      */
-    family->capabilities = WOODLAND_HAVE_EFFECTS
-                               ? EXT_BACKGROUND_EFFECT_MANAGER_V1_CAPABILITY_BLUR
-                               : 0;
     family->global =
         wl_global_create(server->display, &ext_background_effect_manager_v1_interface,
                          BG_EFFECT_VERSION, family, manager_bind);

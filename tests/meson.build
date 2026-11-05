@@ -163,7 +163,7 @@ if get_option('test').enabled()
            is_parallel: false,
            timeout: 90)
       # ext-background-effect：blur region 的双缓冲/裁剪/撤除。同一个探针，
-      # 多走一遍 blur 参数；能不能真糊由 get_tree 的 effects 字段决定。
+      # 多走一遍 blur 参数；脚本按 [effects] 配置跑"开"和"关"两遍。
       test('smoke-bg-effect',
            find_program('sh'),
            args: [meson.current_source_dir() / 'smoke' / 'run_bg_effect_smoke.sh',

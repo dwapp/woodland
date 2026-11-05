@@ -1,4 +1,4 @@
-# 圆角与背景模糊：默认构建只留状态与换算，effects 构建才真的画
+# 圆角与背景模糊：scenefx 恒在，画不画由 [effects] 运行期决定
 effect_lib = static_library('effect',
   'effect.c',
   include_directories: woodland_inc,

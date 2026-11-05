@@ -19,7 +19,7 @@ unset WAYLAND_DISPLAY
 export XDG_RUNTIME_DIR="$(mktemp -d)"
 
 SMOKE_LOG="$XDG_RUNTIME_DIR/woodland.log"
-WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_HEADLESS_OUTPUTS=1 "$BIN" \
+WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1 "$BIN" \
     >"$SMOKE_LOG" 2>&1 &
 pid=$!
 

@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * effect 纯函数单测：圆角半径的取值优先级、四角怎么摊、blur region 怎么裁。
+ * effect 纯函数单测：圆角半径的取值优先级、四角怎么摊、blur region 怎么裁、
+ * 运行期开关怎么压过一切。
  *
  * 不建 compositor、不碰 GPU——这些函数把"协议/配置里的意图"翻译成"要画多大
- * 半径、糊哪一块"，默认构建与 effects 构建行为必须一致，差别只在最后画不画。
- * 所以这里两种构建都要通过（渲染部分在 effect.c 里被 #if 编掉了）。
+ * 半径、糊哪一块"。scenefx 是常开的，画不画由 [effects] 决定，所以这里既测
+ * 配置生效的情况，也测 enabled=false 时"记录归记录、半径归 0"。
  */
 #include <assert.h>
 #include <stdio.h>
@@ -206,6 +207,37 @@ int main(void)
     woodland_effect_buffer_corners(NULL, 0, 0, 400, 300, 400, 300, &per);
     assert(per.top_left == 0 && per.bottom_right == 0);
     woodland_effect_buffer_corners(&window, 0, 0, 400, 300, 400, 300, NULL);
+
+    /* ---- 11) 运行期开关：enabled 压过客户端覆盖与配置半径 ---- */
+    assert(woodland_effect_server_enabled(&server)); /* 默认开 */
+    assert(woodland_effect_server_blur_enabled(&server));
+
+    config->effects.enabled = false;
+    view.ssd_overrides.corner_radius_set = true;
+    view.ssd_overrides.corner_radius = 8;
+    config->effects.corner_radius = 16;
+    assert(woodland_effect_corner_radius(&view) == 0);
+    clear_corners(&c);
+    woodland_effect_corners(&view, &c);
+    assert(c.top_left == 0 && c.bottom_right == 0);
+
+    /* 总开关关掉时，blur 写 true 也不该生效 */
+    config->effects.blur = true;
+    assert(!woodland_effect_server_enabled(&server));
+    assert(!woodland_effect_server_blur_enabled(&server));
+
+    /* 总开关开着、只关模糊：圆角还在，模糊停 */
+    config->effects.enabled = true;
+    config->effects.blur = false;
+    assert(woodland_effect_server_enabled(&server));
+    assert(!woodland_effect_server_blur_enabled(&server));
+    assert(woodland_effect_corner_radius(&view) == 8); /* 覆盖值重新生效 */
+
+    /* 空 server / 空配置：一律当作关掉，不崩 */
+    assert(!woodland_effect_server_enabled(NULL));
+    struct woodland_server bare = {0};
+    assert(!woodland_effect_server_enabled(&bare));
+    assert(!woodland_effect_server_blur_enabled(&bare));
 
     pixman_region32_fini(&region);
     woodland_config_destroy(config);

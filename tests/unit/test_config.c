@@ -42,8 +42,9 @@ static void test_default_config(void)
     assert(strcmp(cfg->cursor.theme, "default") == 0);
     assert(cfg->cursor.size == 24);
 
-    assert(!cfg->effects.enabled);
-    assert(!cfg->effects.blur);
+    /* 特效是运行期开关：默认开着，用户想关才关 */
+    assert(cfg->effects.enabled);
+    assert(cfg->effects.blur);
     assert(cfg->effects.corner_radius == 0);
     assert(!cfg->effects.shadow);
 

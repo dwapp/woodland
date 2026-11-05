@@ -75,12 +75,15 @@ struct woodland_config_cursor {
 /*
  * [effects]：圆角与模糊。
  *
- * corner_radius 是**唯一**的圆角半径来源（窗口自己经 treeland-decoration 覆盖
- * 时才另外算）——真正画出来要 -Deffects=enabled，默认构建只记录，wctl 里看得见
- * 但画面不变。blur 的开关不在这儿：模糊由客户端经 ext-background-effect-v1
- * 主动请求，合成器只负责"支持就如实报 capability"。
+ * 渲染能力是编译期固定的（scenefx 常开），这三个字段全是**运行期**开关：
  *
- * enabled / shadow 目前仍是预留（还没接线），别把它们当成生效开关。
+ *   enabled        总开关。false 时圆角按 0 算、不建 blur 节点、capability 报 0，
+ *                  等价于"这台机器不画任何特效"，但协议状态照常记录。
+ *   blur           模糊开关（默认 true）。只有在客户端经 ext-background-effect-v1
+ *                  主动声明区域时才真糊——开关是"允许不允许"，不是"无条件糊"。
+ *   corner_radius  唯一的圆角半径来源；窗口经 treeland-decoration 覆盖时以窗口为准。
+ *
+ * shadow 仍是预留（没有阴影渲染），别当生效开关。
  */
 struct woodland_config_effects {
     bool enabled;

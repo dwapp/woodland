@@ -776,7 +776,6 @@ bool woodland_ssd_titlebar_visible(const struct woodland_view *view)
 
 void woodland_ssd_set_corner_radius(struct woodland_view *view, int radius)
 {
-#if WOODLAND_HAVE_EFFECTS
     struct woodland_ssd *ssd = view ? view->ssd : NULL;
     if (!ssd) {
         return;
@@ -790,10 +789,6 @@ void woodland_ssd_set_corner_radius(struct woodland_view *view, int radius)
     /* 左右竖条保持直角：1px 宽的矩形套半径只会把边线啃掉一截 */
     wlr_scene_rect_set_corner_radii(ssd->border[BORDER_LEFT], square);
     wlr_scene_rect_set_corner_radii(ssd->border[BORDER_RIGHT], square);
-#else
-    (void)view;
-    (void)radius;
-#endif
 }
 
 void woodland_ssd_finish(void)
