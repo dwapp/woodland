@@ -117,7 +117,7 @@ test('pointer_constraints', test_pointer_constraints)
 
 if wayland_client_dep.found()
   test_syncobj = executable('test_syncobj', 'test_syncobj.c',
-    dependencies: [wlroots, wayland_server, wayland_client_dep],
+    dependencies: [scene_deps, wayland_server, wayland_client_dep],
     include_directories: woodland_inc,
     link_with: [protocol_lib, output_lib, cursor_lib, shell_lib, seat_lib, session_lock_lib, ime_lib, workspace_lib, layer_lib, ssd_lib, capture_lib, util_lib])
   test('syncobj', test_syncobj)
