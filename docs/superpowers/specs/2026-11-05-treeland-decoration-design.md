@@ -1,7 +1,8 @@
 # treeland-decoration-unstable-v1 支持设计规格
 
 > 日期：2026-11-05
-> 状态：已实现（协议语义完整；圆角/阴影只记录，见 §4）
+> 状态：已实现（协议语义完整；圆角在 `-Deffects=enabled` 构建里真的画出来，
+> 阴影仍只记录，见 §4）
 > 参考实现：treeland `src/modules/decoration/decorationmanagerinterfacev1.cpp`
 > （Apache-2.0 OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only）
 > 协议定义：`treeland-protocols/public/treeland-decoration-unstable-v1.xml`（MIT）
@@ -80,24 +81,33 @@ woodland_proto_decoration
 `protocol → ssd`（调 `woodland_ssd_deco_changed()`），**shell 不需要知道这个
 协议存在**。方向是单向的：协议写 `view->ssd_overrides`，SSD 自己读。
 
-## 4. 渲染能力与取舍（为什么圆角/阴影只记录）
+## 4. 渲染能力与取舍
 
 协议允许合成器"按自己的策略处理，并把越界值 clamp 到支持的上界"。woodland
-的渲染路径是 `wlr_scene` 的矩形与 surface buffer：
+有两条渲染路径，按构建分开：
 
-- **圆角**要对整块窗口（含客户端内容）做 alpha 裁剪。`wlr_scene_buffer_set_clip`
-  只支持矩形，圆角需要 shader/scenefx。项目里 `[effects]` 默认关闭且尚未接线
-  （`WOODLAND_HAVE_EFFECTS` 恒为 0），所以有效上界就是 0。
-- **阴影**要一层模糊 buffer，同样属于 effects；而一旦真画出来，就得把阴影算进
-  摆放几何（否则相邻窗口会互相压边），这会牵动 placement/snap/maximize 全链路。
+| 构建 | 场景库 | 圆角 | 阴影 |
+|---|---|---|---|
+| 默认（`-Deffects=disabled`） | wlroots `wlr_scene` | 只记录 | 只记录 |
+| `-Deffects=enabled` | scenefx 0.5（自带 fx_renderer） | 真画 | 只记录 |
 
-因此这两项的取舍是：**记录 + 可见 + 明说没画**。
+- **圆角**在 effects 构建里由 `src/effect/effect.c` 落到 scenefx：
+  客户端内容用 `wlr_scene_buffer_set_corner_radii()`，SSD 的标题栏与边框用
+  `wlr_scene_rect_set_corner_radii()`。四角怎么分配见
+  `woodland_effect_corners()`：有标题栏 → 内容上角归 0（被标题栏盖住），
+  标题栏/上边框自己圆；最大化/全屏 → 一律直角。
+  半径只来自 `[effects] corner_radius` 或本协议的 per-view 覆盖，二者都 clamp
+  到 `WOODLAND_SSD_MAX_SIZE`。
+- **阴影**仍不画：它不只影响像素，还得算进摆放几何（否则相邻窗口互相压边），
+  会牵动 placement/snap/maximize 全链路。
 
-- `wctl get_tree` 的 `deco.rendered` 只列出真正改变画面的属性
-  （`border` / `titlebar`），圆角与阴影不进这个数组；
-- `--trace` 里对应条目写明 `recorded (no render backend)`；
-- 协议里的 `set_*` 仍然完整校验（上界 1000、颜色 [0,255]），这样等 effects
-  落地时只剩"把值喂给 scenefx"这一小步，不需要重新定义语义。
+"没画"这件事必须能看出来，所以两种构建都不说谎：
+
+- `wctl get_tree` 的 `deco.rendered` 只列真正改变画面的属性。effects 构建里是
+  `["border","titlebar","corner_radius"]`，默认构建里没有 `corner_radius`；
+- `--trace` 的 `deco` 条目在默认构建写 `recorded (no render backend)`，
+  effects 构建不写这句（否则脚本会以为没生效）；
+- 协议里的 `set_*` 完整校验（上界 1000、颜色 [0,255]），与构建无关。
 
 ## 5. 生命周期与错误
 
