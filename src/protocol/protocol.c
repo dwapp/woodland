@@ -8,14 +8,15 @@
  *   3. 持有两个"创建即完成"的全局（viewporter、presentation-time）——
  *      它们没有监听器也没有私有状态，不值得各自开一族。
  *
- * 具体的协议行为按关注点分在五个文件里：
+ * 具体的协议行为按关注点分在七个文件里：
  *   idle.c       空闲与抑制（idle-notify / idle-inhibit / shortcuts-inhibit）
  *   output.c     输出管理（output-management / output-power-management）
  *   input.c      输入与选区（relative-pointer / pointer-gestures / primary-selection）
  *   window.c     窗口（xdg-activation / xdg-toplevel-tag）
  *   decoration.c 窗口装饰（treeland-decoration：按窗口的 SSD 定制）
- *
- * 分层的原因不是"文件太大了"：这四块的状态机各不相干，混在一个文件里时
+ *   background_effect.c 背景模糊（ext-background-effect-v1）
+ *   wallpaper.c  壁纸（treeland-wallpaper-shell / -manager / -notifier）
+ * 分层的原因不是"文件太大了"：这几块的状态机各不相干，混在一个文件里时
  * init 的失败回滚和 finish 的逆序拆除要横跨十几组监听器，漏一行就是悬挂
  * 指针；拆开之后每族的建立与回收在同一个文件里，加协议只动一处。
  */
@@ -32,8 +33,16 @@
 #include "woodland.h"
 
 bool woodland_protocol_init(struct woodland_server *server) {
-    if (!server->cursor || !server->seat || !server->output_layout) {
-        wlr_log(WLR_ERROR, "protocol layer needs cursor/seat/output first");
+    /*
+     * 前置条件写全一点：协议层要挂壁纸族，而壁纸族监听的是
+     * cursor / seat / output_layout / workspace（server->active_workspace
+     * 就是"workspace 层已经建好"的标志）。少了任何一个，监听器会挂到
+     * 没初始化的 wl_signal 上——那是段错误，不是启动失败。
+     */
+    if (!server->cursor || !server->seat || !server->output_layout ||
+        !server->active_workspace) {
+        wlr_log(WLR_ERROR,
+                "protocol layer needs cursor/seat/output/workspace first");
         return false;
     }
 
@@ -103,6 +112,11 @@ bool woodland_protocol_init(struct woodland_server *server) {
     if (!woodland_proto_bg_effect_init(proto)) {
         return false;
     }
+    /* 壁纸放在最后：它要 server->scene、server->outputs、server->session_lock
+     * 都已就位 */
+    if (!woodland_proto_wallpaper_init(proto)) {
+        return false;
+    }
 
     /* 已有输出可能早于本模块建好，补一次广播让客户端看到初始状态 */
     woodland_proto_output_broadcast(proto);
@@ -124,6 +138,7 @@ void woodland_protocol_finish(struct woodland_server *server)
     }
 
     /* 逆序拆：与 init 对称，后建的先摘 */
+    woodland_proto_wallpaper_finish(proto);
     woodland_proto_bg_effect_finish(proto);
     woodland_proto_decoration_finish(proto);
     woodland_proto_drm_lease_finish(proto);
@@ -171,4 +186,12 @@ void woodland_protocol_withdraw_drm_lease(struct woodland_server *server,
         return;
     }
     woodland_proto_drm_lease_withdraw_output(server->proto, output);
+}
+
+void woodland_protocol_output_added(struct woodland_server *server,
+                                    struct wlr_output *output) {
+    if (!server || !server->proto) {
+        return;
+    }
+    woodland_proto_wallpaper_output_added(server->proto, output);
 }

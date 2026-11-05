@@ -83,6 +83,13 @@ static void handle_new_output_broadcast(struct wl_listener *listener, void *data
     /* 协议层可能还没初始化（headless 的首个输出早于 protocol init），
      * 那种情况由 woodland_protocol_init 末尾的补广播覆盖 */
     woodland_protocol_output_changed(server);
+
+    /*
+     * 壁纸基线要重新压到图层树之下：output.c 的图层树是 lower_to_bottom()
+     * 建的，每来一个输出都会把壁纸顶到 layer-shell background 上面去。
+     * 这里必须晚于 handle_new_output（本监听器注册在 protocol init 之后）。
+     */
+    woodland_protocol_output_added(server, wlr_output);
 }
 
 bool woodland_server_init(struct woodland_server *server)

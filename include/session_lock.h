@@ -44,6 +44,15 @@ struct woodland_session_lock {
 
     struct wl_list lock_outputs; // struct woodland_session_lock_output.link
 
+    /*
+     * 锁定状态变化（两边都是"已经落定"之后才 emit，监听方直接读
+     * woodland_session_lock_is_locked 就是新状态）。
+     *
+     * 用信号而不是让 session_lock 去调协议层：协议层挂在它上面（壁纸要按
+     * 锁定状态发 pause/play），反过来依赖会绕成一个圈。
+     */
+    struct wl_signal lock_changed;
+
     struct wl_listener new_lock;
     struct wl_listener manager_destroy;
 

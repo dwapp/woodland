@@ -17,6 +17,7 @@
 #include "protocol.h"
 #include "seat.h"
 #include "woodland.h"
+#include "workspace.h"
 
 int main(void)
 {
@@ -54,6 +55,8 @@ int main(void)
 
     assert(woodland_cursor_init(&server));
     assert(woodland_seat_init(&server));
+    /* 协议层要挂壁纸族，壁纸族监听 workspace_changed */
+    assert(woodland_workspace_init(&server));
     assert(woodland_protocol_init(&server));
 
     /* 验证指针约束管理器正常创建 */
@@ -123,6 +126,7 @@ int main(void)
 
     /* 逆序释放子系统 */
     woodland_protocol_finish(&server);
+    woodland_workspace_finish(&server);
     woodland_seat_finish(&server);
     woodland_cursor_finish(&server);
     woodland_output_finish(&server);

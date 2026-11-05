@@ -444,6 +444,37 @@ static void check_ssd_geometry(struct woodland_server *server,
     }
 }
 
+/*
+ * 壁纸节点是否真在最底层。
+ *
+ * 壁纸树在初始化时 lower_to_bottom()，但图层树也是一路 lower_to_bottom()
+ * 建的（src/output/output.c），每来一个新输出就把壁纸顶到 layer-shell 的
+ * background 之上——表现是"壁纸没了"，而截图里只看得出"桌面上有个底色"，
+ * 极难反推。所以把"壁纸是 scene 根的第一个子节点"写成断言。
+ */
+static void check_wallpaper_z_order(struct woodland_server *server,
+                                    struct woodland_check *check) {
+    struct wlr_scene_tree *tree = server->wallpaper_tree;
+    if (!tree) {
+        /* 没建协议层（单元测试里很常见）不算失败 */
+        check->ok = true;
+        set_text(check->expected, sizeof(check->expected),
+                 "wallpaper tree is the bottom-most scene child");
+        set_text(check->actual, sizeof(check->actual), "no wallpaper tree");
+        return;
+    }
+
+    struct wl_list *first = server->scene->tree.children.next;
+    struct wlr_scene_node *bottom =
+        first ? wl_container_of(first, bottom, link) : NULL;
+
+    check->ok = (bottom == &tree->node);
+    set_text(check->expected, sizeof(check->expected),
+             "wallpaper tree is the bottom-most scene child");
+    set_text(check->actual, sizeof(check->actual), "bottom child is %s",
+             bottom == &tree->node ? "the wallpaper tree" : "something else");
+}
+
 /* ==================== 汇总 ==================== */
 
 int woodland_selfcheck_collect(struct woodland_server *server,
@@ -466,6 +497,7 @@ int woodland_selfcheck_collect(struct woodland_server *server,
         {"ft_activated_matches", check_ft_activated},
         {"xdg_activated_matches", check_xdg_activated},
         {"ssd_geometry_matches", check_ssd_geometry},
+        {"wallpaper_below_layers", check_wallpaper_z_order},
     };
 
     int count = 0;

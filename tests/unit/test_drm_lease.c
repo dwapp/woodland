@@ -12,6 +12,7 @@
 #include "protocol.h"
 #include "seat.h"
 #include "woodland.h"
+#include "workspace.h"
 
 int main(void)
 {
@@ -42,6 +43,8 @@ int main(void)
     assert(woodland_output_init(&server));
     assert(woodland_cursor_init(&server));
     assert(woodland_seat_init(&server));
+    /* 协议层要挂壁纸族，壁纸族监听 workspace_changed */
+    assert(woodland_workspace_init(&server));
 
     /* 初始化协议层（包含 drm_lease 协议族） */
     assert(woodland_protocol_init(&server));
@@ -72,6 +75,7 @@ int main(void)
     /* 二次调用 finish 保证幂等性 */
     woodland_protocol_finish(&server);
 
+    woodland_workspace_finish(&server);
     woodland_seat_finish(&server);
     woodland_cursor_finish(&server);
     woodland_output_finish(&server);

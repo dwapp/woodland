@@ -13,6 +13,7 @@ struct woodland_proto_window;
 struct woodland_proto_drm_lease;
 struct woodland_proto_decoration;
 struct woodland_proto_bg_effect;
+struct woodland_proto_wallpaper;
 struct wlr_output;
 struct wlr_viewporter;
 struct wlr_presentation;
@@ -46,6 +47,7 @@ struct woodland_proto {
     struct woodland_proto_drm_lease *drm_lease;   /* drm_lease.c */
     struct woodland_proto_decoration *decoration; /* decoration.c */
     struct woodland_proto_bg_effect *bg_effect;   /* background_effect.c */
+    struct woodland_proto_wallpaper *wallpaper;   /* wallpaper.c */
 };
 
 /* 空闲与抑制族（idle.c）：idle-notify / idle-inhibit / keyboard-shortcuts-inhibit */
@@ -86,5 +88,18 @@ void woodland_proto_decoration_finish(struct woodland_proto *proto);
 bool woodland_proto_bg_effect_init(struct woodland_proto *proto);
 void woodland_proto_bg_effect_finish(struct woodland_proto *proto);
 void woodland_proto_bg_effect_refresh(struct woodland_proto *proto);
+
+/* 壁纸族（wallpaper.c）：treeland-wallpaper-shell / -manager / -notifier */
+bool woodland_proto_wallpaper_init(struct woodland_proto *proto);
+void woodland_proto_wallpaper_finish(struct woodland_proto *proto);
+/**
+ * 新输出的 scene 树建好之后调用：把壁纸基线重新压到最底。
+ *
+ * 图层树是用 lower_to_bottom() 建的（src/output/output.c），谁后建谁更靠下，
+ * 所以每来一个输出都会把壁纸树顶到 layer-shell 的 background 之上。这条调用
+ * 是"壁纸必须在 layer-shell 下面"的唯一保证，热插拔路径别漏。
+ */
+void woodland_proto_wallpaper_output_added(struct woodland_proto *proto,
+                                           struct wlr_output *output);
 
 #endif

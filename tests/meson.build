@@ -83,6 +83,39 @@ if get_option('test').enabled()
          timeout: 60)
   endif
 
+  # treeland 壁纸协议（manager / notifier / shell）。XML 用的是仓库内副本
+  # （protocols/treeland/），所以不像上面几项那样依赖系统里装了对应的包。
+  # 另外要 ext-workspace 的客户端头：切工作区没法用键盘（headless 没设备），
+  # 只能走这一个协议；它来自 wayland-protocols，缺了就不注册这个测试。
+  wp_shell_xml = meson.project_source_root() / 'protocols' / 'treeland' / 'treeland-wallpaper-shell-unstable-v1.xml'
+  wp_manager_xml = meson.project_source_root() / 'protocols' / 'treeland' / 'treeland-wallpaper-manager-unstable-v1.xml'
+  ext_workspace_xml = wp_datadir / 'staging' / 'ext-workspace' / 'ext-workspace-v1.xml'
+
+  if wayland_client_dep.found() and wayland_scanner.found() and fs.exists(ext_workspace_xml)
+    wp_probe_srcs = ['smoke/wallpaper_probe.c']
+    foreach p : [[wp_shell_xml, 'treeland-wallpaper-shell-unstable-v1'],
+                 [wp_manager_xml, 'treeland-wallpaper-manager-unstable-v1'],
+                 [ext_workspace_xml, 'ext-workspace-v1']]
+      wp_probe_srcs += custom_target(p[1] + '-client-header',
+        input: p[0], output: p[1] + '-client-protocol.h',
+        command: [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@'])
+      wp_probe_srcs += custom_target(p[1] + '-client-code',
+        input: p[0], output: p[1] + '-protocol.c',
+        command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'])
+    endforeach
+
+    wallpaper_probe = executable('wallpaper_probe', wp_probe_srcs,
+                                 dependencies: [wayland_client_dep])
+    test('smoke-wallpaper',
+         find_program('sh'),
+         args: [meson.current_source_dir() / 'smoke' / 'run_wallpaper_smoke.sh',
+                woodland_bin.full_path(),
+                wallpaper_probe.full_path(),
+                wctl_bin.full_path()],
+         is_parallel: false,
+         timeout: 60)
+  endif
+
   # output-management 的事件顺序回归（apply 的 succeeded 必须先于新一轮
   # configuration + done）。协议 xml 属于 wlr-protocols（不在
   # wayland-protocols 里），只认系统安装位置：wrap 内的 wlroots 属于嵌套

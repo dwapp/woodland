@@ -24,6 +24,7 @@
 #include "seat.h"
 #include "wlr-gamma-control-unstable-v1-client-protocol.h"
 #include "woodland.h"
+#include "workspace.h"
 
 struct client_state {
     struct zwlr_gamma_control_manager_v1 *manager;
@@ -131,6 +132,8 @@ int main(void)
     assert(woodland_cursor_init(&server));
     assert(woodland_seat_init(&server));
     woodland_cursor_init_events(&server);
+    /* 协议层要挂壁纸族，壁纸族监听 workspace_changed（同 output_removed） */
+    assert(woodland_workspace_init(&server));
 
     /* 初始化协议层（包含 output-management, power, gamma-control） */
     assert(woodland_protocol_init(&server));
@@ -227,6 +230,7 @@ int main(void)
     wl_client_destroy(client);
 
     woodland_protocol_finish(&server);
+    woodland_workspace_finish(&server);
     woodland_seat_finish(&server);
     woodland_cursor_finish_events(&server);
     woodland_cursor_finish(&server);
