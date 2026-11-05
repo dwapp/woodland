@@ -9,7 +9,7 @@ BIN="${1:-./build/src/woodland}"
 
 # 日志落到文件而不是终端：退出码之外的东西（启动告警、崩溃栈）才是证据
 SMOKE_LOG="$(mktemp)"
-WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1 "$BIN" \
+WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_HEADLESS_OUTPUTS=1 "$BIN" \
     >"$SMOKE_LOG" 2>&1 &
 pid=$!
 

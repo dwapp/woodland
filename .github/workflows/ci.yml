@@ -11,20 +11,10 @@ jobs:
     # 编 fallback（第一个是 wayland，它要 expat），链条就断在 setup。
     container:
       image: archlinux:base-devel
-      # 光 mknod 出 /dev/udmabuf 不够：默认 cgroup 设备白名单不放行，
-      # open() 会返回 EPERM（不是 ENODEV，说明内核有驱动）。放开设备
-      # 访问，配合下面那个建节点的 step。
-      options: --privileged
     env:
       # run_headless.sh 直接用继承的 XDG_RUNTIME_DIR（其余 smoke 脚本自己
       # mktemp 覆盖），容器里没有这个变量时 wayland socket 建不出来。
       XDG_RUNTIME_DIR: /tmp/xdg-runtime
-      # 不要在这里全局设 WLR_RENDERER_FORCE_SOFTWARE：单测用
-      # wlr_renderer_autocreate() 建自己的 renderer，设了会把 pixman 换成
-      # GLES2，进而让 wlr_allocator_autocreate() 跳过 shm allocator、去够
-      # 不到的 udmabuf，最后断言在 server.allocator 上 SIGABRT。
-      # 只有 woodland 进程需要软件渲染，server.c 在 fx_renderer_create()
-      # 第一次失败时会自行 setenv 重试，作用范围仅限那个进程。
     steps:
       - name: Install dependencies
         run: |
@@ -51,31 +41,10 @@ jobs:
           make -C /tmp/lswt
           bin="$(find /tmp/lswt -maxdepth 2 -type f -perm -u+x -name lswt | head -1)"
           install -Dm755 "$bin" /usr/local/bin/lswt
-      - name: Provide /dev/udmabuf for the headless FX renderer
-        run: |
-          # fx_renderer 只声明 WLR_BUFFER_CAP_DMABUF，于是
-          # wlr_allocator_autocreate() 在没有 /dev/dri 的容器里只能落到
-          # udmabuf allocator。runner 的容器默认没有这个设备节点：缺了它
-          # 合成器起不来，冒烟全挂，一批单测也会在 server.allocator 上
-          # SIGABRT。设备号从 sysfs 读（udmabuf 是 misc 设备，minor 号会变）。
-          if [ -e /dev/udmabuf ]; then
-            ls -l /dev/udmabuf
-            exit 0
-          fi
-          if [ -r /sys/class/misc/udmabuf/dev ]; then
-            dev="$(cat /sys/class/misc/udmabuf/dev)"
-            mknod /dev/udmabuf c "${dev%:*}" "${dev#*:}"
-          else
-            mknod /dev/udmabuf c 10 259
-          fi
-          chmod 666 /dev/udmabuf
-          ls -l /dev/udmabuf
       - name: Setup
         run: |
           mkdir -p "$XDG_RUNTIME_DIR"
           chmod 700 "$XDG_RUNTIME_DIR"
-          # scenefx 是硬依赖（scene 实现固定走它），wrap 会顺带把 wlroots 0.20
-          # 拉到同一个子项目版本上——两边同名符号必须来自同一棵源码树。
           meson setup build -Dtest=enabled
       - name: Build
         run: meson compile -C build

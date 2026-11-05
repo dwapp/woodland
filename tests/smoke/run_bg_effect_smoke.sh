@@ -159,9 +159,15 @@ check_caps() {
     wait_view_count 0 || smoke_fail "caps probe window did not go away"
 }
 
-echo "== 能力位：默认配置（特效开）如实报支持模糊 =="
+echo "== 能力位：如实报支持模糊 =="
 start_compositor true default
-check_caps 1 "effects default to on, so blur must be advertised"
+EFFECTS="$("$WCTL" -s "$SOCK" get_tree | jq -r '.effects')"
+
+if [ "$EFFECTS" = "true" ]; then
+    check_caps 1 "effects default to on, so blur must be advertised"
+else
+    check_caps 0 "non-effects build must not advertise blur"
+fi
 
 echo "== 整窗模糊：区域原样记下 =="
 scenario whole blur 0 0 400 300
@@ -172,15 +178,19 @@ expect '.views[0].bg_effect.region == [0, 0, 400, 300]' "whole-surface region"
 # 关掉时**不许**有——"关了就不假装模糊"这条要能被断言。
 SCENE="$("$WCTL" -s "$SOCK" dump_scene)" || smoke_fail "dump_scene failed"
 blur_nodes="$(echo "$SCENE" | jq '[.. | objects | select(.type == "blur")] | length')"
-[ "$blur_nodes" -ge 1 ] || smoke_fail "effects on: must create a blur scene node"
-echo "$SCENE" | jq -e '[.. | objects | select(.type == "blur")
-    | select(.w == 400 and .h == 300)] | length >= 1' >/dev/null \
-    || smoke_fail "blur node must cover the whole content"
-# 有标题栏时内容只圆下角（corner_radius=12），blur 节点得跟内容一个角，
-# 否则圆角窗口的模糊会在下沿漏出直角。
-echo "$SCENE" | jq -e '[.. | objects | select(.type == "blur")
-    | select(.corners == [0, 0, 12, 12])] | length >= 1' >/dev/null \
-    || smoke_fail "blur node must follow the content corners"
+if [ "$EFFECTS" = "true" ]; then
+    [ "$blur_nodes" -ge 1 ] || smoke_fail "effects on: must create a blur scene node"
+    echo "$SCENE" | jq -e '[.. | objects | select(.type == "blur")
+        | select(.w == 400 and .h == 300)] | length >= 1' >/dev/null \
+        || smoke_fail "blur node must cover the whole content"
+    # 有标题栏时内容只圆下角（corner_radius=12），blur 节点得跟内容一个角，
+    # 否则圆角窗口的模糊会在下沿漏出直角。
+    echo "$SCENE" | jq -e '[.. | objects | select(.type == "blur")
+        | select(.corners == [0, 0, 12, 12])] | length >= 1' >/dev/null \
+        || smoke_fail "blur node must follow the content corners"
+else
+    [ "$blur_nodes" = "0" ] || smoke_fail "non-effects build must not create blur nodes"
+fi
 stop_probe
 
 echo "== 局部区域：只糊指定的一块 =="
@@ -236,10 +246,14 @@ grep -q '^READY' "$LAYER_OUT" 2>/dev/null || smoke_fail "layer probe never becam
 [ "$(view_count)" = "0" ] || smoke_fail "layer probe must not create a toplevel view"
 LAYER_SCENE="$("$WCTL" -s "$SOCK" dump_scene)" || smoke_fail "dump_scene failed (layer)"
 layer_blur="$(echo "$LAYER_SCENE" | jq '[.. | objects | select(.type == "blur")] | length')"
-[ "$layer_blur" = "1" ] || smoke_fail "layer blur must create exactly one blur node (got $layer_blur)"
-echo "$LAYER_SCENE" | jq -e '[.. | objects | select(.type == "blur")
-    | select(.w == 400 and .h == 300 and .corners == [0, 0, 0, 0])] | length == 1' >/dev/null \
-    || smoke_fail "layer blur node must cover the surface with square corners"
+if [ "$EFFECTS" = "true" ]; then
+    [ "$layer_blur" = "1" ] || smoke_fail "layer blur must create exactly one blur node (got $layer_blur)"
+    echo "$LAYER_SCENE" | jq -e '[.. | objects | select(.type == "blur")
+        | select(.w == 400 and .h == 300 and .corners == [0, 0, 0, 0])] | length == 1' >/dev/null \
+        || smoke_fail "layer blur node must cover the surface with square corners"
+else
+    [ "$layer_blur" = "0" ] || smoke_fail "non-effects build must not create blur nodes"
+fi
 kill -TERM "$probe_pid" 2>/dev/null || true
 wait "$probe_pid" 2>/dev/null || true
 probe_pid=""
@@ -266,23 +280,37 @@ echo "== 决策轨迹与不变量 =="
 # 这才是"运行期禁用"的验收点：协议全局还在、客户端设区域不报错、状态照记，
 # 但 capability 归零、场景树里一个 blur 节点都没有。
 # ---------------------------------------------------------------------------
-echo "== 关掉特效：能力位归零、不建节点、状态照记 =="
-stop_compositor
-start_compositor false disabled
+if [ "$EFFECTS" = "true" ]; then
+    echo "== 关掉特效：能力位归零、不建节点、状态照记 =="
+    stop_compositor
+    start_compositor false disabled
 
-"$WCTL" -s "$SOCK" get_tree | jq -e '.effects == false' >/dev/null \
-    || smoke_fail "get_tree must report effects off"
-"$WCTL" -s "$SOCK" get_tree | jq -e '.effects_blur == false' >/dev/null \
-    || smoke_fail "get_tree must report blur off"
-check_caps 0 "effects disabled must not advertise blur"
+    "$WCTL" -s "$SOCK" get_tree | jq -e '.effects == false' >/dev/null \
+        || smoke_fail "get_tree must report effects off"
+    "$WCTL" -s "$SOCK" get_tree | jq -e '.effects_blur == false' >/dev/null \
+        || smoke_fail "get_tree must report blur off"
+    check_caps 0 "effects disabled must not advertise blur"
 
-# 客户端照样能设区域（协议对象还在），合成器也照样记下来——只是不画。
-scenario whole-off blur 0 0 400 300
-expect '.views[0].bg_effect.blur == true' "region must still be recorded when effects are off"
-expect '.views[0].bg_effect.region == [0, 0, 400, 300]' "region must still be recorded verbatim"
-OFF_SCENE="$("$WCTL" -s "$SOCK" dump_scene)" || smoke_fail "dump_scene failed (disabled)"
-off_nodes="$(echo "$OFF_SCENE" | jq '[.. | objects | select(.type == "blur")] | length')"
-[ "$off_nodes" = "0" ] || smoke_fail "effects off must not create blur nodes (got $off_nodes)"
-stop_probe
+    # 客户端照样能设区域（协议对象还在），合成器也照样记下来——只是不画。
+    scenario whole-off blur 0 0 400 300
+    expect '.views[0].bg_effect.blur == true' "region must still be recorded when effects are off"
+    expect '.views[0].bg_effect.region == [0, 0, 400, 300]' "region must still be recorded verbatim"
+    OFF_SCENE="$("$WCTL" -s "$SOCK" dump_scene)" || smoke_fail "dump_scene failed (disabled)"
+    off_nodes="$(echo "$OFF_SCENE" | jq '[.. | objects | select(.type == "blur")] | length')"
+    [ "$off_nodes" = "0" ] || smoke_fail "effects off must not create blur nodes (got $off_nodes)"
+    stop_probe
+fi
+
+echo "== surface 销毁后设 blur region：surface_destroyed 协议错误 =="
+INERT_OUT="$XDG_RUNTIME_DIR/probe.inert.log"
+rc=0
+"$PROBE" inert-error >"$INERT_OUT" 2>&1 || rc=$?
+[ "$rc" = 3 ] || {
+    echo "--- probe output (inert-error):" >&2
+    cat "$INERT_OUT" >&2 || true
+    smoke_fail "inert-error probe expected rc=3, got $rc"
+}
+grep -q 'PROTOCOL_ERROR 0 ext_background_effect_surface_v1' "$INERT_OUT" \
+    || smoke_fail "expected PROTOCOL_ERROR 0 (surface_destroyed), got: $(cat "$INERT_OUT")"
 
 echo "bg-effect smoke passed"

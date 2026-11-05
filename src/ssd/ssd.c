@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include <stdlib.h>
+#include "config.h"
 
 #include "scene.h"
 #include <wlr/util/edges.h>
@@ -34,8 +35,13 @@ struct woodland_ssd {
     struct woodland_view *view;
     struct wlr_scene_tree *tree;
     bool active;
+#if WOODLAND_HAVE_EFFECTS
     /* 整框圆角描边：一个 rect + clipped_region 挖空内框，见 set_corner_radius */
     struct wlr_scene_rect *frame;
+    int corner_radius;                   /* 当前外框内半径，重排后要重算挖空区 */
+#else
+    struct wlr_scene_rect *border[BORDER_COUNT];
+#endif
     struct wlr_scene_rect *titlebar;
     struct wlr_scene_rect *button_bg[BUTTON_COUNT]; // 按钮悬停/按下底色（在图标之下）
     struct wlr_scene_buffer *button[BUTTON_COUNT];
@@ -46,7 +52,7 @@ struct woodland_ssd {
     enum woodland_ssd_part pressed_part; // 按下的按钮（NONE = 无）
     int width;                           /* 内容宽（缓存的几何） */
     int height;                          /* 内容高 */
-    int corner_radius;                   /* 当前外框内半径，重排后要重算挖空区 */
+    /* corner_radius 移动至上方的 #if WOODLAND_HAVE_EFFECTS 块内 */
     bool maximized;                      /* 缓存的最大化状态 */
 };
 
@@ -199,6 +205,7 @@ static struct wlr_scene_rect *make_rect(struct wlr_scene_tree *parent, int x, in
     return r;
 }
 
+#if WOODLAND_HAVE_EFFECTS
 /*
  * 外框（相对内容原点）：从 (-b, -th-b) 到 (w+b, h+b)。可见描边不再由四条
  * 1px 细条拼——细条在圆角处会被半径 clamp 掉、或者留下直角尖角，改由单个
@@ -240,6 +247,42 @@ static void ssd_apply_frame_corners(struct woodland_ssd *ssd)
     clip.corners = corner_radii_all(r);
     wlr_scene_rect_set_clipped_region(ssd->frame, clip);
 }
+#else
+static void ssd_border_geometry(const struct woodland_ssd *ssd, int index, int *out_x, int *out_y,
+                                int *out_w, int *out_h)
+{
+    int w = ssd->width;
+    int h = ssd->height;
+    int th = ssd_titlebar_height(ssd->view);
+    int b = ssd_border_width(ssd->view);
+    switch (index) {
+    case BORDER_TOP:
+        *out_x = -b;
+        *out_y = -th - b;
+        *out_w = w + 2 * b;
+        *out_h = b;
+        break;
+    case BORDER_BOTTOM:
+        *out_x = -b;
+        *out_y = h;
+        *out_w = w + 2 * b;
+        *out_h = b;
+        break;
+    case BORDER_LEFT:
+        *out_x = -b;
+        *out_y = -th;
+        *out_w = b;
+        *out_h = th + h;
+        break;
+    default: /* BORDER_RIGHT */
+        *out_x = w;
+        *out_y = -th;
+        *out_w = b;
+        *out_h = th + h;
+        break;
+    }
+}
+#endif
 
 /* 命中测试边框几何：向外扩展为抓取边距（默认 8px），解决细边框难以拖拽的问题 */
 static void ssd_border_hit_geometry(const struct woodland_ssd *ssd, int index, int *out_x, int *out_y,
@@ -351,12 +394,21 @@ static void ssd_layout(struct woodland_ssd *ssd)
         wlr_scene_rect_set_size(ssd->titlebar, w, th);
     }
 
+#if WOODLAND_HAVE_EFFECTS
     /* 整框描边：几何变了，clipped_region 的挖空区必须同步重算 */
     int fx, fy, fw, fh;
     ssd_frame_geometry(ssd, &fx, &fy, &fw, &fh);
     wlr_scene_node_set_position(&ssd->frame->node, fx, fy);
     wlr_scene_rect_set_size(ssd->frame, fw, fh);
     ssd_apply_frame_corners(ssd);
+#else
+    for (int i = 0; i < BORDER_COUNT; i++) {
+        int bx, by, rw, rh;
+        ssd_border_geometry(ssd, i, &bx, &by, &rw, &rh);
+        wlr_scene_node_set_position(&ssd->border[i]->node, bx, by);
+        wlr_scene_rect_set_size(ssd->border[i], rw, rh);
+    }
+#endif
 
     if (th <= 0) {
         return;
@@ -474,8 +526,14 @@ void woodland_ssd_create(struct woodland_view *view)
     ssd_get_titlebar_color(view, false, tc);
     float bc[4];
     ssd_get_border_color(view, false, bc);
+#if WOODLAND_HAVE_EFFECTS
     /* frame 先建：在最底层，标题栏与内容会盖住它的挖空区 */
     ssd->frame = make_rect(ssd->tree, 0, 0, 1, 1, bc);
+#else
+    for (int i = 0; i < BORDER_COUNT; i++) {
+        ssd->border[i] = make_rect(ssd->tree, 0, 0, 1, 1, bc);
+    }
+#endif
     ssd->titlebar = make_rect(ssd->tree, 0, 0, 1, 1, tc);
     /* 按钮底色：先建（在下层），图标后建（盖在上面）；默认隐藏 */
     for (int i = 0; i < BUTTON_COUNT; i++) {
@@ -498,10 +556,18 @@ void woodland_ssd_create(struct woodland_view *view)
 
     ssd_update_icon(ssd);
 
+#if WOODLAND_HAVE_EFFECTS
     if (!ssd->frame || !ssd->titlebar || !ssd->button_bg[BUTTON_CLOSE] ||
         !ssd->button_bg[BUTTON_MAXIMIZE] || !ssd->button_bg[BUTTON_MINIMIZE] ||
         !ssd->button[BUTTON_CLOSE] || !ssd->button[BUTTON_MAXIMIZE] ||
         !ssd->button[BUTTON_MINIMIZE]) {
+#else
+    if (!ssd->titlebar || !ssd->border[BORDER_TOP] || !ssd->border[BORDER_BOTTOM] ||
+        !ssd->border[BORDER_LEFT] || !ssd->border[BORDER_RIGHT] || !ssd->button_bg[BUTTON_CLOSE] ||
+        !ssd->button_bg[BUTTON_MAXIMIZE] || !ssd->button_bg[BUTTON_MINIMIZE] ||
+        !ssd->button[BUTTON_CLOSE] || !ssd->button[BUTTON_MAXIMIZE] ||
+        !ssd->button[BUTTON_MINIMIZE]) {
+#endif
         wlr_log(WLR_ERROR, "failed to create ssd scene rects");
         wlr_scene_node_destroy(&ssd->tree->node);
         free(ssd);
@@ -540,7 +606,13 @@ static void ssd_apply_state(struct woodland_ssd *ssd)
     wlr_scene_node_set_enabled(&ssd->tree->node, true);
 
     bool maximized = view->maximized;
+#if WOODLAND_HAVE_EFFECTS
     wlr_scene_node_set_enabled(&ssd->frame->node, !maximized);
+#else
+    for (int i = 0; i < BORDER_COUNT; i++) {
+        wlr_scene_node_set_enabled(&ssd->border[i]->node, !maximized);
+    }
+#endif
     /* 标题栏被客户端隐藏时，标题栏本体/按钮/图标/文字一起收掉——
      * 只不是"高度设成 0"，是为了不留下 0 尺寸的节点参与命中与渲染 */
     bool titlebar = ssd_titlebar_height(view) > 0;
@@ -637,7 +709,13 @@ void woodland_ssd_set_active(struct woodland_view *view, bool active)
     wlr_scene_rect_set_color(ssd->titlebar, tc);
     float bc[4];
     ssd_get_border_color(view, active, bc);
+#if WOODLAND_HAVE_EFFECTS
     wlr_scene_rect_set_color(ssd->frame, bc);
+#else
+    for (int i = 0; i < BORDER_COUNT; i++) {
+        wlr_scene_rect_set_color(ssd->border[i], bc);
+    }
+#endif
     /* 激活态改变时，刷新标题栏排版及文本前景色 */
     if (changed) {
         ssd_layout(ssd);
@@ -772,12 +850,17 @@ bool woodland_ssd_titlebar_visible(const struct woodland_view *view)
 
 void woodland_ssd_set_corner_radius(struct woodland_view *view, int radius)
 {
+#if WOODLAND_HAVE_EFFECTS
     struct woodland_ssd *ssd = view ? view->ssd : NULL;
     if (!ssd) {
         return;
     }
     ssd->corner_radius = radius < 0 ? 0 : radius;
     ssd_apply_frame_corners(ssd);
+#else
+    (void)view;
+    (void)radius;
+#endif
 }
 
 void woodland_ssd_finish(void)

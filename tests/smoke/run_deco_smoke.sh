@@ -64,6 +64,8 @@ while [ "$i" -lt 100 ]; do
     sleep 0.05; i=$((i+1))
 done
 [ -n "$SOCK" ] || smoke_fail "debug socket never appeared"
+EFFECTS="$("$WCTL" -s "$SOCK" get_tree | jq -r '.effects')"
+
 
 # 圆角现在总是有渲染后端（scenefx 常开），能不能画出来取决于 [effects] enabled；
 # 默认配置是开的，所以这里的期望值写死"画"。"关掉后不长角"由 smoke-bg-effect
@@ -166,24 +168,27 @@ scenario effect radius 12 shadow 40 0 10 0 0 0 102
 expect '.views[0].deco.corner_radius == 12' "corner radius must be recorded"
 expect '.views[0].deco.shadow_radius == 40' "shadow radius must be recorded"
 expect '.views[0].deco.shadow_offset == [0, 10]' "shadow offset must be recorded"
-expect '.views[0].deco.rendered == ["corner_radius"]' "corner radius has a render backend"
-expect '.views[0].ssd.margins == [1, 27, 1, 1]' "radius/shadow must not change geometry"
+if [ "$EFFECTS" = "true" ]; then
+    expect '.views[0].deco.rendered == ["corner_radius"]' "corner radius has a render backend"
 
-# 圆角必须落在一整圈描边上：frame 外圆角 R+b，clipped_region 挖空内框且内圆角
-# R。旧实现是四条 1px 细条，半径会被细条尺寸 clamp 掉、角上只剩直角——钉住
-# 不会再退回去。R=12，b=1，内容 400x300，标题栏 26。
-ROUND_SCENE="$("$WCTL" -s "$SOCK" dump_scene)" || smoke_fail "dump_scene failed (rounded frame)"
-echo "$ROUND_SCENE" | jq -e '
-    [.. | objects | select(.type == "rect" and .corners == [13,13,13,13])] as $f
-    | ($f | length) == 1
-      and ($f[0].clip.corners == [12,12,12,12])
-      and ($f[0].clip.x == 1 and $f[0].clip.y == 1)
-      and ($f[0].clip.w == 400 and $f[0].clip.h == 326)
-      and ($f[0].w == 402 and $f[0].h == 328)
-' >/dev/null || smoke_fail "radius must produce one stroked frame (outer R+b, inner R)"
-echo "$ROUND_SCENE" | jq -e '
-    [.. | objects | select(.type == "rect" and (.w == 1 or .h == 1))] | length == 0
-' >/dev/null || smoke_fail "no 1px border strips may remain outside the rounded frame"
+    # 圆角必须落在一整圈描边上：frame 外圆角 R+b，clipped_region 挖空内框且内圆角
+    # R。旧实现是四条 1px 细条，半径会被细条尺寸 clamp 掉、角上只剩直角——钉住
+    # 不会再退回去。R=12，b=1，内容 400x300，标题栏 26。
+    ROUND_SCENE="$("$WCTL" -s "$SOCK" dump_scene)" || smoke_fail "dump_scene failed (rounded frame)"
+    echo "$ROUND_SCENE" | jq -e '
+        [.. | objects | select(.type == "rect" and .corners == [13,13,13,13])] as $f
+        | ($f | length) == 1
+          and ($f[0].clip.corners == [12,12,12,12])
+          and ($f[0].clip.x == 1 and $f[0].clip.y == 1)
+          and ($f[0].clip.w == 400 and $f[0].clip.h == 326)
+          and ($f[0].w == 402 and $f[0].h == 328)
+    ' >/dev/null || smoke_fail "radius must produce one stroked frame (outer R+b, inner R)"
+    echo "$ROUND_SCENE" | jq -e '
+        [.. | objects | select(.type == "rect" and (.w == 1 or .h == 1))] | length == 0
+    ' >/dev/null || smoke_fail "no 1px border strips may remain outside the rounded frame"
+else
+    expect '.views[0].deco.rendered == []' "radius/shadow have no render backend"
+fi
 stop_probe
 
 echo "== context 销毁：边框恢复默认，标题栏保持隐藏 =="
@@ -221,10 +226,12 @@ echo "== 决策轨迹与不变量 =="
 "$WCTL" -s "$SOCK" get_trace | jq -e '
     [.entries[] | select(.what == "deco")] | length >= 5' >/dev/null \
     || smoke_fail "deco trace entries missing"
-"$WCTL" -s "$SOCK" get_trace | jq -e '
-    [.entries[] | select(.what == "deco" and (.detail | contains("corner_radius"))
-                         and (.detail | contains("effects disabled")))] | length == 0' >/dev/null \
-    || smoke_fail "corner radius must not claim to be disabled"
+if [ "$EFFECTS" = "true" ]; then
+    "$WCTL" -s "$SOCK" get_trace | jq -e '
+        [.entries[] | select(.what == "deco" and (.detail | contains("corner_radius"))
+                             and (.detail | contains("effects disabled")))] | length == 0' >/dev/null \
+        || smoke_fail "corner radius must not claim to be disabled"
+fi
 "$WCTL" -s "$SOCK" get_trace | jq -e '
     [.entries[] | select(.what == "deco" and (.detail | contains("shadow"))
                          and (.detail | contains("no render backend")))] | length >= 1' >/dev/null \

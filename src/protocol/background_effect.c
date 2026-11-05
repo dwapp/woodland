@@ -70,9 +70,14 @@ struct bg_manager {
 
 static uint32_t bg_capabilities(struct woodland_proto_bg_effect *family)
 {
+#if WOODLAND_HAVE_EFFECTS
     return woodland_effect_server_blur_enabled(family->server)
                ? EXT_BACKGROUND_EFFECT_MANAGER_V1_CAPABILITY_BLUR
                : 0;
+#else
+    (void)family;
+    return 0;
+#endif
 }
 
 static const struct ext_background_effect_manager_v1_interface manager_impl;
@@ -247,6 +252,8 @@ static void surface_handle_set_blur_region(struct wl_client *client, struct wl_r
     (void)client;
     struct woodland_bg_surface *bg = bg_from_resource(resource);
     if (!bg || bg->inert) {
+        wl_resource_post_error(resource, EXT_BACKGROUND_EFFECT_SURFACE_V1_ERROR_SURFACE_DESTROYED,
+                               "surface has been destroyed");
         return;
     }
     if (region_resource) {
@@ -407,8 +414,19 @@ void woodland_proto_bg_effect_finish(struct woodland_proto *proto)
     if (!family) {
         return;
     }
-    /* 资源随客户端/display 一起走，这里只摘全局 */
-    wl_global_destroy(family->global);
+    if (family->global) {
+        wl_global_destroy(family->global);
+        family->global = NULL;
+    }
+    struct bg_manager *manager, *tmp;
+    wl_list_for_each_safe(manager, tmp, &family->managers, link)
+    {
+        wl_list_remove(&manager->link);
+        if (manager->resource) {
+            wl_resource_set_user_data(manager->resource, NULL);
+        }
+        free(manager);
+    }
     free(family);
     proto->bg_effect = NULL;
 }
