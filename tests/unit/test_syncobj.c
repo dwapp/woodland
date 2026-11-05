@@ -20,6 +20,7 @@
 #include "protocol.h"
 #include "seat.h"
 #include "woodland.h"
+#include "workspace.h"
 
 /*
  * linux-drm-syncobj-v1 接线的确定性验证。
@@ -116,6 +117,7 @@ int main(void)
     assert(woodland_output_init(&server));
     assert(woodland_cursor_init(&server));
     assert(woodland_seat_init(&server));
+    assert(woodland_workspace_init(&server));
     assert(woodland_protocol_init(&server));
 
     /* pixman + headless：renderer/backend 不满足 timeline 门控，全局不暴露 */
@@ -151,7 +153,7 @@ int main(void)
     woodland_protocol_finish(&server);
     assert(server.proto == NULL);
     woodland_protocol_finish(&server);
-
+    woodland_workspace_finish(&server);
     woodland_seat_finish(&server);
     woodland_cursor_finish(&server);
     woodland_output_finish(&server);
