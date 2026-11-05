@@ -152,6 +152,61 @@ int main(void)
     woodland_effect_set_blur_region(&view, NULL, 400, 300);
     assert(!woodland_effect_blur_visible(&view));
 
+    /* ---- 10) 逐 buffer 圆角：只有贴窗口边的角才圆 ---- */
+    struct woodland_effect_corners window = {12, 12, 12, 12};
+    struct woodland_effect_corners per;
+
+    /* 主 buffer：占满 400x300，四角全跟着圆 */
+    clear_corners(&per);
+    woodland_effect_buffer_corners(&window, 0, 0, 400, 300, 400, 300, &per);
+    assert(per.top_left == 12 && per.top_right == 12);
+    assert(per.bottom_left == 12 && per.bottom_right == 12);
+
+    /* 中间的 subsurface（视频、输入法候选框）：哪个角都不贴边 */
+    clear_corners(&per);
+    woodland_effect_buffer_corners(&window, 50, 60, 100, 80, 400, 300, &per);
+    assert(per.top_left == 0 && per.top_right == 0);
+    assert(per.bottom_left == 0 && per.bottom_right == 0);
+
+    /* 左上角的 child：只圆左上 */
+    clear_corners(&per);
+    woodland_effect_buffer_corners(&window, 0, 0, 100, 80, 400, 300, &per);
+    assert(per.top_left == 12 && per.top_right == 0);
+    assert(per.bottom_left == 0 && per.bottom_right == 0);
+
+    /* 右下角的一块：只圆右下——这正是"父 buffer 圆了、subsurface 又盖成直角"的修法 */
+    clear_corners(&per);
+    woodland_effect_buffer_corners(&window, 300, 220, 100, 80, 400, 300, &per);
+    assert(per.top_left == 0 && per.top_right == 0);
+    assert(per.bottom_left == 0 && per.bottom_right == 12);
+
+    /* 整条右边（比如侧边栏 subsurface）：右上 + 右下 */
+    clear_corners(&per);
+    woodland_effect_buffer_corners(&window, 300, 0, 100, 300, 400, 300, &per);
+    assert(per.top_left == 0 && per.top_right == 12);
+    assert(per.bottom_left == 0 && per.bottom_right == 12);
+
+    /* 越界（subsurface 比父 surface 大）：按贴边算，仍要圆 */
+    clear_corners(&per);
+    woodland_effect_buffer_corners(&window, -10, -10, 420, 320, 400, 300, &per);
+    assert(per.top_left == 12 && per.bottom_right == 12);
+
+    /* 上角本来是 0（有标题栏的内容）：逐 buffer 之后依然是 0，别把 0 变成半径 */
+    struct woodland_effect_corners under_titlebar = {0, 0, 12, 12};
+    clear_corners(&per);
+    woodland_effect_buffer_corners(&under_titlebar, 0, 0, 400, 300, 400, 300, &per);
+    assert(per.top_left == 0 && per.top_right == 0);
+    assert(per.bottom_left == 12 && per.bottom_right == 12);
+
+    /* 非法输入：不写脏值，四角归 0 */
+    clear_corners(&per);
+    woodland_effect_buffer_corners(&window, 0, 0, 0, 0, 400, 300, &per);
+    assert(per.top_left == 0 && per.bottom_right == 0);
+    clear_corners(&per);
+    woodland_effect_buffer_corners(NULL, 0, 0, 400, 300, 400, 300, &per);
+    assert(per.top_left == 0 && per.bottom_right == 0);
+    woodland_effect_buffer_corners(&window, 0, 0, 400, 300, 400, 300, NULL);
+
     pixman_region32_fini(&region);
     woodland_config_destroy(config);
 
