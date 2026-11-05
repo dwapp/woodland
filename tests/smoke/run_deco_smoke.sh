@@ -168,6 +168,22 @@ expect '.views[0].deco.shadow_radius == 40' "shadow radius must be recorded"
 expect '.views[0].deco.shadow_offset == [0, 10]' "shadow offset must be recorded"
 expect '.views[0].deco.rendered == ["corner_radius"]' "corner radius has a render backend"
 expect '.views[0].ssd.margins == [1, 27, 1, 1]' "radius/shadow must not change geometry"
+
+# 圆角必须落在一整圈描边上：frame 外圆角 R+b，clipped_region 挖空内框且内圆角
+# R。旧实现是四条 1px 细条，半径会被细条尺寸 clamp 掉、角上只剩直角——钉住
+# 不会再退回去。R=12，b=1，内容 400x300，标题栏 26。
+ROUND_SCENE="$("$WCTL" -s "$SOCK" dump_scene)" || smoke_fail "dump_scene failed (rounded frame)"
+echo "$ROUND_SCENE" | jq -e '
+    [.. | objects | select(.type == "rect" and .corners == [13,13,13,13])] as $f
+    | ($f | length) == 1
+      and ($f[0].clip.corners == [12,12,12,12])
+      and ($f[0].clip.x == 1 and $f[0].clip.y == 1)
+      and ($f[0].clip.w == 400 and $f[0].clip.h == 326)
+      and ($f[0].w == 402 and $f[0].h == 328)
+' >/dev/null || smoke_fail "radius must produce one stroked frame (outer R+b, inner R)"
+echo "$ROUND_SCENE" | jq -e '
+    [.. | objects | select(.type == "rect" and (.w == 1 or .h == 1))] | length == 0
+' >/dev/null || smoke_fail "no 1px border strips may remain outside the rounded frame"
 stop_probe
 
 echo "== context 销毁：边框恢复默认，标题栏保持隐藏 =="
