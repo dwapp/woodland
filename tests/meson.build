@@ -118,4 +118,44 @@ if get_option('test').enabled()
          is_parallel: false,
          timeout: 90)
   endif
+
+  # treeland-decoration：客户端探针 + wctl 断言（边距/覆盖值/协议错误）。
+  # 需要 wayland-client、wayland-protocols 里的 xdg-shell / xdg-decoration，
+  # 以及仓库自带的 treeland XML；缺任何一样就不注册，免得把构建搞挂。
+  if wayland_client_dep.found() and wp_dep.found() and wayland_scanner.found()
+    deco_probe_srcs = ['smoke/deco_probe.c']
+    deco_xmls = [
+      [wp_datadir / 'stable' / 'xdg-shell' / 'xdg-shell.xml', 'xdg-shell'],
+      [wp_datadir / 'unstable' / 'xdg-decoration' / 'xdg-decoration-unstable-v1.xml',
+       'xdg-decoration-unstable-v1'],
+      [meson.project_source_root() / 'protocols' / 'treeland' /
+       'treeland-decoration-unstable-v1.xml', 'treeland-decoration-unstable-v1'],
+    ]
+    deco_xml_ok = true
+    foreach p : deco_xmls
+      if not fs.exists(p[0])
+        deco_xml_ok = false
+      endif
+    endforeach
+    if deco_xml_ok
+      foreach p : deco_xmls
+        deco_probe_srcs += custom_target(p[1] + '-client-header',
+          input: p[0], output: p[1] + '-client-protocol.h',
+          command: [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@'])
+        deco_probe_srcs += custom_target(p[1] + '-client-code',
+          input: p[0], output: p[1] + '-protocol.c',
+          command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'])
+      endforeach
+      deco_probe = executable('deco_probe', deco_probe_srcs,
+                              dependencies: [wayland_client_dep])
+      test('smoke-decoration',
+           find_program('sh'),
+           args: [meson.current_source_dir() / 'smoke' / 'run_deco_smoke.sh',
+                  woodland_bin.full_path(),
+                  deco_probe.full_path(),
+                  wctl_bin.full_path()],
+           is_parallel: false,
+           timeout: 90)
+    endif
+  endif
 endif
