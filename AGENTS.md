@@ -84,7 +84,7 @@ wctl --help
 
 **查状态优先用 `wctl get_tree` / `get_focus`，不要去数截图里的像素。** "非激活标题栏到底是 246 还是 247" 这类问题，`wctl get_tree | jq '[.views[] | select(.activated)] | length'` 一句话就说清了。
 
-`--self-check` 打开后，每次状态变化（map / unmap / destroy / 焦点切换）都会在 **idle** 阶段跑一遍不变量断言（视图链表完整、焦点可聚焦且与键盘 surface 一致、激活态唯一、SSD 颜色 / foreign-toplevel / xdg configure 与激活态一致、SSD 几何与内容尺寸一致），失败记 `self-check <name> failed after <reason>: expected .., got ..` 的 ERROR 日志。它不退出进程，但会让 `tests/smoke/run_ipc_smoke.sh` 失败——改完窗口状态相关的代码后跑一次 `--self-check` 是成本最低的回归。
+`--self-check` 打开后，每次状态变化（map / unmap / destroy / 焦点切换）都会在 **idle** 阶段跑一遍不变量断言（视图链表完整、焦点可聚焦且与键盘 surface 一致、激活态唯一、SSD 颜色 / foreign-toplevel / xdg configure 与激活态一致、SSD 几何与内容尺寸一致、**壁纸树是 scene 根的第一个子节点**），失败记 `self-check <name> failed after <reason>: expected .., got ..` 的 ERROR 日志。它不退出进程，但会让 `tests/smoke/run_ipc_smoke.sh` 失败——改完窗口状态相关的代码后跑一次 `--self-check` 是成本最低的回归。
 
 ## ⚠️ 调试陷阱（必读）
 
@@ -175,3 +175,10 @@ libwayland 的 errno，协议错误恒为 EPROTO=71）。见 `tests/smoke/deco_p
 - **M0（已完成，已合入 main）**：可编译骨架（meson + wrap、util/log、server 生命周期、headless 冒烟）。
 - **M1（进行中，feature/m1-output-render 分支）**：输出与渲染循环（输出热插拔、`wlr_output_layout`、`wlr_scene_output` 渲染、光标 + cursor-shape）。
 - **M2~M6**：窗口管理、SSD/特效、私有协议、IME/壁纸/屏保、wine 协议。
+- **壁纸协议（treeland-wallpaper-shell / -manager / -notifier）已实现**（`feature/wallpaper`）：
+  设计规格见 `docs/superpowers/specs/2026-11-05-wallpaper-protocols-design.md`。
+  woodland 只做路径校验、配置持久化（`$XDG_CONFIG_HOME/woodland/wallpaper.json`）与
+  播放控制，解码交给 `treeland-wallpaper-factory`；壁纸 surface 画在 layer-shell 的
+  background 之下。改这块要留意两件事：一是**可见性裁决**（一个源一个 surface、全堆在
+  同一位置，靠 `wallpaper_apply_visibility()` 按 workspace / 锁屏状态挑），二是
+  `server->workspace_changed` 与 `server->wallpaper_tree` 这两个跨层钩子。
