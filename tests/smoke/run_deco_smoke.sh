@@ -65,6 +65,9 @@ while [ "$i" -lt 100 ]; do
 done
 [ -n "$SOCK" ] || smoke_fail "debug socket never appeared"
 
+# 圆角是不是真的画出来取决于构建：默认构建只记录，effects 构建交给 scenefx
+EFFECTS="$("$WCTL" -s "$SOCK" get_tree | jq -r '.effects')"
+
 view_count() {
     "$WCTL" -s "$SOCK" get_tree 2>/dev/null | jq -r '.count // -1'
 }
@@ -157,12 +160,16 @@ scenario bare border 0 0 0 0 0 titlebar 1
 expect '.views[0].ssd.margins == [0, 0, 0, 0]' "zero border + hidden titlebar means no decoration"
 stop_probe
 
-echo "== 圆角/阴影：只记录，不算 rendered =="
+echo "== 圆角/阴影：圆角按构建决定，阴影只记录 =="
 scenario effect radius 12 shadow 40 0 10 0 0 0 102
 expect '.views[0].deco.corner_radius == 12' "corner radius must be recorded"
 expect '.views[0].deco.shadow_radius == 40' "shadow radius must be recorded"
 expect '.views[0].deco.shadow_offset == [0, 10]' "shadow offset must be recorded"
-expect '.views[0].deco.rendered == []' "radius/shadow have no render backend"
+if [ "$EFFECTS" = "true" ]; then
+    expect '.views[0].deco.rendered == ["corner_radius"]' "effects build renders the corner radius"
+else
+    expect '.views[0].deco.rendered == []' "radius/shadow have no render backend"
+fi
 expect '.views[0].ssd.margins == [1, 27, 1, 1]' "radius/shadow must not change geometry"
 stop_probe
 
@@ -201,10 +208,17 @@ echo "== 决策轨迹与不变量 =="
 "$WCTL" -s "$SOCK" get_trace | jq -e '
     [.entries[] | select(.what == "deco")] | length >= 5' >/dev/null \
     || smoke_fail "deco trace entries missing"
+if [ "$EFFECTS" = "true" ]; then
+    # effects 构建里圆角有渲染后端，只有阴影还挂着"recorded"的说明
+    "$WCTL" -s "$SOCK" get_trace | jq -e '
+        [.entries[] | select(.what == "deco" and (.detail | contains("corner_radius"))
+                             and (.detail | contains("no render backend")))] | length == 0' >/dev/null \
+        || smoke_fail "corner radius must not claim to have no render backend"
+fi
 "$WCTL" -s "$SOCK" get_trace | jq -e '
-    [.entries[] | select(.what == "deco" and (.detail | contains("no render backend")))]
-    | length >= 2' >/dev/null \
-    || smoke_fail "trace must spell out that radius/shadow are not rendered"
+    [.entries[] | select(.what == "deco" and (.detail | contains("shadow"))
+                         and (.detail | contains("no render backend")))] | length >= 1' >/dev/null \
+    || smoke_fail "trace must spell out that the shadow is not rendered"
 "$WCTL" -s "$SOCK" self_check | jq -e '.ok == true' >/dev/null \
     || smoke_fail "self_check failed after decoration changes"
 

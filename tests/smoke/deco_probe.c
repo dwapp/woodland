@@ -19,6 +19,12 @@
  *   shadow <r> <dx> <dy> <r> <g> <b> <a>   set_shadow
  *   dup                          再建一个 context（预期被 already_used 打掉）
  *
+ * ext-background-effect-v1 相关：
+ *   blur <x> <y> <w> <h>         get_background_effect + set_blur_region
+ *   --caps                       打印 CAPS <flags>（bit0 = blur）
+ *   --alpha <0-255>              buffer 用 ARGB8888，按该 alpha 预乘
+ *   --pattern                    buffer 画彩条（不画纯灰：纯色模糊前后一样，看不出效果）
+ *
  * 退出码：0 = 正常；1 = 环境/协商失败；3 = 收到了协议错误（dup 用例）。
  */
 #define _GNU_SOURCE
@@ -35,6 +41,7 @@
 #include "treeland-decoration-unstable-v1-client-protocol.h"
 #include "xdg-decoration-unstable-v1-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
+#include "ext-background-effect-v1-client-protocol.h"
 
 #define WIDTH 400
 #define HEIGHT 300
@@ -46,13 +53,22 @@ static struct wl_shm *shm;
 static struct xdg_wm_base *wm_base;
 static struct zxdg_decoration_manager_v1 *xdg_deco_manager;
 static struct treeland_decoration_manager_v1 *deco_manager;
+static struct ext_background_effect_manager_v1 *bg_effect_manager;
+static uint32_t bg_caps;
+static int want_caps;
 
 static struct wl_surface *surface;
 static struct xdg_surface *xdg_surface;
 static struct xdg_toplevel *toplevel;
 static struct zxdg_toplevel_decoration_v1 *xdg_deco;
 static struct treeland_decoration_context_v1 *deco_ctx;
+static struct ext_background_effect_surface_v1 *bg_effect;
 static int configured;
+/* buffer 外观：alpha < 255 才能看出"后面被糊了"，pattern 让模糊前后有区别 */
+static uint32_t buffer_alpha = 255;
+static int buffer_pattern;
+
+static const struct ext_background_effect_manager_v1_listener bg_listener;
 
 /* ==================== 事件 ==================== */
 
@@ -133,6 +149,11 @@ static void registry_global(void *data, struct wl_registry *registry, uint32_t n
     } else if (strcmp(interface, treeland_decoration_manager_v1_interface.name) == 0) {
         deco_manager = wl_registry_bind(registry, name, &treeland_decoration_manager_v1_interface,
                                         version < 1 ? version : 1);
+    } else if (strcmp(interface, ext_background_effect_manager_v1_interface.name) == 0) {
+        bg_effect_manager = wl_registry_bind(registry, name,
+                                             &ext_background_effect_manager_v1_interface,
+                                             version < 1 ? version : 1);
+        ext_background_effect_manager_v1_add_listener(bg_effect_manager, &bg_listener, NULL);
     }
 }
 
@@ -146,6 +167,18 @@ static void registry_global_remove(void *data, struct wl_registry *registry, uin
 static const struct wl_registry_listener registry_listener = {
     .global = registry_global,
     .global_remove = registry_global_remove,
+};
+
+static void bg_capabilities(void *data, struct ext_background_effect_manager_v1 *manager,
+                            uint32_t flags)
+{
+    (void)data;
+    (void)manager;
+    bg_caps = flags;
+}
+
+static const struct ext_background_effect_manager_v1_listener bg_listener = {
+    .capabilities = bg_capabilities,
 };
 
 /* ==================== 工具 ==================== */
@@ -212,16 +245,40 @@ static struct wl_buffer *create_buffer(void)
         close(fd);
         return NULL;
     }
-    /* 纯灰：内容本身不重要，重要的是有一块真 buffer 让窗口 map 上来 */
+    /* 纯灰：内容本身不重要，重要的是有一块真 buffer 让窗口 map 上来；
+     * pattern 画彩条（模糊前后差别明显），alpha 用来做半透明窗口 */
     uint32_t *pixels = data;
-    for (int i = 0; i < WIDTH * HEIGHT; i++) {
-        pixels[i] = 0xff808080;
+    for (int y = 0; y < HEIGHT; y++) {
+        for (int x = 0; x < WIDTH; x++) {
+            uint32_t r = 0x80, g = 0x80, b = 0x80;
+            if (buffer_pattern) {
+                if (((x / 40) + (y / 40)) % 2 == 0) {
+                    r = 0xe0;
+                    g = 0x38;
+                    b = 0x38;
+                } else {
+                    r = 0x30;
+                    g = 0x60;
+                    b = 0xe0;
+                }
+                if ((x / 80) % 3 == 1) {
+                    g = 0xd0;
+                }
+            }
+            uint32_t a = buffer_alpha;
+            /* 预乘：wl_shm 的 ARGB8888 是 premultiplied */
+            r = r * a / 255;
+            g = g * a / 255;
+            b = b * a / 255;
+            pixels[y * WIDTH + x] = (a << 24) | (r << 16) | (g << 8) | b;
+        }
     }
     munmap(data, (size_t)size);
 
     struct wl_shm_pool *pool = wl_shm_create_pool(shm, fd, size);
-    struct wl_buffer *buffer = wl_shm_pool_create_buffer(pool, 0, WIDTH, HEIGHT, stride,
-                                                        WL_SHM_FORMAT_XRGB8888);
+    struct wl_buffer *buffer = wl_shm_pool_create_buffer(
+        pool, 0, WIDTH, HEIGHT, stride,
+        buffer_alpha < 255 ? WL_SHM_FORMAT_ARGB8888 : WL_SHM_FORMAT_XRGB8888);
     wl_shm_pool_destroy(pool);
     close(fd);
     return buffer;
@@ -253,6 +310,13 @@ int main(int argc, char *argv[])
     }
     struct wl_registry *registry = wl_display_get_registry(display);
     wl_registry_add_listener(registry, &registry_listener, NULL);
+    wl_display_roundtrip(display);
+    /*
+     * 第二轮是必须的，不是保险：bind 请求是在第一轮**分发**全局事件时才排进
+     * 发送队列的，而第一轮等的那次 sync 早在 bind 之前就发出去了。所以第一轮
+     * 返回时服务端还没看见 bind，更没来得及发 capabilities——这时读 bg_caps
+     * 永远是 0，只有 effects 构建会露馅（非 effects 构建期望值恰好也是 0）。
+     */
     wl_display_roundtrip(display);
 
     if (!compositor || !shm || !wm_base) {
@@ -287,11 +351,23 @@ int main(int argc, char *argv[])
     int want_dup = 0;
     int no_context = 0;
     int drop_context = 0;
+    int drop_effect = 0;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--no-context") == 0) {
             no_context = 1;
         } else if (strcmp(argv[i], "--drop-context") == 0) {
             drop_context = 1;
+        } else if (strcmp(argv[i], "--drop-effect") == 0) {
+            drop_effect = 1;
+        } else if (strcmp(argv[i], "--caps") == 0) {
+            want_caps = 1;
+        } else if (strcmp(argv[i], "--alpha") == 0 && i + 1 < argc) {
+            buffer_alpha = (uint32_t)atoi(argv[++i]);
+            if (buffer_alpha > 255) {
+                buffer_alpha = 255;
+            }
+        } else if (strcmp(argv[i], "--pattern") == 0) {
+            buffer_pattern = 1;
         }
     }
     if (!no_context) {
@@ -302,6 +378,15 @@ int main(int argc, char *argv[])
         }
     }
 
+    /*
+     * 能力位只跟 manager 有关，跟窗口/装饰上下文无关，所以解析完参数就打，
+     * 脚本据此决定"模糊到底该不该生效"的期望值。bit0 = blur。
+     */
+    if (want_caps) {
+        printf("CAPS %u\n", bg_caps);
+        fflush(stdout);
+    }
+
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--hold") == 0 && i + 1 < argc) {
             hold_ms = atoi(argv[++i]);
@@ -309,6 +394,31 @@ int main(int argc, char *argv[])
             /* 已在上面处理 */
         } else if (strcmp(argv[i], "--drop-context") == 0) {
             /* 已在上面处理 */
+        } else if (strcmp(argv[i], "--drop-effect") == 0) {
+            /* 已在上面处理 */
+        } else if (strcmp(argv[i], "--caps") == 0 || strcmp(argv[i], "--pattern") == 0) {
+            /* 已在上面处理 */
+        } else if (strcmp(argv[i], "--alpha") == 0 && i + 1 < argc) {
+            i++;
+        } else if (strcmp(argv[i], "blur") == 0 && i + 4 < argc) {
+            /*
+             * 背景模糊：不依赖装饰上下文（协议是独立的 surface 扩展），所以
+             * 这一支排在 !deco_ctx 的检查之前。
+             */
+            int bx = atoi(argv[++i]);
+            int by = atoi(argv[++i]);
+            int bw = atoi(argv[++i]);
+            int bh = atoi(argv[++i]);
+            if (!bg_effect_manager) {
+                fprintf(stderr, "ext_background_effect_manager_v1 not advertised\n");
+                return 77;
+            }
+            bg_effect =
+                ext_background_effect_manager_v1_get_background_effect(bg_effect_manager, surface);
+            struct wl_region *region = wl_compositor_create_region(compositor);
+            wl_region_add(region, bx, by, bw, bh);
+            ext_background_effect_surface_v1_set_blur_region(bg_effect, region);
+            wl_region_destroy(region);
         } else if (!deco_ctx) {
             fprintf(stderr, "operation %s needs a decoration context\n", argv[i]);
             return 1;
@@ -396,6 +506,18 @@ int main(int argc, char *argv[])
         fflush(stdout);
     }
 
+    /*
+     * 撤掉背景效果对象：协议说区域"在下一次提交时移除"。这里不提交新的
+     * buffer（没必要），合成器在对象销毁时就该把 blur 摘掉。
+     */
+    if (drop_effect && bg_effect) {
+        ext_background_effect_surface_v1_destroy(bg_effect);
+        bg_effect = NULL;
+        pump(150);
+        printf("EFFECT_DROPPED\n");
+        fflush(stdout);
+    }
+
     int rc = pump(hold_ms);
     if (rc != 0) {
         print_protocol_error();
@@ -404,6 +526,9 @@ int main(int argc, char *argv[])
 
     if (deco_ctx) {
         treeland_decoration_context_v1_destroy(deco_ctx);
+    }
+    if (bg_effect) {
+        ext_background_effect_surface_v1_destroy(bg_effect);
     }
     wl_buffer_destroy(buffer);
     xdg_toplevel_destroy(toplevel);
