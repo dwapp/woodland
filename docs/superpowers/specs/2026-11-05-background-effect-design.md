@@ -4,7 +4,8 @@
 > 状态：已实现（协议 + 渲染；scenefx 路径需要 `-Deffects=enabled`）
 > 协议定义：wayland-protocols ≥ 1.41 `staging/ext-background-effect/ext-background-effect-v1.xml`
 > 参考实现：`/home/ut004971@uos/work/doors`（wlroots 0.21 内建同名协议 + 自研 shader）、
-> treeland vendored 的 wlroots MR5304
+> treeland vendored 的 wlroots MR5304；`/home/ut004971@uos/work/mango`（scenefx 用法对照，
+> 见 §8）
 
 ## 1. 背景与目标
 
@@ -45,15 +46,22 @@ pending/current 两份 `struct woodland_bg_state { pixman_region32_t blur_region
 surface 销毁时按 `wlr_addon` 摘挂（`struct woodland_bg_surface` 挂在
 `surface->addons` 上），保证"对象比 surface 活得久"的客户端不会踩到野指针。
 
-### 3.2 提交时才写 view 状态
+### 3.2 提交时按目标分发
 
-`bg_state_commit` 里做两件事：
+`bg_state_commit` 把 current region 推给渲染端，目标有两类：
 
-1. 把 current region 交给 `woodland_effect_set_blur_region(view, region, w, h)`；
-   区域在这里就裁到 surface 尺寸（`woodland_effect_blur_box()`），越界部分丢掉；
-2. 记一条 `bg_effect` 轨迹（`blur=on|off`），脚本靠它断言"提交真的被处理了"。
+| surface 角色 | 处理 |
+|---|---|
+| xdg toplevel / xwayland 窗口 | `woodland_effect_set_blur_region(view, ...)`，状态记在 view 上 |
+| layer surface（面板、Dock、启动器） | `woodland_effect_layer_blur(layer, box)`，blur 节点挂在它自己的场景树上 |
+| 其他（cursor、输入法） | 记一条 `ignored` 轨迹，不假装生效 |
 
-`view` 还没解析出来（surface 先于 toplevel）时静默跳过——下一次 commit 会再来。
+区域统一先过 `woodland_effect_blur_box()` 裁到 surface 尺寸，越界部分丢掉。
+每类都记一条 `bg_effect` 轨迹（`blur=on|off` / `layer blur=on|off`），脚本靠它
+断言"提交真的被处理了"。
+
+layer surface 这条路径不是可选项：面板是模糊最常见的用户，而它们没有 view
+对象——只认 view 的话，客户端设了区域什么都不发生，还查不出原因。
 
 ### 3.3 capability 按构建如实报
 
@@ -63,12 +71,18 @@ surface 销毁时按 `wlr_addon` 摘挂（`struct woodland_bg_surface` 挂在
 
 ## 4. 渲染（`src/effect/effect.c`，仅 effects 构建）
 
-### 4.1 节点位置：贴 surface，不贴 scene_tree 原点
+### 4.1 节点位置：贴 surface，且用 tree 的坐标系
 
-blur 节点是 `view->scene_tree` 的子节点，但 `scene_tree` 的原点是**内容原点**
-（SSD 的标题栏/边框在负坐标上）。所以节点位置要取内容 buffer 节点的 `x/y`，
-不能拿 `xdg_toplevel->base->geometry` 的 `x/y` 当位置——CSD 客户端会把阴影算进
-geometry，那样会整体偏移。
+blur 节点是 `view->scene_tree` 的子节点，`wlr_scene_node_set_position()` 收的是
+**相对父节点**的坐标；而 `view->scene_tree` 的原点已经是内容原点（SSD 的标题栏
+和边框画在负坐标上）。两件事叠起来有个坑：
+
+- 位置要取内容 buffer 在 tree 内的偏移（不是 `xdg_toplevel->base->geometry` 的
+  `x/y`，CSD 客户端会把阴影算进 geometry，那样会整体偏移）；
+- 这个偏移必须**从 tree 的子节点开始算**，不能把 `view->scene_tree->node.x/y`
+  自己加进去——那是 tree 相对场景根的位置，加上去等于把标题栏高度算两遍，
+  模糊会整体下沉一个标题栏。这个 bug 真的发生过，靠 `dump_scene` 里
+  `blur pos` 与 `buffer pos` 对不上才逮到（差 27px = 标题栏高度）。
 
 ### 4.2 裁剪区域用 surface 局部坐标
 
@@ -88,7 +102,25 @@ geometry，那样会整体偏移。
 
 blur 节点也吃同一份四角：模糊区域自己也要圆，否则圆角窗口的模糊会漏出直角。
 
-### 4.4 渲染器必须换
+但"一个窗口"往往不止一块 buffer：客户端用 subsurface 放视频、放输入法候选框、
+放自带子窗口时，那些 buffer 画在父 surface **之上**，会把父 buffer 的圆角重新
+盖成直角——右下角一块全屏大小的 subsurface，窗口右下就露一个尖角。所以圆角是
+**逐 buffer** 下发的（`woodland_effect_buffer_corners()`）：只有自己贴到窗口
+那条边的角才跟着圆，中间的 buffer 一律直角。
+
+### 4.4 只在客户端画过的地方糊
+
+`set_blur_region` 是客户端声明的区域，而客户端声明得比画得大很常见：CSD 窗口的
+surface 里有一圈"阴影预留"的全透明边，把整个 surface 声明成模糊区域时，那一圈
+会在窗口外面糊出一圈毛边。所以 blur 节点带一个透明度遮罩
+（`wlr_scene_blur_set_transparency_mask_source()`，指到内容 buffer），scenefx 用
+它打一张 stencil，完全透明的像素不画模糊。
+
+判据是二值的（`discard_transparent` 写 stencil），不是按 alpha 加权，所以半透明
+窗口不会被"压暗"——它只是把"没画东西的地方"排除掉。实测：窗口边缘留 40px
+全透明，模糊前后这两张图在那一圈的 RMSE 为 **0**，而中心区域差 0.043。
+
+### 4.5 渲染器必须换
 
 scenefx 的 `wlr_scene_*` 会顶替 wlroots 的实现（同名符号，链接顺序
 `scene_deps = [scenefx, wlroots]`），而它的 `wlr_scene_output_commit()` 直接把
@@ -113,12 +145,14 @@ render pass 强转成自己的 `fx_render_pass`。所以 effects 构建里
 ## 6. 测试
 
 - `tests/unit/test_effect.c`：半径优先级（覆盖 > `[effects] corner_radius`）、
-  clamp、四角分配、region 裁剪（空/越界/全外/负坐标）、提交状态。
+  clamp、四角分配、region 裁剪（空/越界/全外/负坐标）、提交状态，以及逐 buffer
+  圆角的边判定（全窗口 / 中间 / 左上 / 右下 / 整条边 / 越界 / 上角本来就是 0）。
 - `tests/unit/test_session_lock.c`：effects 构建里必须用 `fx_renderer_create()`，
   否则 scenefx 断言；没有 DRM 节点的机器上 skip（77），不伪装成通过。
 - `smoke-bg-effect`：capability、整窗/局部/越界/无对象/销毁五个场景的协议状态，
   外加 **scene 节点断言**（effects 构建必须有铺满内容的 blur 节点，默认构建
-  必须没有）。
+  必须没有）；再加一个 `--layer` 场景：layer surface 设模糊后必须出现铺满它、
+  四角为 0 的 blur 节点，surface 销毁后节点必须跟着消失。
 - `smoke-xwayland`：标题栏底色断言改成 `±1%` 容差——wlroots renderer 与
   fx_renderer 在 sRGB 舍入上差一个最低位（247 vs 246），这不是画错了。
 
@@ -129,3 +163,24 @@ render pass 强转成自己的 `fx_render_pass`。所以 effects 构建里
 - `set_blur_region` 只取区域的**包围盒**（`pixman_region32_extents`），不做
   逐矩形的多块裁剪。多矩形区域的中间空洞会被一起糊——协议允许，先记着。
 - `[effects] enabled/blur/shadow` 仍是预留字段，别当成生效开关。
+
+## 8. 与 mango 的对照（代码级）
+
+mango 也用 scenefx，但它的模糊是**配置驱动**（`blur`/`blur_layer`/规则里的
+`no_blur`），woodland 是**协议驱动**（客户端 `set_blur_region`）。两者取舍不同，
+下面是逐条对照——抄了什么、为什么不抄剩下的：
+
+| mango 的做法 | woodland | 理由 |
+|---|---|---|
+| 客户端创建时就建 blur 节点，之后只改 size/pos/enabled | 懒建，建好就留着，只切 `enabled` | 结果一样；woodland 里多数窗口根本不会请求模糊，没必要每个 view 都挂一个节点 |
+| 逐个 buffer 下发圆角（`wlr_scene_node_for_each_buffer`） | 照着做，但按"贴边"判断 | mango 给每个 buffer 同一份四角，中间的小 subsurface 会被圆成一个胶囊；woodland 只圆贴窗口边的角 |
+| `wlr_scene_blur_set_transparency_mask_source()` 给 layer 用 | 所有模糊都用 | 见 §4.4，这是"声明得比画得大"时唯一不露毛边的做法 |
+| layer surface 也模糊（非 BACKGROUND/BOTTOM 层） | 照做，但只在客户端显式请求时 | 面板是模糊的主要用户；区别是 mango 无条件糊，woodland 要协议 |
+| `should_only_blur_bottom_layer`（"xray"，只糊壁纸） | **不做** | 这个开关在 scenefx 里走的是 optimized blur 的离屏缓冲，那个缓冲只由 `wlr_scene_optimized_blur` 节点（整屏一块）填充。woodland 没有这种节点，直接打开开关等于去采样一块没初始化的 buffer。要做就得先引入 mango 那套"整屏背景模糊层"，属于另一个特性 |
+| `blur_params_*`（遍数/半径/噪声/亮度/对比度/饱和度）可配、改配置时 `reset_blur_params()` 重建 | 仍写死（3 遍、半径 5） | 见 §2 非目标；参数化要先想清楚配置面（`[effects]` 已有 4 个字段），不是这一轮的题目 |
+| 窗口级 config 开关 `no_blur` + 规则 | 不做 | woodland 没有窗口规则系统，协议本身就是"逐窗口开关" |
+| 阴影（`wlr_scene_shadow_create`，带圆角） | 不做 | 见 treeland-decoration 规格 §4：阴影要算进摆放几何 |
+
+结论：值得抄且已经抄的三条是**逐 buffer 圆角**、**透明度遮罩**、**layer surface
+支持**；`should_only_blur_bottom_layer` 和模糊参数化看着诱人，但都依赖 woodland
+还没有的东西，硬抄会得到一个"配置生效了、画面更糟"的结果。
