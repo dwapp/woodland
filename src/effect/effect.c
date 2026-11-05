@@ -338,8 +338,9 @@ static void update_corners(struct woodland_view *view)
     }
 
     /*
-     * SSD 那几块矩形用的是"外框半径"：和内容的不一样——有标题栏时内容的上角
-     * 是 0（被盖住），标题栏的上角却是圆的。铺满屏幕时外框也要直角。
+     * SSD 描边用同一个内半径：内容 buffer 与标题栏按它裁角，外框描边自动
+     * 再加一个边框厚度。有标题栏时内容上角被盖住取 0，描边外轮廓仍四角圆。
+     * 铺满屏幕时一律直角。
      */
     int frame_radius = woodland_effect_corner_radius(view);
     if (view->maximized || view->fullscreen) {

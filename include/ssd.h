@@ -150,11 +150,11 @@ void woodland_ssd_finish(void);
 bool woodland_ssd_titlebar_visible(const struct woodland_view *view);
 
 /**
- * 把圆角摊到 SSD 自己的矩形上（[effects] enabled 关掉时半径已经折成 0）。
+ * 设置 SSD 外框的内圆角半径（[effects] enabled 关掉时调用方已经折成 0）。
  *
- * 上沿（标题栏 + 上边框）圆上角、下边框圆下角，左右竖条保持直角——竖条只有
- * 1px 宽，硬套半径只会把边线啃掉一截。传进来的是"外框半径"，已经由调用方
- * 按最大化/全屏折过零。
+ * 传进来的是**内轮廓**半径：内容 buffer 与标题栏按它裁角，描边外轮廓自动
+ * 加一个边框厚度。实现是单个 frame rect + clipped_region 挖空内框——四条
+ * 1px 细条拼方框时，半径会被细条尺寸 clamp 掉，角上只能留下直角。
  */
 void woodland_ssd_set_corner_radius(struct woodland_view *view, int radius);
 
