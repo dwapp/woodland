@@ -36,6 +36,16 @@ meson test -C build --print-errorlogs  # 跑全部测试
 - **CI 跑在 `archlinux:base-devel`，不要换回 `debian:stable`。** wlroots 0.20 要 wayland >= 1.24、libdrm >= 2.4.129、xkbcommon >= 1.8、pixman >= 0.43，bookworm 一个都不满足，meson 会退到 wrap 里逐个编 fallback，链条断在第一个 wayland 子项目（`Dependency "expat" not found`）。缺 expat 只是表象，补它只会把失败推到下一个依赖。
 - **顶层 `meson.build` 里给 `wlroots` 包的那层 `declare_dependency` 别删。** wlroots 作为子项目构建时，`wayland-scanner` 生成的协议头落在 `build/subprojects/wlroots/protocol/`，而它自己只导出 `include/`，于是 `wlr/types/wlr_layer_shell_v1.h` 里 `#include "wlr-layer-shell-unstable-v1-protocol.h"` 直接编译失败。系统装过 wlroots 的机器上 `/usr/include` 有这个头，问题会被掩盖——**本地能编不代表能编**。
 
+### effects 构建（scenefx）必读
+
+`-Deffects=enabled` 时场景库整个换成 scenefx 0.5，它**自带一套同名 `wlr_scene_*`** 符号（链接顺序 `scene_deps = [scenefx, wlroots]`），并且带来 blur / 圆角 / 阴影节点。三条硬约束：
+
+1. **`.c` 里只 `#include "scene.h"`，不要直接 include `wlr/types/wlr_scene.h` 或 `scenefx/...`。** `include/scene.h` 按 `WOODLAND_HAVE_EFFECTS` 选方言，混用会让同一个结构体在两个 TU 里有不同布局。
+2. **`WOODLAND_HAVE_EFFECTS` 的判断必须放在 `#include "config.h"` 之后。** 否则宏未定义、`#if` 恒假，整段代码被静默编掉（踩过一次：X11 的 context destroy 监听器没了，留下悬空 view）。
+3. **`server->renderer` 必须是 `fx_renderer_create()`。** scenefx 的 `wlr_scene_output_commit()` 把 render pass 强转成自己的 `fx_render_pass`，塞 wlroots 的 pixman/gles2 renderer 进去会在 `fx_get_render_pass` 里断言死（`test_session_lock` 就是这么挂的）。它会强制走 EGL/GLES2，所以**官方测试矩阵仍是默认构建**，effects 构建是"要看效果时才开"的第二配置。
+
+`effects` 只切"画不画"，不切"记不记"：`wctl get_tree` 的 `bg_effect`、`deco.rendered`、`--trace` 在两种构建下都要能查，差别是 `deco.rendered` 在默认构建里不含 `corner_radius`、`get_tree` 顶层 `effects` 为 false、`dump_scene` 里没有 blur 节点。想确认"到底画没画"，查这三处，不要靠截图猜。
+
 ## 调试接口（wctl）
 
 合成器在 `$XDG_RUNTIME_DIR/woodland-<wayland socket>.sock` 上开一个**只读**调试 socket，路径同时导出到 `WOODLAND_IPC`。协议是「一行一条命令、一行一条 JSON 回应」，所以 `wctl` 和 `nc -U` 都能用：
@@ -64,7 +74,7 @@ wctl --help
             {"seq":3,"ms":31,"obj":1,"what":"focus","detail":"prev=0 raise=1"}]}
 ```
 
-- `what` 是**稳定标签**（脚本会 grep），权威清单在 `include/trace.h`：`map` / `unmap` / `destroy` / `focus` / `focus_none` / `layer_focus` / `place` / `workspace` / `output_add` / `output_remove` / `cfg_apply` / `deco`。加新标签先改 trace.h 的清单，再发第一条轨迹。
+- `what` 是**稳定标签**（脚本会 grep），权威清单在 `include/trace.h`：`map` / `unmap` / `destroy` / `focus` / `focus_none` / `layer_focus` / `place` / `workspace` / `output_add` / `output_remove` / `cfg_apply` / `deco` / `bg_effect`。加新标签先改 trace.h 的清单，再发第一条轨迹。
 - `detail` 只写**决策依据**（走了哪个分支、策略名、抑制窗口），不要抄 `get_tree` 已有的数值。
 - 关闭时零分配零格式化；打开后也不分配（一次 calloc）。**它只依赖 `util/json`，不许反向依赖任何业务模块**——否则会成为依赖环的入口。
 - 环的语义：`seq` 全局单调，`total` 是累计条数，`dropped = total - count` 就是被覆盖掉的条数。第一个 entry 的 `seq` 一定等于 `dropped`。
