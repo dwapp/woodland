@@ -197,3 +197,27 @@ mango 也用 scenefx，但它的模糊是**配置驱动**（`blur`/`blur_layer`/
 结论：值得抄且已经抄的三条是**逐 buffer 圆角**、**透明度遮罩**、**layer surface
 支持**；`should_only_blur_bottom_layer` 和模糊参数化看着诱人，但都依赖 woodland
 还没有的东西，硬抄会得到一个"配置生效了、画面更糟"的结果。
+
+## 9. 与 swayfx / mango 的对照（圆角边框）
+
+SSD 边框原先是四条 1px 矩形首尾相接的方框，圆角只给上下两条设了
+`corner_radii_top/bottom`、左右竖条干脆保持直角。细条宽/高只有 1px，scenefx
+的 `fx_render_pass_add_rounded_rect()` 会把半径按 rect 尺寸 clamp 掉：实际画面
+上标题栏圆角外没有描边、下边框在角上仍是直的，右下角还戳出一小截竖线。
+"窗口圆了、边框还是方的"就是这么来的。
+
+swayfx `sway/desktop/transaction.c` 把上下边框 rect 加高到
+`border_thickness + corner_radius`，外圆角设 `corner_radius + border_width`，
+再用 `clipped_region` 挖掉内框（内圆角 `corner_radius`）；左右竖边框两端各
+缩进一个半径，只画直边段。mango `src/draw/text-node.c:rect_apply_border()`
+更直接：一个 rect 设外圆角、挖空内框，得到一圈等宽描边。
+
+woodland 采用 mango 的整框挖空（单一 `frame` rect，见
+`src/ssd/ssd.c:ssd_apply_frame_corners()`）+ swayfx 的半径换算（外 `R+b` /
+内 `R`，弧线线宽才均匀）。**没有抄** swayfx 的竖边缩进——整框挖空后角部已由
+描边连续覆盖，再缩进反而留缺口；也没有抄它 `-1px` 的位移 hack
+（swayfx issue #386），那是把上下边框拆成两个 rect 时对齐产生的误差。
+
+验收：`smoke-decoration` 断言 `dump_scene` 里只有一个 `corners == [R+b]*4`
+的 rect、其 `clip.corners == [R]*4`、且不再有 1px 细条；嵌套截图四角放大可见
+描边沿弧线连续、无直角尖角。

@@ -59,7 +59,7 @@ struct woodland_ssd_overrides {
 | 属性 | 读它的地方 | 效果 |
 |---|---|---|
 | `titlebar_hidden` | `ssd_titlebar_height()` | 边距 top 归零、标题栏/按钮/图标/文字全隐、命中区域消失 |
-| `border_width` | `ssd_border_width()` | 边距、四边矩形、抓取宽度一起变 |
+| `border_width` | `ssd_border_width()` | 边距、整框描边（外圆角 / 挖空区）、抓取宽度一起变 |
 | `border_rgba` | `ssd_get_border_color()` | 激活/非激活同色（协议只给一个颜色） |
 | `corner_radius` / `shadow_*` | 无（只经 wctl 暴露） | 不改画面 |
 
@@ -92,12 +92,22 @@ woodland_proto_decoration
 | `false` | 同一套 scenefx，只是不建节点 | 只记录 | 只记录 |
 
 - **圆角**由 `src/effect/effect.c` 落到 scenefx：
-  客户端内容用 `wlr_scene_buffer_set_corner_radii()`，SSD 的标题栏与边框用
-  `wlr_scene_rect_set_corner_radii()`。四角怎么分配见
-  `woodland_effect_corners()`：有标题栏 → 内容上角归 0（被标题栏盖住），
-  标题栏/上边框自己圆；最大化/全屏 → 一律直角。
+  客户端内容用 `wlr_scene_buffer_set_corner_radii()`，SSD 用一整圈**圆角描边**
+  （见下）。四角怎么分配见 `woodland_effect_corners()`：有标题栏 → 内容上角
+  归 0（被标题栏盖住），标题栏自己圆上角；最大化/全屏 → 一律直角。
   半径只来自 `[effects] corner_radius` 或本协议的 per-view 覆盖，二者都 clamp
   到 `WOODLAND_SSD_MAX_SIZE`；总开关关掉时按 0 算。
+
+  SSD 边框**不能**由四条 1px 细条拼：细条的宽/高只有 1px，圆角半径会被
+  scenefx 按尺寸 clamp 掉，角上要么没有线、要么留一个直角尖角。现在是一个
+  覆盖整个外框的 `frame` rect：外圆角 `R+b`、标题栏上角 `R`，再用
+  `clipped_region` 挖掉内框 `(b, b, 内容宽, 标题栏高+内容高)`（内圆角 `R`），
+  剩下的就是沿弧线等宽的描边。外半径比内半径大一个边框厚度才等宽，这条来自
+  swayfx `sway/desktop/transaction.c`；整框挖空的写法来自 mango
+  `src/draw/text-node.c:rect_apply_border()`。swayfx 另外把竖边框两端各缩进
+  一个半径，用整框挖空就不需要单独处理。
+  `wctl dump_scene` 的 rect 现在带 `corners` 与 `clip`，`smoke-decoration`
+  断言 `corners == [R+b]*4`、`clip.corners == [R]*4`、且没有残留的 1px 细条。
 - **阴影**仍不画：它不只影响像素，还得算进摆放几何（否则相邻窗口互相压边），
   会牵动 placement/snap/maximize 全链路。
 
