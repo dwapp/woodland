@@ -11,6 +11,10 @@ jobs:
     # 编 fallback（第一个是 wayland，它要 expat），链条就断在 setup。
     container:
       image: archlinux:base-devel
+      # 光 mknod 出 /dev/udmabuf 不够：默认 cgroup 设备白名单不放行，
+      # open() 会返回 EPERM（不是 ENODEV，说明内核有驱动）。放开设备
+      # 访问，配合下面那个建节点的 step。
+      options: --privileged
     env:
       # run_headless.sh 直接用继承的 XDG_RUNTIME_DIR（其余 smoke 脚本自己
       # mktemp 覆盖），容器里没有这个变量时 wayland socket 建不出来。
