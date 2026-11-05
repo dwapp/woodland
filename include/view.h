@@ -10,6 +10,7 @@
 
 /* 位置管理与焦点管理的接口都按 struct woodland_view 定义，
  * 统一从这里带出去，调用方只需要 include "view.h"。 */
+#include "effect.h" /* struct woodland_effect_state（按值内嵌） */
 #include "focus.h"
 #include "placement.h"
 #include "ssd.h" /* struct woodland_ssd_overrides（按值内嵌，必须完整定义） */
@@ -83,6 +84,13 @@ struct woodland_view {
      * src/protocol/decoration.c，读的人是 ssd.c 与 ipc/commands.c。
      */
     struct woodland_ssd_overrides ssd_overrides;
+    /*
+     * ext-background-effect 的已提交状态（blur region）与圆角/模糊的渲染
+     * 结果。写入归 protocol/background_effect.c，读的人是 effect.c 与
+     * ipc/commands.c；和 ssd_overrides 一样存在 view 上，因为客户端在 map
+     * 之前就会设区域，而 scenefx 节点到 map 之后才有。
+     */
+    struct woodland_effect_state effect;
     bool deco_csd;                               // 客户端请求 CSD（map 后不建 SSD）
     bool deco_registered;                        // 是否已注册 zxdg_decoration listener
     struct wlr_xdg_toplevel_decoration_v1 *deco; // zxdg decoration 对象

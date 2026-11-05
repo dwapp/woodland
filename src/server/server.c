@@ -18,7 +18,11 @@
 #include <wlr/xwayland.h>
 
 #include "capture.h"
+/* 必须在 WOODLAND_HAVE_EFFECTS 的判断之前：宏在这个头里 */
 #include "config.h"
+#if WOODLAND_HAVE_EFFECTS
+#include <scenefx/render/fx_renderer/fx_renderer.h>
+#endif
 #include "cursor.h"
 #include "ime.h"
 #include "ipc.h"
@@ -121,7 +125,16 @@ bool woodland_server_init(struct woodland_server *server)
         return false;
     }
 
+    /*
+     * 有 effects 时必须用 scenefx 的 fx renderer：scenefx 的 scene 把
+     * output->renderer 直接当 fx_renderer 用，塞一个 wlroots 的 pixman/gles2
+     * renderer 进去会按错误的结构布局读内存。
+     */
+#if WOODLAND_HAVE_EFFECTS
+    server->renderer = fx_renderer_create(server->backend);
+#else
     server->renderer = wlr_renderer_autocreate(server->backend);
+#endif
     if (!server->renderer) {
         wlr_log(WLR_ERROR, "failed to create renderer");
         return false;
@@ -162,6 +175,10 @@ bool woodland_server_init(struct woodland_server *server)
         wlr_log(WLR_ERROR, "failed to create scene");
         return false;
     }
+#if WOODLAND_HAVE_EFFECTS
+    /* 模糊参数是 scene 全局的：3 遍 downsample 够糊，半径再大只会糊成一片 */
+    wlr_scene_set_blur_data(server->scene, 3, 5, 0.0f, 1.0f, 1.0f, 1.0f);
+#endif
 
     if (!woodland_output_init(server)) {
         wlr_log(WLR_ERROR, "failed to init output");

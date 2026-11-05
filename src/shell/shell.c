@@ -20,7 +20,7 @@
 
 #include <wlr/types/wlr_ext_foreign_toplevel_list_v1.h>
 #include <wlr/types/wlr_pointer.h>
-#include <wlr/types/wlr_scene.h>
+#include "scene.h"
 #include <wlr/types/wlr_xdg_decoration_v1.h>
 #include <wlr/util/log.h>
 
@@ -30,6 +30,7 @@
 #endif
 
 #include "capture.h"
+#include "effect.h"
 #include "layer.h"
 #include "output.h"
 #include "selfcheck.h"
@@ -238,6 +239,8 @@ void woodland_view_map(struct woodland_view *view)
     }
     woodland_focus_view(view, true);
     woodland_view_update_outputs(view);
+    /* CSD 视图没有 SSD，map 之后补一次圆角/模糊（SSD 视图由 ssd_create 覆盖） */
+    woodland_effect_update(view);
     woodland_selfcheck_schedule(server, "map");
 }
 
@@ -370,6 +373,8 @@ static void xdg_toplevel_commit(struct wl_listener *listener, void *data)
     }
     /* 内容尺寸/状态变化后同步 SSD 几何（标题栏/边框/按钮） */
     woodland_ssd_update(view);
+    /* CSD 视图没有 SSD，圆角/模糊只能在这里跟一次（SSD 视图是重复调用，幂等） */
+    woodland_effect_update(view);
     (void)data;
 }
 

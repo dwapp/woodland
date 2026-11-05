@@ -15,7 +15,7 @@
 
 #include <wlr/types/wlr_layer_shell_v1.h>
 #include <wlr/types/wlr_output_layout.h>
-#include <wlr/types/wlr_scene.h>
+#include "scene.h"
 #include <wlr/types/wlr_seat.h>
 #include <wlr/util/box.h>
 #include <wlr/util/edges.h>
@@ -71,6 +71,7 @@ static const struct ipc_field_doc get_tree_fields[] = {
     {"ipc", "str", "debug socket path"},
     {"placement_policy", "str", "cascade | center | cursor | autoplace"},
     {"self_check", "bool", "--self-check was given at startup"},
+    {"effects", "bool", "built with -Deffects=enabled (scenefx blur/rounded corners)"},
     {"outputs", "obj[]",
      "name, enabled, box[x,y,w,h], workarea, width, "
      "height, scale (per-mille)"},
@@ -85,7 +86,8 @@ static const struct ipc_field_doc get_tree_fields[] = {
      "ssd{present,active,margins}, "
      "deco{managed,titlebar,border_width,border_rgba,"
      "corner_radius,shadow_radius,shadow_offset,"
-     "shadow_rgba,rendered[]}, limits, snapped[]"},
+     "shadow_rgba,rendered[]}, "
+     "bg_effect{blur,region[x,y,w,h]}, limits, snapped[]"},
     {"count", "int", "number of views"},
 };
 
@@ -406,7 +408,7 @@ static void append_view_details(struct woodland_server *server, struct woodland_
         woodland_json_obj_key(&deco, "shadow_rgba");
         woodland_json_int_array(out, rgba, 4);
     }
-    /* 真正会改变画面的属性：圆角/阴影只记录，别在断言里当它们生效 */
+    /* 真正会改变画面的属性：没接 scenefx 时圆角/阴影只记录，别在断言里当它们生效 */
     woodland_json_obj_key(&deco, "rendered");
     struct woodland_json_arr rendered;
     woodland_json_arr_open(&rendered, out);
@@ -418,8 +420,25 @@ static void append_view_details(struct woodland_server *server, struct woodland_
         woodland_json_arr_sep(&rendered);
         woodland_json_string(out, "titlebar");
     }
+#if WOODLAND_HAVE_EFFECTS
+    if (view->ssd_overrides.corner_radius_set) {
+        woodland_json_arr_sep(&rendered);
+        woodland_json_string(out, "corner_radius");
+    }
+#endif
     woodland_json_arr_close(&rendered);
     woodland_json_obj_close(&deco);
+
+    /* ext-background-effect 的已提交状态：blur 为真才真的有模糊 */
+    woodland_json_obj_key(&obj, "bg_effect");
+    struct woodland_json_obj bg;
+    woodland_json_obj_open(&bg, out);
+    woodland_json_obj_bool(&bg, "blur", view->effect.blur);
+    int blur_box[4] = {view->effect.blur_region.x, view->effect.blur_region.y,
+                       view->effect.blur_region.width, view->effect.blur_region.height};
+    woodland_json_obj_key(&bg, "region");
+    woodland_json_int_array(out, blur_box, 4);
+    woodland_json_obj_close(&bg);
 
     int min_w = 0, min_h = 0, max_w = 0, max_h = 0;
     woodland_view_size_limits(view, &min_w, &min_h, &max_w, &max_h);
@@ -441,6 +460,8 @@ static void ipc_get_tree(struct woodland_server *server, struct woodland_json *o
     woodland_json_obj_str(&obj, "placement_policy",
                           woodland_placement_policy_name(server->placement_policy));
     woodland_json_obj_bool(&obj, "self_check", server->self_check);
+    /* 这台合成器到底会不会画圆角/模糊：脚本据此决定 deco.rendered 的期望值 */
+    woodland_json_obj_bool(&obj, "effects", WOODLAND_HAVE_EFFECTS);
 
     woodland_json_obj_key(&obj, "outputs");
     append_outputs(server, out);
@@ -533,6 +554,19 @@ static void dump_node(struct scene_dump_ctx *ctx, struct wlr_scene_node *node, i
     case WLR_SCENE_NODE_BUFFER:
         woodland_json_obj_str(&obj, "type", "buffer");
         break;
+#if WOODLAND_HAVE_EFFECTS
+    /*
+     * 模糊节点只在 effects 构建里存在。dump_scene 是排查"画了但看不见"的
+     * 第一现场，所以宁可把 blur 节点的尺寸/四角也吐出来，也不要让它掉进
+     * unknown——那样看起来像节点根本没建。
+     */
+    case WLR_SCENE_NODE_BLUR:
+        woodland_json_obj_str(&obj, "type", "blur");
+        break;
+    case WLR_SCENE_NODE_OPTIMIZED_BLUR:
+        woodland_json_obj_str(&obj, "type", "optimized_blur");
+        break;
+#endif
     default:
         woodland_json_obj_str(&obj, "type", "unknown");
         break;
@@ -559,6 +593,16 @@ static void dump_node(struct scene_dump_ctx *ctx, struct wlr_scene_node *node, i
         woodland_json_obj_int(&obj, "h", buffer->dst_height);
         woodland_json_obj_int(&obj, "opacity", (int)(buffer->opacity * 100.0f + 0.5f));
         woodland_json_obj_bool(&obj, "has_buffer", buffer->buffer != NULL);
+#if WOODLAND_HAVE_EFFECTS
+    } else if (node->type == WLR_SCENE_NODE_BLUR) {
+        struct wlr_scene_blur *blur = wlr_scene_blur_from_node(node);
+        woodland_json_obj_int(&obj, "w", blur->width);
+        woodland_json_obj_int(&obj, "h", blur->height);
+        int corners[4] = {blur->corners.top_left, blur->corners.top_right,
+                          blur->corners.bottom_right, blur->corners.bottom_left};
+        woodland_json_obj_key(&obj, "corners");
+        woodland_json_int_array(out, corners, 4);
+#endif
     }
 
     if (node->type == WLR_SCENE_NODE_TREE && depth < ctx->max_depth) {

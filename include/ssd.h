@@ -141,4 +141,21 @@ bool woodland_ssd_content_size(const struct woodland_view *view, int *width, int
 
 /** 释放 SSD 全局缓存与资源。 */
 void woodland_ssd_finish(void);
+
+/**
+ * 标题栏当前是否可见（隐藏或者配置高度为 0 都算不可见）。
+ *
+ * 圆角要按它分上下沿：标题栏在时内容只露下沿，上沿归标题栏自己圆。
+ */
+bool woodland_ssd_titlebar_visible(const struct woodland_view *view);
+
+/**
+ * 把圆角摊到 SSD 自己的矩形上（只在 -Deffects=enabled 里真的画得出来）。
+ *
+ * 上沿（标题栏 + 上边框）圆上角、下边框圆下角，左右竖条保持直角——竖条只有
+ * 1px 宽，硬套半径只会把边线啃掉一截。传进来的是"外框半径"，已经由调用方
+ * 按最大化/全屏折过零。
+ */
+void woodland_ssd_set_corner_radius(struct woodland_view *view, int radius);
+
 #endif /* WOODLAND_SSD_H */
