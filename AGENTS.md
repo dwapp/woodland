@@ -12,6 +12,10 @@
 - `include/`：公开头（模块间接口），`include/woodland.h` 是全局状态 `struct woodland_server`。
 - `src/`：按模块子目录分层（`server/`、`util/`，后续 milestone 增加 `seat/`、`scene/`、`shell/` 等）。
 - `tests/unit/`：单元测试；`tests/smoke/`：冒烟测试脚本。
+- `protocols/treeland/`：从 treeland 生态抄来的协议 XML **只读副本**（MIT），
+  由 `src/protocol/meson.build` 用 `wayland-scanner` 生成服务端头/接口表。
+  不放代码、不改内容；同步办法见该目录的 `README.md`。CI 里没有
+  `treeland-protocols` 包，所以**不要**改成从 `/usr/share` 取。
 - `docs/superpowers/specs/`：设计规格；`docs/superpowers/plans/`：实现计划；`docs/superpowers/`：里程碑骨架规划。
 
 模块职责划分以规格文档 §5 为准：`server`（backend/renderer/allocator/scene + 事件循环 + 渲染循环 + 输出热插拔）、`seat`（输入设备/光标/焦点）、`scene`（图层树）、`layout`（布局几何计算）等。
@@ -38,6 +42,7 @@ meson test -C build --print-errorlogs  # 跑全部测试
 
 ```bash
 wctl get_tree   | jq '.views[] | {id,title,focused,activated,outer,snapped}'
+wctl get_tree   | jq '.views[] | {id, margins: .ssd.margins, deco}'
 wctl get_focus  | jq .        # 焦点在谁身上（recorded_view vs keyboard_view）
 wctl get_trace  | jq '.entries[] | "\(.seq) \(.what) \(.obj) \(.detail)"'
 wctl self_check | jq .        # 不变量断言；失败项带 expected / actual
@@ -59,7 +64,7 @@ wctl --help
             {"seq":3,"ms":31,"obj":1,"what":"focus","detail":"prev=0 raise=1"}]}
 ```
 
-- `what` 是**稳定标签**（脚本会 grep），权威清单在 `include/trace.h`：`map` / `unmap` / `destroy` / `focus` / `focus_none` / `layer_focus` / `place` / `workspace` / `output_add` / `output_remove` / `cfg_apply`。加新标签先改 trace.h 的清单，再发第一条轨迹。
+- `what` 是**稳定标签**（脚本会 grep），权威清单在 `include/trace.h`：`map` / `unmap` / `destroy` / `focus` / `focus_none` / `layer_focus` / `place` / `workspace` / `output_add` / `output_remove` / `cfg_apply` / `deco`。加新标签先改 trace.h 的清单，再发第一条轨迹。
 - `detail` 只写**决策依据**（走了哪个分支、策略名、抑制窗口），不要抄 `get_tree` 已有的数值。
 - 关闭时零分配零格式化；打开后也不分配（一次 calloc）。**它只依赖 `util/json`，不许反向依赖任何业务模块**——否则会成为依赖环的入口。
 - 环的语义：`seq` 全局单调，`total` 是累计条数，`dropped = total - count` 就是被覆盖掉的条数。第一个 entry 的 `seq` 一定等于 `dropped`。
@@ -127,6 +132,20 @@ test/commit、写布局时已放开，客户端就会先收到 configuration（w
 输出早已不在 layout 里，销毁它不会触发 layout change，只剩 `server->output_removed`
 这一条路（`src/output/output.c` 发，`src/protocol/output.c` 收）。
 回归测试：`meson test -C build smoke-output-mgmt-order`（旧顺序会 FAIL）。
+
+**5. 协议对象别死攥 `struct woodland_view *`。**
+客户端可以在 toplevel 之后随时销毁它，而我们挂在 `xdg_toplevel->events.destroy` /
+`xwayland_surface->events.destroy` 上的监听器**一定排在 shell 那个之后**（shell 在
+`new_toplevel` 时就注册了，它在这个信号里把 view free 掉）。所以"视图没了"的回调
+里**不许读 view**，只能清指针 + `wl_list_remove` 自己的监听器（信号所属对象正在
+销毁，不摘就是悬挂链表节点）。参见 `src/protocol/decoration.c` 的
+`context_handle_toplevel_destroy()`。
+
+**6. 写探针时 `wl_display_dispatch_pending()` 返回的是"分发了几个事件"。**
+把它当 0/1 判会立刻误判成"连接出错"——症状是探针在收到第一个 configure 后
+就退出、打印一个假的协议错误。要判错只看 `< 0`；真要报协议错误码用
+`wl_display_get_protocol_error()` 的返回值（`wl_display_get_error()` 给的是
+libwayland 的 errno，协议错误恒为 EPROTO=71）。见 `tests/smoke/deco_probe.c`。
 
 ## 项目规则
 
