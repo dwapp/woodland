@@ -5,7 +5,7 @@
 #include <wlr/render/allocator.h>
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/types/wlr_output_layout.h>
-#include <wlr/types/wlr_scene.h>
+#include "scene.h"
 
 #include "cursor.h"
 #include "output.h"

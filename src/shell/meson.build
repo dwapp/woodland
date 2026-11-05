@@ -4,5 +4,5 @@ shell_lib = static_library('woodland-shell',
   ['shell.c', 'toplevel_state.c', 'interactive.c', 'cursor.c',
    'focus.c', 'placement.c', 'selfcheck.c'],
   include_directories: woodland_inc,
-  dependencies: [wlroots, wayland_server],
+  dependencies: [scene_deps, wayland_server],
   link_with: [capture_lib, util_lib, trace_lib])

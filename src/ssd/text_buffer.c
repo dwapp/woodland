@@ -8,7 +8,7 @@
 #include <string.h>
 
 #include <wlr/interfaces/wlr_buffer.h>
-#include <wlr/types/wlr_scene.h>
+#include "scene.h"
 #include <wlr/util/log.h>
 
 struct woodland_text_buffer {

@@ -8,4 +8,4 @@ ssd_lib = static_library('ssd',
   'text_buffer.c',
   'icon.c',
   include_directories: woodland_inc,
-  dependencies: [wlroots, wayland_server, pangocairo, cairo] + rsvg_deps)
+  dependencies: [scene_deps, wayland_server, pangocairo, cairo] + rsvg_deps)

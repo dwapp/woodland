@@ -6,7 +6,7 @@
 #include <wlr/types/wlr_data_device.h>
 #include <wlr/types/wlr_input_device.h>
 #include <wlr/types/wlr_keyboard.h>
-#include <wlr/types/wlr_scene.h>
+#include "scene.h"
 #include <xkbcommon/xkbcommon.h>
 
 #include "cursor.h"

@@ -6,7 +6,7 @@
 #include <wlr/render/allocator.h>
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/types/wlr_output.h>
-#include <wlr/types/wlr_scene.h>
+#include "scene.h"
 #include "layer.h"
 #include "output.h"
 #include "woodland.h"

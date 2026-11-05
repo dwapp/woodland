@@ -4,4 +4,4 @@ config_lib = static_library('woodland-config', [
     'apply.c',
   ],
   include_directories: woodland_inc,
-  dependencies: [wlroots, wayland_server, xkbcommon])
+  dependencies: [scene_deps, wayland_server, xkbcommon])
