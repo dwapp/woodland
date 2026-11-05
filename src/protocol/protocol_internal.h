@@ -11,6 +11,7 @@ struct woodland_proto_output;
 struct woodland_proto_input;
 struct woodland_proto_window;
 struct woodland_proto_drm_lease;
+struct woodland_proto_decoration;
 struct wlr_output;
 struct wlr_viewporter;
 struct wlr_presentation;
@@ -36,12 +37,13 @@ struct woodland_proto {
     struct wlr_presentation *presentation;
     struct wlr_linux_drm_syncobj_manager_v1 *linux_drm_syncobj;
 
-    /* 有状态的四族，混在一起会互相拖累得看不出边界 */
+    /* 有状态的五族，混在一起会互相拖累得看不出边界 */
     struct woodland_proto_idle *idle;      /* idle.c   */
     struct woodland_proto_output *output;  /* output.c */
     struct woodland_proto_input *input;    /* input.c  */
     struct woodland_proto_window *window;  /* window.c */
-    struct woodland_proto_drm_lease *drm_lease; /* drm_lease.c */
+    struct woodland_proto_drm_lease *drm_lease;   /* drm_lease.c */
+    struct woodland_proto_decoration *decoration; /* decoration.c */
 };
 
 /* 空闲与抑制族（idle.c）：idle-notify / idle-inhibit / keyboard-shortcuts-inhibit */
@@ -73,5 +75,9 @@ void woodland_proto_drm_lease_offer_output(struct woodland_proto *proto,
                                            struct wlr_output *output);
 void woodland_proto_drm_lease_withdraw_output(struct woodland_proto *proto,
                                               struct wlr_output *output);
+
+/* 装饰族（decoration.c）：treeland-decoration（按窗口的 SSD 定制） */
+bool woodland_proto_decoration_init(struct woodland_proto *proto);
+void woodland_proto_decoration_finish(struct woodland_proto *proto);
 
 #endif

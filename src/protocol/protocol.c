@@ -8,11 +8,12 @@
  *   3. 持有两个"创建即完成"的全局（viewporter、presentation-time）——
  *      它们没有监听器也没有私有状态，不值得各自开一族。
  *
- * 具体的协议行为按关注点分在四个文件里：
- *   idle.c    空闲与抑制（idle-notify / idle-inhibit / shortcuts-inhibit）
- *   output.c  输出管理（output-management / output-power-management）
- *   input.c   输入与选区（relative-pointer / pointer-gestures / primary-selection）
- *   window.c  窗口（xdg-activation / xdg-toplevel-tag）
+ * 具体的协议行为按关注点分在五个文件里：
+ *   idle.c       空闲与抑制（idle-notify / idle-inhibit / shortcuts-inhibit）
+ *   output.c     输出管理（output-management / output-power-management）
+ *   input.c      输入与选区（relative-pointer / pointer-gestures / primary-selection）
+ *   window.c     窗口（xdg-activation / xdg-toplevel-tag）
+ *   decoration.c 窗口装饰（treeland-decoration：按窗口的 SSD 定制）
  *
  * 分层的原因不是"文件太大了"：这四块的状态机各不相干，混在一个文件里时
  * init 的失败回滚和 finish 的逆序拆除要横跨十几组监听器，漏一行就是悬挂
@@ -96,6 +97,9 @@ bool woodland_protocol_init(struct woodland_server *server) {
     if (!woodland_proto_drm_lease_init(proto)) {
         return false;
     }
+    if (!woodland_proto_decoration_init(proto)) {
+        return false;
+    }
 
     /* 已有输出可能早于本模块建好，补一次广播让客户端看到初始状态 */
     woodland_proto_output_broadcast(proto);
@@ -109,6 +113,7 @@ void woodland_protocol_finish(struct woodland_server *server) {
     }
 
     /* 逆序拆：与 init 对称，后建的先摘 */
+    woodland_proto_decoration_finish(proto);
     woodland_proto_drm_lease_finish(proto);
     woodland_proto_window_finish(proto);
     woodland_proto_input_finish(proto);

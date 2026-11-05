@@ -12,6 +12,7 @@
  * 统一从这里带出去，调用方只需要 include "view.h"。 */
 #include "focus.h"
 #include "placement.h"
+#include "ssd.h" /* struct woodland_ssd_overrides（按值内嵌，必须完整定义） */
 
 struct woodland_server;
 struct woodland_workspace;
@@ -76,6 +77,12 @@ struct woodland_view {
      */
     char *tag;
     struct woodland_ssd *ssd;                    // 服务端装饰（默认 SSD，见设计）
+    /*
+     * treeland-decoration-unstable-v1 的每窗口覆盖（圆角/阴影/边框/标题栏）。
+     * 全零 = 客户端没接管，SSD 一律用配置默认；写入与生命周期归
+     * src/protocol/decoration.c，读的人是 ssd.c 与 ipc/commands.c。
+     */
+    struct woodland_ssd_overrides ssd_overrides;
     bool deco_csd;                               // 客户端请求 CSD（map 后不建 SSD）
     bool deco_registered;                        // 是否已注册 zxdg_decoration listener
     struct wlr_xdg_toplevel_decoration_v1 *deco; // zxdg decoration 对象

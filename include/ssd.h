@@ -17,6 +17,14 @@ struct wlr_scene_tree;
 #define WOODLAND_SSD_RESIZE_GRAB_W 8
 #define WOODLAND_SSD_CORNER_W 16
 
+/*
+ * treeland-decoration 客户端能改的半径/宽度上界。
+ *
+ * 协议对越界值只要求"clamp 到支持的上界或忽略"，没有定死数字。取 1000 是
+ * 照抄 treeland 的选择：它比任何真实窗口都大，又小到不会让几何计算溢出。
+ */
+#define WOODLAND_SSD_MAX_SIZE 1000
+
 /** SSD 可命中区域类型（用于光标交互）。 */
 enum woodland_ssd_part {
     WOODLAND_SSD_NONE = 0,
@@ -31,6 +39,34 @@ enum woodland_ssd_part {
 };
 
 struct woodland_ssd;
+
+/*
+ * treeland-decoration-unstable-v1 的每窗口覆盖值。
+ *
+ * 为什么存在 view 上而不是 SSD 里：客户端在 map 之前就会创建装饰上下文并
+ * 下请求（xdg-decoration 协商也发生在 initial commit），而 SSD 对象要到 map
+ * 才创建；边距计算（woodland_ssd_get_margins）更要在这之前就能用。放在 view
+ * 上，SSD 创建时自然读到，未被覆盖的窗口只是一片零。
+ *
+ * 每个 *_set 表示"客户端接管了这个属性"；没 set 过的继续用配置默认（协议里
+ * 的 opt-in 语义）。*_rgba 一律 0xRRGGBBAA —— 注意与配置里的 0xAARRGGBB
+ * 不同：协议按 r,g,b,a 四个独立参数传，挨着协议写少一次脑内转置。
+ */
+struct woodland_ssd_overrides {
+    bool managed; /* 有存活的装饰上下文（wctl get_tree 里可见） */
+    bool titlebar_set;
+    bool titlebar_hidden; /* titlebar_mode == hide */
+    bool border_set;
+    int border_width;     /* 0 = 不画边框 */
+    uint32_t border_rgba; /* 0xRRGGBBAA */
+    bool corner_radius_set;
+    int corner_radius;
+    bool shadow_set;
+    int shadow_radius;
+    int shadow_dx;
+    int shadow_dy;
+    uint32_t shadow_rgba; /* 0xRRGGBBAA */
+};
 
 /* SSD 占用的外边距（内容矩形之外的部分），语义同 labwc ssd_thickness() */
 struct woodland_ssd_margins {
@@ -56,6 +92,15 @@ void woodland_ssd_destroy(struct woodland_view *view);
 
 /** 重建/更新 SSD 几何（内容尺寸或状态变化后调用）。 */
 void woodland_ssd_update(struct woodland_view *view);
+
+/**
+ * 装饰覆盖值变了一次，重排并刷新颜色。
+ *
+ * 与 woodland_ssd_update() 的差别只在"清状态"：覆盖值会改变标题栏是否存在、
+ * 边框有多宽，旧的高亮/按下态可能指向已经消失的按钮，所以这里一并清掉。
+ * 没有 SSD（未 map）时直接返回——覆盖值已经存在 view 上，map 时会读到。
+ */
+void woodland_ssd_deco_changed(struct woodland_view *view);
 
 /** 切换激活态（颜色两态）。 */
 void woodland_ssd_set_active(struct woodland_view *view, bool active);

@@ -227,6 +227,14 @@ int woodland_text_buffer_get_width(const struct woodland_text_buffer *tb)
     return tb ? tb->width : 0;
 }
 
+void woodland_text_buffer_set_enabled(struct woodland_text_buffer *tb, bool enabled)
+{
+    if (!tb || !tb->scene_buffer) {
+        return;
+    }
+    wlr_scene_node_set_enabled(&tb->scene_buffer->node, enabled);
+}
+
 /* ==================== 按钮符号（cairo 画线） ==================== */
 
 struct wlr_buffer *woodland_button_icon_buffer(enum woodland_ssd_button_icon icon, int size,

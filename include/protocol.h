@@ -14,11 +14,12 @@ struct wlr_output;
  * 这一层的职责只有"把 wlroots 的 manager 挂上 display，并把事件接到
  * 已有的窗口管理逻辑上"——不实现协议本身，也不碰渲染与几何。
  *
- * 内部按关注点分了四个文件，各自的取舍写在文件头：
+ * 内部按关注点分了五个文件，各自的取舍写在文件头：
  *   idle.c    空闲与抑制：idle-notify / idle-inhibit / shortcuts-inhibit
  *   output.c  输出管理：output-management / output-power-management
  *   input.c   输入与选区：relative-pointer / pointer-gestures / primary-selection
  *   window.c  窗口：xdg-activation / xdg-toplevel-tag
+ *   decoration.c 窗口装饰：treeland-decoration（按窗口的 SSD 定制）
  *   protocol.c 只管按序建立、逆序回收，以及下面这几个转发入口。
  *
  * 按语义完备程度分三档，档位决定了它是否真的改变行为：
@@ -27,9 +28,12 @@ struct wlr_output;
  *             idle-notify、idle-inhibit、keyboard-shortcuts-inhibit、
  *             output-power-management、output-management、gamma-control、
  *             drm-lease、relative-pointer、pointer-constraints、pointer-gestures、
- *             linux-drm-syncobj、xdg-activation
+ *             linux-drm-syncobj、xdg-activation、
+ *             treeland-decoration 的边框与标题栏
  *             —— 客户端请求会真的影响合成器行为。
- *   仅记录：  xdg-toplevel-tag（存下来、经 wctl 可见，但暂不参与窗口规则）。
+ *   仅记录：  xdg-toplevel-tag（存下来、经 wctl 可见，但暂不参与窗口规则）；
+ *             treeland-decoration 的圆角与阴影（wlr_scene 画不了圆角/模糊，
+ *             要等 effects 里程碑接 scenefx，现在只记录 + 在 wctl 里可见）。
  *   暂不接线：security-context（无沙箱校验时声明"我是沙箱"反而是假安全）、
  *             tearing-control（要改 scene 的 commit 路径传 tearing 位，
  *             属单独一版）、content-type（scene 不消费）、
