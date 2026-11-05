@@ -6,6 +6,13 @@
 wayland_scanner = find_program('wayland-scanner', native: true)
 treeland_xml_dir = meson.project_source_root() / 'protocols' / 'treeland'
 
+# ext-background-effect-v1 还是 staging，拿系统 wayland-protocols 里的那份。
+# 1.41 起才有这个协议；机器上太老就直接 configure 失败，别留个"编出来没有
+# 模糊能力位"的哑构建。
+wayland_protos = dependency('wayland-protocols', version: '>=1.41')
+wp_datadir = wayland_protos.get_variable('pkgdatadir')
+bg_effect_xml = wp_datadir / 'staging' / 'ext-background-effect' / 'ext-background-effect-v1.xml'
+
 proto_srcs = []
 foreach p : [['treeland-decoration-unstable-v1', 'treeland-decoration']]
   proto_xml = treeland_xml_dir / (p[0] + '.xml')
@@ -19,6 +26,14 @@ foreach p : [['treeland-decoration-unstable-v1', 'treeland-decoration']]
     command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'])
 endforeach
 
+# 同一套生成规则套在系统 XML 上（前缀不同，避免和 treeland 那份撞名）
+proto_srcs += custom_target('background-effect-server-header',
+  input: bg_effect_xml, output: 'ext-background-effect-v1-protocol.h',
+  command: [wayland_scanner, 'server-header', '@INPUT@', '@OUTPUT@'])
+proto_srcs += custom_target('background-effect-server-code',
+  input: bg_effect_xml, output: 'ext-background-effect-v1-protocol.c',
+  command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'])
+
 protocol_lib = static_library('woodland-protocol',
   'protocol.c',
   'idle.c',
@@ -27,9 +42,10 @@ protocol_lib = static_library('woodland-protocol',
   'window.c',
   'drm_lease.c',
   'decoration.c',
+  'background_effect.c',
   proto_srcs,
   # '.'：生成的头文件落在 build/src/protocol/，decoration.c 用
   # #include "treeland-decoration-unstable-v1-protocol.h" 就近取
   include_directories: [woodland_inc, include_directories('.')],
-  dependencies: [wlroots, wayland_server],
-  link_with: [trace_lib])
+  dependencies: [scene_deps, wayland_server, wayland_protos],
+  link_with: [trace_lib, effect_lib])
