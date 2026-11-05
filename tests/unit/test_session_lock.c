@@ -20,8 +20,14 @@
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_keyboard.h>
 #include <wlr/types/wlr_output_layout.h>
-#include <wlr/types/wlr_scene.h>
+#include "scene.h"
 #include <wlr/types/wlr_seat.h>
+
+/* 宏在 config.h 里；effects 构建要用 scenefx 的 renderer（见 main） */
+#include "config.h"
+#if WOODLAND_HAVE_EFFECTS
+#include <scenefx/render/fx_renderer/fx_renderer.h>
+#endif
 
 #include "cursor.h"
 #include "ext-session-lock-v1-client-protocol.h"
@@ -162,7 +168,22 @@ int main(void)
     server.backend = wlr_headless_backend_create(server.event_loop);
     assert(server.backend != NULL);
 
+    /*
+     * 和 src/server/server.c 走同一条路：effects 构建里 scene 是 scenefx 的，
+     * 它提交 output 时会把自己的 render pass 强转成 fx_render_pass；塞一个
+     * wlroots 的 pixman renderer 进去会在 fx_get_render_pass 里断言死
+     * （render_pass->impl != &render_pass_impl）。FX renderer 只有 GLES2 一条
+     * 路，没 DRM 节点的机器上建不出来——那种环境跳过，不伪装成通过。
+     */
+#if WOODLAND_HAVE_EFFECTS
+    server.renderer = fx_renderer_create(server.backend);
+    if (server.renderer == NULL) {
+        fprintf(stderr, "no GLES2/DRM device for fx_renderer, skip\n");
+        return 77;
+    }
+#else
     server.renderer = wlr_renderer_autocreate(server.backend);
+#endif
     assert(server.renderer != NULL);
 
     server.allocator = wlr_allocator_autocreate(server.backend, server.renderer);

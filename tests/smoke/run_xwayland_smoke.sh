@@ -120,9 +120,21 @@ color_count() {
         | sed -n "s/^ *\([0-9][0-9]*\):.*$3.*/\1/p" | head -1
 }
 
+color_count_near() {
+    # $1=png $2=crop $3=#RRGGBB $4=容差(如 1%) → 落在该颜色 ±容差 内的像素数
+    #
+    # 底色断言不能要求逐位相等：同一份像素走 wlroots 自带 renderer 和走
+    # scenefx 的 FX renderer，在 sRGB 换算的舍入上会差一个最低位
+    # （0.965*255 一边得 247、一边得 246）。差一位不代表画错了，但"是不是
+    # 变成了别的底色"必须还能分辨，所以用 -fuzz 把目标色染成洋红再数。
+    convert "$1" -crop "$2" +repage -fuzz "$4" -fill "#FF00FF" -opaque "$3" \
+        -format %c histogram:info:- 2>/dev/null \
+        | sed -n 's/^ *\([0-9][0-9]*\):.*#FF00FF.*/\1/p' | head -1
+}
+
 TITLEBAR="#E1DEDB"       # labwc 激活态标题栏底色
-TITLEBAR_DIM="#F7F6F4"   # 非激活态（0.965*255 渲染为 247，不是 246）
-n="$(color_count "$WORK/managed.png" "400x26+0+0" "$TITLEBAR")"
+TITLEBAR_DIM="#F7F6F4"   # 非激活态（0.965*255 约为 246~247，按 renderer 差一位）
+n="$(color_count_near "$WORK/managed.png" "400x26+0+0" "$TITLEBAR" 1%)"
 [ -n "${n:-}" ] && [ "$n" -gt 1000 ] || {
     echo "no SSD titlebar pixels at top of the X11 window (got '${n:-0}')" >&2
     convert "$WORK/managed.png" -crop 400x26+0+0 +repage "$WORK/crop.png" || true
@@ -168,7 +180,7 @@ client_pids="$client_pids $second_pid"
 sleep 1.2
 grim "$WORK/focus-two.png"
 dim="$(identify -format '%wx%h' "$WORK/focus-two.png")"
-inactive_px="$(color_count "$WORK/focus-two.png" "$dim+0+0" "$TITLEBAR_DIM")"
+inactive_px="$(color_count_near "$WORK/focus-two.png" "$dim+0+0" "$TITLEBAR_DIM" 1%)"
 [ -n "${inactive_px:-}" ] && [ "$inactive_px" -gt 500 ] || {
     echo "no inactive titlebar: focus is not exclusive (got '${inactive_px:-0}')" >&2
     exit 1
@@ -177,7 +189,7 @@ inactive_px="$(color_count "$WORK/focus-two.png" "$dim+0+0" "$TITLEBAR_DIM")"
 kill -TERM "$second_pid" 2>/dev/null || true
 sleep 1.2
 grim "$WORK/focus-after.png"
-active_px="$(color_count "$WORK/focus-after.png" "$dim+0+0" "$TITLEBAR")"
+active_px="$(color_count_near "$WORK/focus-after.png" "$dim+0+0" "$TITLEBAR" 1%)"
 [ -n "${active_px:-}" ] && [ "$active_px" -gt 500 ] || {
     echo "focus did not fall back after closing the focused window" \
          "(active pixels: '${active_px:-0}')" >&2

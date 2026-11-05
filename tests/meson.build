@@ -130,6 +130,8 @@ if get_option('test').enabled()
        'xdg-decoration-unstable-v1'],
       [meson.project_source_root() / 'protocols' / 'treeland' /
        'treeland-decoration-unstable-v1.xml', 'treeland-decoration-unstable-v1'],
+      [wp_datadir / 'staging' / 'ext-background-effect' / 'ext-background-effect-v1.xml',
+       'ext-background-effect-v1'],
     ]
     deco_xml_ok = true
     foreach p : deco_xmls
@@ -151,6 +153,16 @@ if get_option('test').enabled()
       test('smoke-decoration',
            find_program('sh'),
            args: [meson.current_source_dir() / 'smoke' / 'run_deco_smoke.sh',
+                  woodland_bin.full_path(),
+                  deco_probe.full_path(),
+                  wctl_bin.full_path()],
+           is_parallel: false,
+           timeout: 90)
+      # ext-background-effect：blur region 的双缓冲/裁剪/撤除。同一个探针，
+      # 多走一遍 blur 参数；能不能真糊由 get_tree 的 effects 字段决定。
+      test('smoke-bg-effect',
+           find_program('sh'),
+           args: [meson.current_source_dir() / 'smoke' / 'run_bg_effect_smoke.sh',
                   woodland_bin.full_path(),
                   deco_probe.full_path(),
                   wctl_bin.full_path()],
