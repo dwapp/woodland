@@ -15,6 +15,10 @@ jobs:
       # run_headless.sh 直接用继承的 XDG_RUNTIME_DIR（其余 smoke 脚本自己
       # mktemp 覆盖），容器里没有这个变量时 wayland socket 建不出来。
       XDG_RUNTIME_DIR: /tmp/xdg-runtime
+      # scenefx 的 fx renderer 只走 EGL/GLES2，runner 上没有 /dev/dri。
+      # 强制 surfaceless + llvmpipe：不设这个也会被 server.c 的自动回退接住，
+      # 但显式写出来，启动少一次必然失败的探测。
+      WLR_RENDERER_FORCE_SOFTWARE: '1'
     steps:
       - name: Install dependencies
         run: |
@@ -45,6 +49,8 @@ jobs:
         run: |
           mkdir -p "$XDG_RUNTIME_DIR"
           chmod 700 "$XDG_RUNTIME_DIR"
+          # scenefx 是硬依赖（scene 实现固定走它），wrap 会顺带把 wlroots 0.20
+          # 拉到同一个子项目版本上——两边同名符号必须来自同一棵源码树。
           meson setup build -Dtest=enabled
       - name: Build
         run: meson compile -C build
