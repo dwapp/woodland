@@ -74,6 +74,7 @@ struct woodland_wallpaper_surface {
      */
     int play_state;
     struct wl_list link; // woodland_proto_wallpaper.surfaces
+    struct wl_listener surface_destroy;
 };
 
 /* 一个 manager 对象（treeland_wallpaper_v1）：绑定到某个输出 */
@@ -94,7 +95,7 @@ struct woodland_proto_wallpaper {
 
     struct wl_global *manager_global;
     struct wl_global *shell_global;
-
+    struct wl_global *notifier_global;
     struct wl_list notifiers;  // struct woodland_wallpaper_notifier.link
     struct wl_list surfaces;   // struct woodland_wallpaper_surface.link
     struct wl_list wallpapers; // struct woodland_wallpaper.link
@@ -102,6 +103,7 @@ struct woodland_proto_wallpaper {
     struct wl_listener output_removed;
     struct wl_listener lock_changed;
     struct wl_listener workspace_changed;
+    struct wl_listener layout_change;
 };
 
 /* 配置里出现的、当前确实能用的源（用于 notifier 广播与 already_used 判定） */
@@ -397,9 +399,23 @@ static const struct wlr_surface_role wallpaper_role = {
 };
 
 static void wallpaper_surface_free(struct woodland_wallpaper_surface *wallpaper) {
+    if (wallpaper->surface_destroy.link.prev) {
+        wl_list_remove(&wallpaper->surface_destroy.link);
+    }
     wl_list_remove(&wallpaper->link);
     free(wallpaper->source);
     free(wallpaper);
+}
+
+static void wallpaper_handle_surface_destroy(struct wl_listener *listener, void *data) {
+    struct woodland_wallpaper_surface *wallpaper =
+        wl_container_of(listener, wallpaper, surface_destroy);
+    (void)data;
+    /* wlroots 的 scene_surface 会在其自己的 surface.events.destroy 监听器中释放节点 */
+    wallpaper->wlr_surface = NULL;
+    wallpaper->scene_surface = NULL;
+    wl_list_remove(&wallpaper->surface_destroy.link);
+    wl_list_init(&wallpaper->surface_destroy.link);
 }
 
 static void wallpaper_surface_resource_destroy(struct wl_resource *resource) {
@@ -500,6 +516,7 @@ static void shell_get_wallpaper_surface(struct wl_client *client,
     /* 还没告诉过客户端该播还是该停（0 会被当成"已经说过 pause"） */
     wallpaper->play_state = -1;
     wl_list_init(&wallpaper->link);
+    wl_list_init(&wallpaper->surface_destroy.link);
     /* 先挂析构再干活：后面任何一步失败都靠 wl_resource_destroy 统一收尾 */
     wl_resource_set_implementation(wallpaper_resource, &wallpaper_surface_impl,
                                    wallpaper, wallpaper_surface_resource_destroy);
@@ -530,6 +547,9 @@ static void shell_get_wallpaper_surface(struct wl_client *client,
     wlr_scene_node_set_position(&wallpaper->scene_surface->buffer->node, 0, 0);
     /* ready 之前不画：否则会闪一帧上一次的内容（协议里就是这么约定的） */
     wlr_scene_node_set_enabled(&wallpaper->scene_surface->buffer->node, false);
+
+    woodland_listener_connect(&wallpaper->surface_destroy, &wlr_surface->events.destroy,
+                              wallpaper_handle_surface_destroy, "wallpaper.surface_destroy");
 
     wl_list_insert(&wp->surfaces, &wallpaper->link);
     /* 新 surface 可能不是当前该显示的那张：先让可见性裁决一次再报日志 */
@@ -823,18 +843,23 @@ static void wallpaper_handle_output_removed(struct wl_listener *listener, void *
         return;
     }
     /*
-     * 输出拔了但配置留着（插回来还是原来那张图）。只有"再没有别的输出
-     * 引用这个源"时才通知 remove——否则拔掉一块屏会把主屏的壁纸也撤掉。
+     * 输出拔了但配置留着（插回来还是原来那张图）。先去重再广播 remove，
+     * 否则每个 workspace 都填同一张壁纸会连续发出多次重复的 remove；
+     * 且只有"再没有别的输出引用这个源"时才通知 remove。
      */
-    if (config->lockscreen && !source_is_used(wp, config->lockscreen)) {
-        notifier_broadcast_remove(wp, config->lockscreen);
-    }
+    struct wp_source *sources = NULL;
+    size_t n = 0, cap = 0;
+    sources_add(&sources, &n, &cap, config->lockscreen, config->lockscreen_type);
     for (size_t i = 0; i < config->n_workspaces; i++) {
-        const char *path = config->workspaces[i].desktop;
-        if (path && !source_is_used(wp, path)) {
-            notifier_broadcast_remove(wp, path);
+        sources_add(&sources, &n, &cap, config->workspaces[i].desktop,
+                    config->workspaces[i].desktop_type);
+    }
+    for (size_t i = 0; i < n; i++) {
+        if (!source_is_used(wp, sources[i].path)) {
+            notifier_broadcast_remove(wp, sources[i].path);
         }
     }
+    sources_finish(sources, n);
     /* 参照输出可能换人了（拔掉的正是主屏）：重新挑一次可见的源 */
     wallpaper_apply_visibility(wp);
 }
@@ -865,6 +890,22 @@ static void wallpaper_handle_workspace_changed(struct wl_listener *listener, voi
     (void)data;
     wallpaper_apply_visibility(wp);
 }
+static void wallpaper_update_position(struct woodland_proto_wallpaper *wp) {
+    if (!wp || !wp->scene_tree || !wp->server->output_layout) {
+        return;
+    }
+    struct wlr_box box;
+    wlr_output_layout_get_box(wp->server->output_layout, NULL, &box);
+    wlr_scene_node_set_position(&wp->scene_tree->node, box.x, box.y);
+}
+
+static void wallpaper_handle_layout_change(struct wl_listener *listener, void *data) {
+    struct woodland_proto_wallpaper *wp =
+        wl_container_of(listener, wp, layout_change);
+    (void)data;
+    wallpaper_update_position(wp);
+}
+
 
 /* ==================== 由编排层调用的入口 ==================== */
 
@@ -882,9 +923,7 @@ void woodland_proto_wallpaper_output_added(struct woodland_proto *proto,
     wlr_scene_node_lower_to_bottom(&wp->scene_tree->node);
 
     /* 多屏时把壁纸挂到布局左上角，别只在主屏原点铺一块 */
-    struct wlr_box box;
-    wlr_output_layout_get_box(wp->server->output_layout, NULL, &box);
-    wlr_scene_node_set_position(&wp->scene_tree->node, box.x, box.y);
+    wallpaper_update_position(wp);
 
     wallpaper_ensure_output(wp, output);
     wallpaper_apply_visibility(wp);
@@ -906,6 +945,7 @@ bool woodland_proto_wallpaper_init(struct woodland_proto *proto) {
     wl_list_init(&wp->output_removed.link);
     wl_list_init(&wp->lock_changed.link);
     wl_list_init(&wp->workspace_changed.link);
+    wl_list_init(&wp->layout_change.link);
     /* 先挂上去：后面任何一步失败，finish 都能顺着它回收 */
     proto->wallpaper = wp;
 
@@ -918,6 +958,7 @@ bool woodland_proto_wallpaper_init(struct woodland_proto *proto) {
         return false;
     }
     wlr_scene_node_lower_to_bottom(&wp->scene_tree->node);
+    wallpaper_update_position(wp);
     /* self_check 靠它断言"壁纸永远在最底层"（shell 库不链接协议库） */
     server->wallpaper_tree = wp->scene_tree;
 
@@ -927,10 +968,10 @@ bool woodland_proto_wallpaper_init(struct woodland_proto *proto) {
     wp->shell_global = wl_global_create(server->display,
                                         &treeland_wallpaper_shell_v1_interface,
                                         WALLPAPER_VERSION, wp, shell_bind);
-    /* notifier 与 shell 同一族：绑在同一个全局名上，但接口各自独立 */
-    if (!wp->manager_global || !wp->shell_global ||
-        !wl_global_create(server->display, &treeland_wallpaper_notifier_v1_interface,
-                          WALLPAPER_VERSION, wp, notifier_bind)) {
+    wp->notifier_global = wl_global_create(server->display,
+                                           &treeland_wallpaper_notifier_v1_interface,
+                                           WALLPAPER_VERSION, wp, notifier_bind);
+    if (!wp->manager_global || !wp->shell_global || !wp->notifier_global) {
         wlr_log(WLR_ERROR, "failed to create wallpaper globals");
         return false;
     }
@@ -946,6 +987,10 @@ bool woodland_proto_wallpaper_init(struct woodland_proto *proto) {
     woodland_listener_connect(&wp->workspace_changed, &server->workspace_changed,
                               wallpaper_handle_workspace_changed,
                               "wallpaper.workspace_changed");
+    woodland_listener_connect(&wp->layout_change, &server->output_layout->events.change,
+                              wallpaper_handle_layout_change,
+                              "wallpaper.layout_change");
+
 
     /* headless 输出早于协议层建好：这里补一次配置，别等下一次热插拔 */
     struct woodland_output *output;
@@ -971,6 +1016,9 @@ void woodland_proto_wallpaper_finish(struct woodland_proto *proto) {
     if (wp->workspace_changed.link.prev) {
         wl_list_remove(&wp->workspace_changed.link);
     }
+    if (wp->layout_change.link.prev) {
+        wl_list_remove(&wp->layout_change.link);
+    }
     if (wp->manager_global) {
         wl_global_destroy(wp->manager_global);
         wp->manager_global = NULL;
@@ -978,6 +1026,10 @@ void woodland_proto_wallpaper_finish(struct woodland_proto *proto) {
     if (wp->shell_global) {
         wl_global_destroy(wp->shell_global);
         wp->shell_global = NULL;
+    }
+    if (wp->notifier_global) {
+        wl_global_destroy(wp->notifier_global);
+        wp->notifier_global = NULL;
     }
 
     /*
@@ -994,6 +1046,9 @@ void woodland_proto_wallpaper_finish(struct woodland_proto *proto) {
     }
     struct woodland_wallpaper_surface *surface, *s_tmp;
     wl_list_for_each_safe(surface, s_tmp, &wp->surfaces, link) {
+        if (surface->surface_destroy.link.prev) {
+            wl_list_remove(&surface->surface_destroy.link);
+        }
         wl_list_remove(&surface->link);
         if (surface->resource) {
             wl_resource_set_user_data(surface->resource, NULL);

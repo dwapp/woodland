@@ -264,8 +264,9 @@ bool woodland_wallpaper_config_set_source(struct woodland_wallpaper_config *conf
     }
 
     bool changed = false;
-    if ((role & WOODLAND_WALLPAPER_LOCKSCREEN) && output->lockscreen &&
-        strcmp(output->lockscreen, path) != 0) {
+    if ((role & WOODLAND_WALLPAPER_LOCKSCREEN) &&
+        (!output->lockscreen || strcmp(output->lockscreen, path) != 0 ||
+         output->lockscreen_type != (int)type)) {
         char *copy = strdup(path);
         if (copy) {
             free(output->lockscreen);
@@ -277,7 +278,8 @@ bool woodland_wallpaper_config_set_source(struct woodland_wallpaper_config *conf
     if (role & WOODLAND_WALLPAPER_DESKTOP) {
         for (size_t i = 0; i < output->n_workspaces; i++) {
             if (output->workspaces[i].desktop &&
-                strcmp(output->workspaces[i].desktop, path) == 0) {
+                strcmp(output->workspaces[i].desktop, path) == 0 &&
+                output->workspaces[i].desktop_type == (int)type) {
                 continue;
             }
             char *copy = strdup(path);
@@ -389,6 +391,9 @@ static bool json_parse_string(struct wp_json *j, char **out) {
         bytes[0] = *j->p++;
 
         if (bytes[0] == '\\') {
+            if (*j->p == '\0') {
+                goto fail;
+            }
             char esc = *j->p++;
             switch (esc) {
             case '"':  bytes[0] = '"';  break;
@@ -576,8 +581,9 @@ static bool json_parse_workspaces(struct wp_json *j, struct parsed_ws **out,
     }
 
     size_t cap = 0;
+    struct parsed_ws ws = {0, NULL, WOODLAND_WALLPAPER_IMAGE};
     for (;;) {
-        struct parsed_ws ws = {0, NULL, WOODLAND_WALLPAPER_IMAGE};
+        ws = (struct parsed_ws){0, NULL, WOODLAND_WALLPAPER_IMAGE};
         if (!json_eat(j, '{')) {
             goto fail;
         }
@@ -629,6 +635,7 @@ static bool json_parse_workspaces(struct wp_json *j, struct parsed_ws **out,
             cap = want;
         }
         (*out)[(*count)++] = ws;
+        ws.desktop = NULL;
 
         json_ws(j);
         if (*j->p == ',') {
@@ -643,6 +650,7 @@ static bool json_parse_workspaces(struct wp_json *j, struct parsed_ws **out,
     }
 
 fail:
+    free(ws.desktop);
     parsed_ws_finish(*out, *count);
     *out = NULL;
     *count = 0;
