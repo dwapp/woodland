@@ -38,11 +38,12 @@ meson test -C build --print-errorlogs  # 跑全部测试
 
 ### effects 构建（scenefx）必读
 
-`-Deffects=enabled` 时场景库整个换成 scenefx 0.5，它**自带一套同名 `wlr_scene_*`** 符号（链接顺序 `scene_deps = [scenefx, wlroots]`），并且带来 blur / 圆角 / 阴影节点。三条硬约束：
+`-Deffects=enabled` 时场景库整个换成 scenefx 0.5，它**自带一套同名 `wlr_scene_*`** 符号（链接顺序 `scene_deps = [scenefx, wlroots]`），并且带来 blur / 圆角 / 阴影节点。四条硬约束：
 
 1. **`.c` 里只 `#include "scene.h"`，不要直接 include `wlr/types/wlr_scene.h` 或 `scenefx/...`。** `include/scene.h` 按 `WOODLAND_HAVE_EFFECTS` 选方言，混用会让同一个结构体在两个 TU 里有不同布局。
 2. **`WOODLAND_HAVE_EFFECTS` 的判断必须放在 `#include "config.h"` 之后。** 否则宏未定义、`#if` 恒假，整段代码被静默编掉（踩过一次：X11 的 context destroy 监听器没了，留下悬空 view）。
-3. **`server->renderer` 必须是 `fx_renderer_create()`。** scenefx 的 `wlr_scene_output_commit()` 把 render pass 强转成自己的 `fx_render_pass`，塞 wlroots 的 pixman/gles2 renderer 进去会在 `fx_get_render_pass` 里断言死（`test_session_lock` 就是这么挂的）。它会强制走 EGL/GLES2，所以**官方测试矩阵仍是默认构建**，effects 构建是"要看效果时才开"的第二配置。
+3. **场景节点坐标是"相对父节点"的，算位置时只累计子节点的偏移。** `view->scene_tree` 的原点就是内容原点（SSD 的标题栏/边框在负坐标上），把 tree 自己的 `x/y` 也加进去等于把标题栏高度算两遍——blur 节点会整体下沉一个标题栏（27px），肉眼像"模糊糊到了标题栏以外的位置"。`dump_scene` 里 `blur pos` 与内容 `buffer pos` 对不上就是这个。
+4. **`server->renderer` 必须是 `fx_renderer_create()`。** scenefx 的 `wlr_scene_output_commit()` 把 render pass 强转成自己的 `fx_render_pass`，塞 wlroots 的 pixman/gles2 renderer 进去会在 `fx_get_render_pass` 里断言死（`test_session_lock` 就是这么挂的）。它会强制走 EGL/GLES2，所以**官方测试矩阵仍是默认构建**，effects 构建是"要看效果时才开"的第二配置。
 
 `effects` 只切"画不画"，不切"记不记"：`wctl get_tree` 的 `bg_effect`、`deco.rendered`、`--trace` 在两种构建下都要能查，差别是 `deco.rendered` 在默认构建里不含 `corner_radius`、`get_tree` 顶层 `effects` 为 false、`dump_scene` 里没有 blur 节点。想确认"到底画没画"，查这三处，不要靠截图猜。
 
