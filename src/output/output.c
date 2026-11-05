@@ -6,7 +6,7 @@
 #include <wlr/types/wlr_layer_shell_v1.h>
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_output_layout.h>
-#include <wlr/types/wlr_scene.h>
+#include "scene.h"
 #include <wlr/types/wlr_xdg_output_v1.h>
 #include <wlr/util/log.h>
 

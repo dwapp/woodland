@@ -16,7 +16,7 @@
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/types/wlr_gamma_control_v1.h>
 #include <wlr/types/wlr_output_layout.h>
-#include <wlr/types/wlr_scene.h>
+#include "scene.h"
 
 #include "cursor.h"
 #include "output.h"

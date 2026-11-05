@@ -5,7 +5,7 @@
 #include <string.h>
 
 #include <wlr/types/wlr_ext_workspace_v1.h>
-#include <wlr/types/wlr_scene.h>
+#include "scene.h"
 #include <wlr/util/log.h>
 
 #include "focus.h"

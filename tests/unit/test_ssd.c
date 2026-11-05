@@ -8,7 +8,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <wayland-server-core.h>
-#include <wlr/types/wlr_scene.h>
+#include "scene.h"
 #include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/util/edges.h>
 

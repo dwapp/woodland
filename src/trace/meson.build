@@ -3,5 +3,5 @@
 # 变成一次架构改动。
 trace_lib = static_library('woodland-trace', ['trace.c'],
   include_directories: woodland_inc,
-  dependencies: [wlroots, wayland_server],
+  dependencies: [scene_deps, wayland_server],
   link_with: [util_lib])

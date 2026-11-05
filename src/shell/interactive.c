@@ -22,7 +22,7 @@
 #include "view.h"
 #include "woodland.h"
 #include <wlr/types/wlr_foreign_toplevel_management_v1.h>
-#include <wlr/types/wlr_scene.h>
+#include "scene.h"
 #include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/util/edges.h>
 

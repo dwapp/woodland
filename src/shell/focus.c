@@ -12,7 +12,7 @@
 #include "config.h"
 
 #include <wlr/types/wlr_layer_shell_v1.h>
-#include <wlr/types/wlr_scene.h>
+#include "scene.h"
 #include <wlr/types/wlr_seat.h>
 #include <wlr/types/wlr_xdg_dialog_v1.h>
 #include <wlr/util/log.h>
