@@ -15,10 +15,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <wlr/types/wlr_scene.h>
+#include "scene.h"
 #include <wlr/util/log.h>
 #include <wlr/xwayland.h>
 
+#include "effect.h"
 #include "ssd.h"
 #include "view.h"
 #include "woodland.h"
@@ -191,6 +192,7 @@ static void xwl_unmap(struct wl_listener *listener, void *data) {
 static void xwl_commit(struct wl_listener *listener, void *data) {
     struct woodland_view *view = wl_container_of(listener, view, commit);
     woodland_ssd_update(view);
+    woodland_effect_update(view);
     (void)data;
 }
 

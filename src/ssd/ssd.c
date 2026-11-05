@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include <stdlib.h>
 
-#include <wlr/types/wlr_scene.h>
+#include "scene.h"
 #include <wlr/util/edges.h>
 #include <wlr/util/log.h>
 
+#include "effect.h"
 #include "icon.h"
 #include "ssd.h"
 #include "text_buffer.h"
@@ -589,6 +590,8 @@ void woodland_ssd_update(struct woodland_view *view)
     ssd_layout(ssd);
     ssd_apply_state(ssd);
     woodland_ssd_set_active(view, ssd->active);
+    /* 几何/状态变了：圆角与模糊节点跟着内容尺寸重算 */
+    woodland_effect_update(view);
 }
 
 /*
@@ -764,6 +767,33 @@ bool woodland_ssd_content_size(const struct woodland_view *view, int *width, int
         *height = view->ssd->height;
     }
     return true;
+}
+
+bool woodland_ssd_titlebar_visible(const struct woodland_view *view)
+{
+    return ssd_titlebar_height(view) > 0;
+}
+
+void woodland_ssd_set_corner_radius(struct woodland_view *view, int radius)
+{
+#if WOODLAND_HAVE_EFFECTS
+    struct woodland_ssd *ssd = view ? view->ssd : NULL;
+    if (!ssd) {
+        return;
+    }
+    struct fx_corner_radii top = corner_radii_top(radius);
+    struct fx_corner_radii bottom = corner_radii_bottom(radius);
+    struct fx_corner_radii square = corner_radii_none();
+    wlr_scene_rect_set_corner_radii(ssd->titlebar, top);
+    wlr_scene_rect_set_corner_radii(ssd->border[BORDER_TOP], top);
+    wlr_scene_rect_set_corner_radii(ssd->border[BORDER_BOTTOM], bottom);
+    /* 左右竖条保持直角：1px 宽的矩形套半径只会把边线啃掉一截 */
+    wlr_scene_rect_set_corner_radii(ssd->border[BORDER_LEFT], square);
+    wlr_scene_rect_set_corner_radii(ssd->border[BORDER_RIGHT], square);
+#else
+    (void)view;
+    (void)radius;
+#endif
 }
 
 void woodland_ssd_finish(void)

@@ -74,6 +74,7 @@ void woodland_config_default_init(struct woodland_config *config)
     config->ssd.border_width = WOODLAND_SSD_BORDER_W;
     config->ssd.button_width = WOODLAND_SSD_BUTTON_W;
     config->ssd.resize_grab_width = WOODLAND_SSD_RESIZE_GRAB_W;
+    /* 默认直角：圆角是 effects 构建才画得出来的东西，不在默认配置里"假装" */
     config->ssd.font = strdup("sans 10");
     config->ssd.active_title_color = 0xFFE1DEDB;    /* #e1dedb */
     config->ssd.inactive_title_color = 0xFFF7F6F4;  /* #f7f6f4 */
@@ -352,7 +353,7 @@ struct woodland_config *woodland_config_parse_string(const char *content, size_t
         cfg->effects.enabled = toml_get_bool(fx, "enabled", cfg->effects.enabled);
         cfg->effects.blur = toml_get_bool(fx, "blur", cfg->effects.blur);
         int64_t cr = toml_get_int(fx, "corner_radius", cfg->effects.corner_radius);
-        if (cr >= 0) {
+        if (cr >= 0 && cr <= WOODLAND_SSD_MAX_SIZE) {
             cfg->effects.corner_radius = (int32_t)cr;
         }
         cfg->effects.shadow = toml_get_bool(fx, "shadow", cfg->effects.shadow);

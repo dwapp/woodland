@@ -72,6 +72,16 @@ struct woodland_config_cursor {
     int32_t size;
 };
 
+/*
+ * [effects]：圆角与模糊。
+ *
+ * corner_radius 是**唯一**的圆角半径来源（窗口自己经 treeland-decoration 覆盖
+ * 时才另外算）——真正画出来要 -Deffects=enabled，默认构建只记录，wctl 里看得见
+ * 但画面不变。blur 的开关不在这儿：模糊由客户端经 ext-background-effect-v1
+ * 主动请求，合成器只负责"支持就如实报 capability"。
+ *
+ * enabled / shadow 目前仍是预留（还没接线），别把它们当成生效开关。
+ */
 struct woodland_config_effects {
     bool enabled;
     bool blur;

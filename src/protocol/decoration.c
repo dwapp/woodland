@@ -8,17 +8,18 @@
  * view->ssd_overrides 里写值，再由 SSD 自己去读。方向是单向的
  * （protocol → ssd），shell 不需要知道这个协议存在。
  *
- * 四类请求里 woodland 真正能画出来的只有两类：
+ * 四类请求里，woodland 能画出来的按构建分档：
  *
  *   边框    完整支持（宽度 + 颜色，scene rect 直接改）；
  *   标题栏  完整支持（hide 后边距只剩边框，命中区域同步收掉）；
- *   圆角    只记录不渲染：wlr_scene 的矩形与 surface 都没有"圆角裁剪"，
- *           真圆角要 shader/scenefx（effects 里程碑）。协议允许合成器把
- *           越界值 clamp 到支持的上界，这里就等于上界为 0；
- *   阴影    同上（要一层模糊 buffer，属于 effects）。
+ *   圆角    -Deffects=enabled 时交给 scenefx 裁（buffer/rect 的 corner radius），
+ *           默认构建只记录——wlr_scene 的矩形与 surface 都没有"圆角裁剪"；
+ *   阴影    只记录：scenefx 有 shadow 节点，但窗口阴影要先决定"阴影算不算
+ *           外框几何"（边距/吸附/最大化都得跟着改），留到单独一版。
  *
- * 后两项不装作"生效了"：值存下来、wctl get_tree 里看得见、trace 里写明
- * 没有渲染后端。客户端据此可以判断，而不是对着一个改了没反应的值猜。
+ * 记了没画的属性不装作"生效了"：值存下来、wctl get_tree 里看得见（rendered
+ * 列表只列真的会改画面的），trace 里写明没有渲染后端。客户端据此可以判断，
+ * 而不是对着一个改了没反应的值猜。
  *
  * 生命周期（协议原文 + 本实现）：
  *   - 同一个 surface 只能有一个存活的 context，第二个是 already_used；
@@ -36,10 +37,19 @@
 #include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/util/log.h>
 
+/*
+ * config.h 必须在第一个 #if WOODLAND_HAVE_* 之前：它定义这些宏。
+ * 之前这里没有直接包含，宏一直没被定义，于是下面那段 X11 destroy 监听器
+ * 连同 include 一起被静默编掉——X11 窗口的 context 会留着悬空 view 指针
+ * （woodland.h 改成包含 config.h 之后才暴露成编译错误）。
+ */
+#include "config.h"
+
 #if WOODLAND_HAVE_XWAYLAND
-#include <wlr/types/wlr_xwayland_surface.h>
+#include <wlr/xwayland.h>
 #endif
 
+#include "effect.h"
 #include "protocol_internal.h"
 #include "ssd.h"
 #include "trace.h"
@@ -208,6 +218,8 @@ static void context_apply(struct woodland_deco_context *ctx)
         return;
     }
     woodland_ssd_deco_changed(view);
+    /* 圆角跟着覆盖值走：CSD 视图没有 SSD，ssd_update 不会替它重算 */
+    woodland_effect_update(view);
 }
 
 /* ==================== context 请求 ==================== */
@@ -240,11 +252,14 @@ static void context_set_corner_radius(struct wl_client *client, struct wl_resour
     view->ssd_overrides.corner_radius_set = true;
     view->ssd_overrides.corner_radius = (int)radius;
     /*
-     * 只有边框/标题栏真的会改变画面：圆角要 shader 裁剪整块 surface，
-     * wlr_scene 做不到（见文件头）。轨迹里写清楚"记了但没画"，免得
-     * 排查的人以为是自己没生效。
+     * 圆角是有渲染后端之分的：effects 构建里 scenefx 真的会裁圆角，默认构建
+     * 只能记下来。轨迹里写清楚是哪一种，免得排查的人以为是自己没生效。
      */
+#if WOODLAND_HAVE_EFFECTS
+    woodland_trace_add("deco", view->id, "corner_radius=%u", radius);
+#else
     woodland_trace_add("deco", view->id, "corner_radius=%u recorded (no render backend)", radius);
+#endif
     context_apply(ctx);
 }
 
