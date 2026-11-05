@@ -98,8 +98,27 @@ int main(void) {
     /* ---------- 空状态：全部通过 ---------- */
     struct woodland_check out[WOODLAND_SELFCHECK_MAX];
     int n = run(&server, out);
-    assert(n == 8);
+    assert(n == 9);
     assert_all_ok(&server, "empty");
+
+    /* ---------- 壁纸树必须在 scene 最底层 ---------- */
+    /*
+     * 没有壁纸树（没建协议层）不算失败：上一步的 assert_all_ok 已经覆盖。
+     * 这里造一个"建了但没压底"的树——也就是输出热插拔把基线顶上去之后的
+     * 形状——断言它被抓出来。
+     */
+    struct wlr_scene_tree *wallpaper = wlr_scene_tree_create(&server.scene->tree);
+    assert(wallpaper);
+    server.wallpaper_tree = wallpaper;
+    n = run(&server, out);
+    const struct woodland_check *wp = find(out, n, "wallpaper_below_layers");
+    assert(!wp->ok);
+    assert(strstr(wp->actual, "something else"));
+
+    wlr_scene_node_lower_to_bottom(&wallpaper->node);
+    assert_all_ok(&server, "wallpaper lowered");
+    server.wallpaper_tree = NULL;
+    wlr_scene_node_destroy(&wallpaper->node);
 
     /* ---------- 一个正常聚焦的视图：全部通过 ---------- */
     struct fake_view a;

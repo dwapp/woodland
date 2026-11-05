@@ -34,6 +34,8 @@ static void handle_ext_workspace_commit(struct wl_listener *listener, void *data
 
 bool woodland_workspace_init(struct woodland_server *server) {
     wl_list_init(&server->workspaces);
+    /* 信号在 workspace 这一层建：切换是它的事，订阅方（壁纸族）后到 */
+    wl_signal_init(&server->workspace_changed);
 
     server->ext_workspace_manager =
         wlr_ext_workspace_manager_v1_create(server->display, EXT_WORKSPACE_VERSION);
@@ -146,6 +148,17 @@ void woodland_workspace_switch_focus(struct woodland_server *server,
          * surface 上则保持不动（见 woodland_focus_fallback）。 */
         woodland_focus_fallback(server);
     }
+
+    /*
+     * 每个 workspace 可以有各自的壁纸（壁纸协议按 workspaceIndex 存），
+     * 而壁纸 surface 是"一源一个、全堆在同一位置"的，所以切工作区必须
+     * 让协议层重挑可见的那张——漏掉这一步，切工作区时桌面纹丝不动，
+     * 后台那些视频壁纸还会继续解码。
+     *
+     * 用信号而不是直接调协议层：workspace 不该反向依赖协议（同
+     * server->output_removed 的理由），单元测试里也只链接 workspace 库。
+     */
+    wl_signal_emit_mutable(&server->workspace_changed, target);
 }
 
 void woodland_workspace_switch(struct woodland_server *server,

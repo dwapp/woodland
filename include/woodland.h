@@ -61,6 +61,22 @@ struct woodland_server {
      * --off 禁用的输出早已不在布局里），靠 layout change 驱动的广播补不上。
      */
     struct wl_signal output_removed;
+    /*
+     * 当前工作区切换完成后的通知（参数是被切到的 struct woodland_workspace）。
+     *
+     * 和 output_removed 同一个理由：workspace 层不该反向依赖协议层，而
+     * "切工作区"对壁纸族不是记账而是**行为**——每个源一个 surface 全堆在
+     * 同一位置，必须按新工作区重挑哪张可见、其余的暂停。
+     */
+    struct wl_signal workspace_changed;
+    /*
+     * 壁纸树的场景节点（没有协议层时为 NULL）。
+     *
+     * 挂在 server 上而不是让 self_check 反查协议层：shell 库不能反过来依赖
+     * protocol 库，否则每个链接 shell 的单元测试都要连带链接协议族。
+     * 壁纸族负责在建立/销毁时置上、置空。
+     */
+    struct wlr_scene_tree *wallpaper_tree;
     struct wlr_output_layout *output_layout;
     struct wlr_scene_output_layout *scene_layout;
 

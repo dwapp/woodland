@@ -14,7 +14,9 @@ wp_datadir = wayland_protos.get_variable('pkgdatadir')
 bg_effect_xml = wp_datadir / 'staging' / 'ext-background-effect' / 'ext-background-effect-v1.xml'
 
 proto_srcs = []
-foreach p : [['treeland-decoration-unstable-v1', 'treeland-decoration']]
+foreach p : [['treeland-decoration-unstable-v1', 'treeland-decoration'],
+             ['treeland-wallpaper-shell-unstable-v1', 'treeland-wallpaper-shell'],
+             ['treeland-wallpaper-manager-unstable-v1', 'treeland-wallpaper-manager']]
   proto_xml = treeland_xml_dir / (p[0] + '.xml')
   # 服务端只需要 header + 接口表：server-header 给实现用的函数声明，
   # private-code 给 wl_interface 定义（客户端桩代码一概不生成）
@@ -33,7 +35,6 @@ proto_srcs += custom_target('background-effect-server-header',
 proto_srcs += custom_target('background-effect-server-code',
   input: bg_effect_xml, output: 'ext-background-effect-v1-protocol.c',
   command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'])
-
 protocol_lib = static_library('woodland-protocol',
   'protocol.c',
   'idle.c',
@@ -43,9 +44,10 @@ protocol_lib = static_library('woodland-protocol',
   'drm_lease.c',
   'decoration.c',
   'background_effect.c',
+  'wallpaper.c',
+  'wallpaper_config.c',
   proto_srcs,
-  # '.'：生成的头文件落在 build/src/protocol/，decoration.c 用
-  # #include "treeland-decoration-unstable-v1-protocol.h" 就近取
+  # '.'：生成的头文件落在 build/src/protocol/，就近取
   include_directories: [woodland_inc, include_directories('.')],
   dependencies: [scene_deps, wayland_server, wayland_protos],
   link_with: [trace_lib, effect_lib])

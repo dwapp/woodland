@@ -14,13 +14,14 @@ struct wlr_output;
  * 这一层的职责只有"把 wlroots 的 manager 挂上 display，并把事件接到
  * 已有的窗口管理逻辑上"——不实现协议本身，也不碰渲染与几何。
  *
- * 内部按关注点分了五个文件，各自的取舍写在文件头：
+ * 内部按关注点分了七个文件，各自的取舍写在文件头：
  *   idle.c    空闲与抑制：idle-notify / idle-inhibit / shortcuts-inhibit
  *   output.c  输出管理：output-management / output-power-management
  *   input.c   输入与选区：relative-pointer / pointer-gestures / primary-selection
  *   window.c  窗口：xdg-activation / xdg-toplevel-tag
  *   decoration.c 窗口装饰：treeland-decoration（按窗口的 SSD 定制）
  *   background_effect.c 背景模糊：ext-background-effect-v1
+ *   wallpaper.c 壁纸：treeland-wallpaper-shell / -manager / -notifier
  *   protocol.c 只管按序建立、逆序回收，以及下面这几个转发入口。
  *
  * 按语义完备程度分三档，档位决定了它是否真的改变行为：
@@ -33,6 +34,9 @@ struct wlr_output;
  *             treeland-decoration 的边框/标题栏/圆角、
  *             ext-background-effect（capability 随 [effects] 运行期变化）
  *             —— 客户端请求会真的影响合成器行为。
+ *   委派实现：treeland-wallpaper-shell / -manager / -notifier
+ *             —— 配置、场景托管、播放控制都在合成器里，但**解码不在**：
+ *             图片/视频由外部 treeland-wallpaper-factory 渲染（见设计规格）。
  *   仅记录：  xdg-toplevel-tag（存下来、经 wctl 可见，但暂不参与窗口规则）；
  *             treeland-decoration 的阴影（要一层模糊 buffer，还没做）。
  *   暂不接线：security-context（无沙箱校验时声明"我是沙箱"反而是假安全）、
@@ -84,4 +88,14 @@ void woodland_protocol_offer_drm_lease(struct woodland_server *server,
 /** 从 DRM lease 管理器撤回 DRM 输出提议 */
 void woodland_protocol_withdraw_drm_lease(struct woodland_server *server,
                                           struct wlr_output *output);
+
+/**
+ * 新输出的 scene 图元（scene_output + 4 棵 layer tree）建好之后调用。
+ *
+ * 必须在新输出的 handle_new_output 之后跑：图层树用 lower_to_bottom() 建立，
+ * 会把壁纸基线顶到 layer-shell 的 background 之上。这是"壁纸永远在
+ * layer-shell 下面"的唯一保证，热插拔路径（不只是启动）也要覆盖。
+ */
+void woodland_protocol_output_added(struct woodland_server *server,
+                                    struct wlr_output *output);
 #endif

@@ -294,6 +294,8 @@ static void handle_unlock(struct wl_listener *listener, void *data)
 
     session_lock_destroy_outputs(session_lock);
     session_lock->locked = false;
+    /* 壁纸（以及将来的其它订阅者）按"解锁了"恢复播放 */
+    wl_signal_emit_mutable(&session_lock->lock_changed, NULL);
 
     if (session_lock->lock) {
         wl_list_remove(&session_lock->lock_new_surface.link);
@@ -388,6 +390,9 @@ static void handle_new_lock(struct wl_listener *listener, void *data)
     session_lock->locked = true;
     session_lock->lock = lock;
     wlr_session_lock_v1_send_locked(lock);
+
+    /* 状态落定之后再通知：订阅方读 is_locked 拿到的就是新值 */
+    wl_signal_emit_mutable(&session_lock->lock_changed, NULL);
 }
 
 static void handle_manager_destroy(struct wl_listener *listener, void *data)
@@ -415,6 +420,7 @@ bool woodland_session_lock_init(struct woodland_server *server)
     }
     session_lock->server = server;
     wl_list_init(&session_lock->lock_outputs);
+    wl_signal_init(&session_lock->lock_changed);
 
     session_lock->wlr_manager = wlr_session_lock_manager_v1_create(server->display);
     if (!session_lock->wlr_manager) {
