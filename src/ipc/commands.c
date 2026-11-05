@@ -126,7 +126,7 @@ static const struct ipc_field_doc get_listeners_fields[] = {
 static const struct ipc_field_doc dump_scene_fields[] = {
     {"tree", "obj",
      "scene graph: type, enabled, x, y, w, h, "
-     "rgba|opacity+has_buffer, children[], truncated"},
+     "rgba|opacity+has_buffer, rect corners+clip, children[], truncated"},
     {"nodes", "int", "nodes emitted (caps at 2000, depth 6)"},
     {"error", "str", "set instead of tree when no scene exists"},
 };
@@ -588,6 +588,27 @@ static void dump_node(struct scene_dump_ctx *ctx, struct wlr_scene_node *node, i
         }
         woodland_json_obj_key(&obj, "rgba");
         woodland_json_int_array(out, rgba, 4);
+        /*
+         * 圆角描边的两半：外圆角 + 挖空内框。边框"看着还是直角"时先看这里
+         * ——只在 1px 细条上设 corners 会被尺寸 clamp 掉，必须有 clip 才是描边。
+         */
+        int corners[4] = {rect->corners.top_left, rect->corners.top_right,
+                          rect->corners.bottom_right, rect->corners.bottom_left};
+        woodland_json_obj_key(&obj, "corners");
+        woodland_json_int_array(out, corners, 4);
+        woodland_json_obj_key(&obj, "clip");
+        struct woodland_json_obj clip;
+        woodland_json_obj_open(&clip, out);
+        woodland_json_obj_int(&clip, "x", rect->clipped_region.area.x);
+        woodland_json_obj_int(&clip, "y", rect->clipped_region.area.y);
+        woodland_json_obj_int(&clip, "w", rect->clipped_region.area.width);
+        woodland_json_obj_int(&clip, "h", rect->clipped_region.area.height);
+        int clip_corners[4] = {
+            rect->clipped_region.corners.top_left, rect->clipped_region.corners.top_right,
+            rect->clipped_region.corners.bottom_right, rect->clipped_region.corners.bottom_left};
+        woodland_json_obj_key(&clip, "corners");
+        woodland_json_int_array(out, clip_corners, 4);
+        woodland_json_obj_close(&clip);
     } else if (node->type == WLR_SCENE_NODE_BUFFER) {
         struct wlr_scene_buffer *buffer = wlr_scene_buffer_from_node(node);
         woodland_json_obj_int(&obj, "w", buffer->dst_width);
