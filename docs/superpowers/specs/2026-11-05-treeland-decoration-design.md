@@ -1,8 +1,8 @@
 # treeland-decoration-unstable-v1 支持设计规格
 
 > 日期：2026-11-05
-> 状态：已实现（协议语义完整；圆角在 `-Deffects=enabled` 构建里真的画出来，
-> 阴影仍只记录，见 §4）
+> 状态：已实现（协议语义完整；圆角真的画出来——scenefx 常开，能不能画由
+> `[effects] enabled` 决定，阴影仍只记录，见 §4）
 > 参考实现：treeland `src/modules/decoration/decorationmanagerinterfacev1.cpp`
 > （Apache-2.0 OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only）
 > 协议定义：`treeland-protocols/public/treeland-decoration-unstable-v1.xml`（MIT）
@@ -84,30 +84,30 @@ woodland_proto_decoration
 ## 4. 渲染能力与取舍
 
 协议允许合成器"按自己的策略处理，并把越界值 clamp 到支持的上界"。woodland
-有两条渲染路径，按构建分开：
+的渲染能力是编译期固定的（scenefx 常开），画不画由 `[effects] enabled` 决定：
 
-| 构建 | 场景库 | 圆角 | 阴影 |
+| `[effects] enabled` | 场景库 | 圆角 | 阴影 |
 |---|---|---|---|
-| 默认（`-Deffects=disabled`） | wlroots `wlr_scene` | 只记录 | 只记录 |
-| `-Deffects=enabled` | scenefx 0.5（自带 fx_renderer） | 真画 | 只记录 |
+| `true`（默认） | scenefx 0.5（自带 fx_renderer） | 真画 | 只记录 |
+| `false` | 同一套 scenefx，只是不建节点 | 只记录 | 只记录 |
 
-- **圆角**在 effects 构建里由 `src/effect/effect.c` 落到 scenefx：
+- **圆角**由 `src/effect/effect.c` 落到 scenefx：
   客户端内容用 `wlr_scene_buffer_set_corner_radii()`，SSD 的标题栏与边框用
   `wlr_scene_rect_set_corner_radii()`。四角怎么分配见
   `woodland_effect_corners()`：有标题栏 → 内容上角归 0（被标题栏盖住），
   标题栏/上边框自己圆；最大化/全屏 → 一律直角。
   半径只来自 `[effects] corner_radius` 或本协议的 per-view 覆盖，二者都 clamp
-  到 `WOODLAND_SSD_MAX_SIZE`。
+  到 `WOODLAND_SSD_MAX_SIZE`；总开关关掉时按 0 算。
 - **阴影**仍不画：它不只影响像素，还得算进摆放几何（否则相邻窗口互相压边），
   会牵动 placement/snap/maximize 全链路。
 
-"没画"这件事必须能看出来，所以两种构建都不说谎：
+"没画"这件事必须能看出来，所以开关两侧都不说谎：
 
-- `wctl get_tree` 的 `deco.rendered` 只列真正改变画面的属性。effects 构建里是
-  `["border","titlebar","corner_radius"]`，默认构建里没有 `corner_radius`；
-- `--trace` 的 `deco` 条目在默认构建写 `recorded (no render backend)`，
-  effects 构建不写这句（否则脚本会以为没生效）；
-- 协议里的 `set_*` 完整校验（上界 1000、颜色 [0,255]），与构建无关。
+- `wctl get_tree` 的 `deco.rendered` 只列真正改变画面的属性。特效开着时是
+  `["border","titlebar","corner_radius"]`，关掉后没有 `corner_radius`；
+- `--trace` 的 `deco` 条目在总开关关掉时写 `recorded (effects disabled)`，
+  开着不写这句（否则脚本会以为没生效）；
+- 协议里的 `set_*` 完整校验（上界 1000、颜色 [0,255]），与开关无关。
 
 ## 5. 生命周期与错误
 

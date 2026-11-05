@@ -117,11 +117,14 @@ struct woodland_layout {
 
 ## 6. 渲染与特效边界
 
-- 默认渲染路径：`wlr_scene` 节点直出，无额外合成开销。
-- 特效（阴影、圆角、模糊、过渡动画、多任务视图缩放动画）均为**可选项**：
-  - 编译期：`meson_options.txt` 中 `-Deffects=true/false`（默认 false）。
-  - 运行期：配置文件 `effects.enable`（默认 false）。
-- 需要特效时，使用 **scenefx**（wlroots 生态的 scene 扩展库）实现模糊、圆角、阴影等：scenefx 在 wlr_scene 之上提供 scene 节点装饰能力（圆角 clip、阴影、blur 等），避免自研渲染管线。
+- 渲染路径固定走 scenefx 的 scene（与 wlroots 同名符号，附带 blur/圆角/阴影节点）；
+  "不想要特效"是运行期的事，不是另编一套。
+- 特效开关（2026-11-05 起）：
+  - 编译期：**没有** effects 选项，scenefx 是硬依赖。降级梯度只到"没有 DRM 节点
+    时用 llvmpipe 软渲染"，不回到 pixman（scene 只认 fx render pass）。
+  - 运行期：`[effects] enabled`（默认 true）总开关，`blur`（默认 true）模糊开关，
+    `corner_radius` 是圆角半径。关掉后协议状态照记、只是不建节点。
+- 需要特效时使用 **scenefx**（wlroots 生态的 scene 扩展库）实现模糊、圆角、阴影等，避免自研渲染管线。
 - 多任务视图（overview）、任务切换器、显示桌面属于窗口管理特性（第 9 节），与特效独立，但其**动画**受特效开关控制。
 
 ## 7. 协议兼容清单（两级分级）

@@ -4,7 +4,7 @@
 
 - `woodland` 是**纯 C + wlroots** 的通用轻量 Wayland 合成器，目标是**兼容 treeland 生态（主要是协议）**，但**不复刻 treeland 的全部逻辑**。单体结构（sway/labwc 风格），单用户、运行在用户 session 内。
 - 无 Qt/QML 依赖。渲染默认走 `wlr_scene` 直出；特效经 scenefx 实现且**默认关闭**。
-- wlroots 经 meson wrap 下载，**锁定 tag 0.20.2**（不跟随 master）；scenefx 锁定 0.5（随 `effects` 选项启用）。两者都**不 vendored**。
+- wlroots 经 meson wrap 下载，**锁定 tag 0.20.2**（不跟随 master）；scenefx 锁 0.5，**是硬依赖**（scene 实现固定走它）。两者都**不 vendored**。
 - 许可证：GPL-2.0-only。
 
 ## 代码在哪里
@@ -29,23 +29,23 @@ meson test -C build --print-errorlogs  # 跑全部测试
 ```
 
 - 编译选项：`c_std=c11`、`warning_level=2` + `werror=true`（**警告即错误**）、`-DWLR_USE_UNSTABLE -D_POSIX_C_SOURCE=200809L`。
-- 特性开关在 `meson_options.txt`：`effects`（默认 false）、`tiling-layout`（默认 false）、`xwayland`（默认 true）、`test`（默认 false，跑测试要开）。
+- 特性开关在 `meson_options.txt`：`tiling-layout`（默认 false）、`xwayland`（默认 true）、`test`（默认 false，跑测试要开）。**没有 `effects` 选项**——scenefx 常开，见下一节。
 - 特性开关经 `configure_file` 生成 `build/config.h`，用 `WOODLAND_HAVE_*` 宏。
-- 冒烟测试用 headless 后端：`tests/smoke/run_headless.sh` 内部以 `WLR_BACKENDS=headless WLR_RENDERER=pixman` 后台启动 + `kill -TERM` + 等退出码 0（M1 起追加 `WLR_HEADLESS_OUTPUTS=1`）。ASan 验证用 `meson setup build-asan -Db_sanitize=address,undefined -Dtest=enabled`。
+- 冒烟测试用 headless 后端：`tests/smoke/run_headless.sh` 内部以 `WLR_BACKENDS=headless` 后台启动 + `kill -TERM` + 等退出码 0（M1 起追加 `WLR_HEADLESS_OUTPUTS=1`）。ASan 验证用 `meson setup build-asan -Db_sanitize=address,undefined -Dtest=enabled`。`WLR_RENDERER=pixman` 已经没用，不要以为写它会切渲染器。
 - **冒烟脚本一律先 `. tests/smoke/lib.sh` 再 `smoke_init <名字>`。** 失败时它把现场落到 `build/meson-logs/smoke/<名字>/`：`compositor.log`、`meta.txt`（参数 / socket / 退出码），有 `WCTL` 和 `SOCK` 时还会抓 `get_tree` / `get_focus` / `self_check` / `get_trace` / `dump_scene` 的 JSON 和一张 `screenshot.png`。脚本自己的收尾写成 `smoke_cleanup()`（dump 之后才调用），断言失败用 `smoke_fail "..."`。**不要再用 `cat 日志; exit 1`**——那正是"只有一行结论、没有现场"的老写法。
 - **CI 跑在 `archlinux:base-devel`，不要换回 `debian:stable`。** wlroots 0.20 要 wayland >= 1.24、libdrm >= 2.4.129、xkbcommon >= 1.8、pixman >= 0.43，bookworm 一个都不满足，meson 会退到 wrap 里逐个编 fallback，链条断在第一个 wayland 子项目（`Dependency "expat" not found`）。缺 expat 只是表象，补它只会把失败推到下一个依赖。
 - **顶层 `meson.build` 里给 `wlroots` 包的那层 `declare_dependency` 别删。** wlroots 作为子项目构建时，`wayland-scanner` 生成的协议头落在 `build/subprojects/wlroots/protocol/`，而它自己只导出 `include/`，于是 `wlr/types/wlr_layer_shell_v1.h` 里 `#include "wlr-layer-shell-unstable-v1-protocol.h"` 直接编译失败。系统装过 wlroots 的机器上 `/usr/include` 有这个头，问题会被掩盖——**本地能编不代表能编**。
 
-### effects 构建（scenefx）必读
+### scenefx 必读（常开，不是可选特性）
 
-`-Deffects=enabled` 时场景库整个换成 scenefx 0.5，它**自带一套同名 `wlr_scene_*`** 符号（链接顺序 `scene_deps = [scenefx, wlroots]`），并且带来 blur / 圆角 / 阴影节点。四条硬约束：
+场景库固定是 scenefx 0.5，它**自带一套同名 `wlr_scene_*`** 符号（链接顺序 `scene_deps = [scenefx, wlroots]`），带来 blur / 圆角 / 阴影节点。想"关掉特效"是**运行期**的事（`[effects] enabled=false`），不存在只编一套的构建。四条硬约束：
 
-1. **`.c` 里只 `#include "scene.h"`，不要直接 include `wlr/types/wlr_scene.h` 或 `scenefx/...`。** `include/scene.h` 按 `WOODLAND_HAVE_EFFECTS` 选方言，混用会让同一个结构体在两个 TU 里有不同布局。
-2. **`WOODLAND_HAVE_EFFECTS` 的判断必须放在 `#include "config.h"` 之后。** 否则宏未定义、`#if` 恒假，整段代码被静默编掉（踩过一次：X11 的 context destroy 监听器没了，留下悬空 view）。
+1. **`.c` 里只 `#include "scene.h"`，不要直接 include `wlr/types/wlr_scene.h` 或 `scenefx/...`。** `include/scene.h` 是唯一入口，混用会让同一个结构体在两个 TU 里有不同布局。
+2. **不要再加 `#if WOODLAND_HAVE_EFFECTS` 这类编译期分支。** 宏已经不存在；新增"要不要画"的判断一律走 `woodland_effect_server_enabled()` / `woodland_effect_server_blur_enabled()`。曾经因为宏判断写在 `#include "config.h"` 之前、`#if` 恒假，整段代码被静默编掉（X11 的 context destroy 监听器没了，留下悬空 view）。
 3. **场景节点坐标是"相对父节点"的，算位置时只累计子节点的偏移。** `view->scene_tree` 的原点就是内容原点（SSD 的标题栏/边框在负坐标上），把 tree 自己的 `x/y` 也加进去等于把标题栏高度算两遍——blur 节点会整体下沉一个标题栏（27px），肉眼像"模糊糊到了标题栏以外的位置"。`dump_scene` 里 `blur pos` 与内容 `buffer pos` 对不上就是这个。
-4. **`server->renderer` 必须是 `fx_renderer_create()`。** scenefx 的 `wlr_scene_output_commit()` 把 render pass 强转成自己的 `fx_render_pass`，塞 wlroots 的 pixman/gles2 renderer 进去会在 `fx_get_render_pass` 里断言死（`test_session_lock` 就是这么挂的）。它会强制走 EGL/GLES2，所以**官方测试矩阵仍是默认构建**，effects 构建是"要看效果时才开"的第二配置。
+4. **`server->renderer` 必须是 `fx_renderer_create()`。** scenefx 的 `wlr_scene_output_commit()` 把 render pass 强转成自己的 `fx_render_pass`，塞 wlroots 的 pixman/gles2 renderer 进去会在 `fx_get_render_pass` 里断言死（`test_session_lock` 就是这么挂的）。它只走 EGL/GLES2：没有 DRM 渲染节点时（容器 / 纯 headless）`server.c` 会自动 `WLR_RENDERER_FORCE_SOFTWARE=1` 重试一次，落到 llvmpipe 的 surfaceless EGL。**回退不到 pixman**——scene 只认 fx render pass。
 
-`effects` 只切"画不画"，不切"记不记"：`wctl get_tree` 的 `bg_effect`、`deco.rendered`、`--trace` 在两种构建下都要能查，差别是 `deco.rendered` 在默认构建里不含 `corner_radius`、`get_tree` 顶层 `effects` 为 false、`dump_scene` 里没有 blur 节点。想确认"到底画没画"，查这三处，不要靠截图猜。
+配置只切"画不画"，不切"记不记"：`wctl get_tree` 的 `bg_effect`、`deco.rendered`、`--trace` 在开关两侧都要能查。`[effects]` 关掉后 `get_tree` 的 `effects` / `effects_blur` 为 false、`deco.rendered` 里没有 `corner_radius`、`dump_scene` 里没有 blur 节点、ext-background-effect 的 capability 报 0（已连接的客户端会在 `reload_config` 后收到重播）。想确认"到底画没画"，查这几处，不要靠截图猜。
 
 ## 调试接口（wctl）
 
@@ -97,7 +97,7 @@ woodland 是 Wayland 合成器：主循环会**正常阻塞在 `ep_poll`** 等�
 
 1. **功能验证靠测试**：`meson test -C build --print-errorlogs`（冒烟测试脚本自己会后台启动 + 发 SIGTERM + 收退出码，不需要你手动跑二进制）。
 2. **查运行时状态用 `wctl`**：`wctl get_tree` / `get_focus` / `self_check`（见上一节），比截图和推理都可靠。
-3. **要看运行日志**：`WLR_BACKENDS=headless WLR_RENDERER=pixman ./build/src/woodland 2>&1` 直接看 wlr_log 输出（前台阻塞是正常的，看完 `Ctrl-C` 或另发 SIGTERM 即可）。
+3. **要看运行日志**：`WLR_BACKENDS=headless ./build/src/woodland 2>&1` 直接看 wlr_log 输出（前台阻塞是正常的，看完 `Ctrl-C` 或另发 SIGTERM 即可）。没有 DRM 节点时它会自动落到 llvmpipe，日志里第一条 `no DRM render node, retrying with llvmpipe` 属于正常。
 4. **要排查崩溃**：用 ASan（`build-asan`）+ 崩溃时 ASan 会自动打印栈，或者给 wlr_log 加日志/读代码推理。**不要 attach gdb 到阻塞的事件循环上等它"出问题"**。
 5. **确需 gdb 时**：只对**已崩溃的 core dump** 做 `gdb ./woodland core`（事后分析，不是 `run`），或对纯函数（不跑事件循环）的单元测试用 gdb。
 

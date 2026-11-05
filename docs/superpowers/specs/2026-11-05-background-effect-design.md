@@ -1,7 +1,7 @@
 # ext-background-effect-v1 与圆角渲染设计规格
 
 > 日期：2026-11-05
-> 状态：已实现（协议 + 渲染；scenefx 路径需要 `-Deffects=enabled`）
+> 状态：已实现（协议 + 渲染；scenefx 常开，模糊由 `[effects]` 运行期开关控制）
 > 协议定义：wayland-protocols ≥ 1.41 `staging/ext-background-effect/ext-background-effect-v1.xml`
 > 参考实现：`/home/ut004971@uos/work/doors`（wlroots 0.21 内建同名协议 + 自研 shader）、
 > treeland vendored 的 wlroots MR5304；`/home/ut004971@uos/work/mango`（scenefx 用法对照，
@@ -63,13 +63,15 @@ surface 销毁时按 `wlr_addon` 摘挂（`struct woodland_bg_surface` 挂在
 layer surface 这条路径不是可选项：面板是模糊最常见的用户，而它们没有 view
 对象——只认 view 的话，客户端设了区域什么都不发生，还查不出原因。
 
-### 3.3 capability 按构建如实报
+### 3.3 capability 按运行期配置如实报
 
-`capabilities` 在 bind 时发一次。没有 scenefx 的构建发 `0`（"我不会模糊"），
-而不是"接了请求但什么都不发生"：客户端据此决定要不要保留半透明外观。
-这一点被 `smoke-bg-effect` 的 CAPS 阶段钉住（effects → 1，非 effects → 0）。
+`capabilities` 在 bind 时**现算**（全局在配置加载之前就建好了，不能读初始化
+时的快照）：`[effects] enabled` 且 `blur` 时发 `BLUR`，否则发 `0`（"我不会模
+糊"），而不是"接了请求但什么都不发生"——客户端据此决定要不要保留半透明外观。
+`reload_config` 改了开关会再广播一次（协议允许重复发送，以最后一条为准）。
+这一点被 `smoke-bg-effect` 的 CAPS 阶段钉住（开 → 1，关 → 0）。
 
-## 4. 渲染（`src/effect/effect.c`，仅 effects 构建）
+## 4. 渲染（`src/effect/effect.c`，scenefx 常开）
 
 ### 4.1 节点位置：贴 surface，且用 tree 的坐标系
 
@@ -120,49 +122,60 @@ surface 里有一圈"阴影预留"的全透明边，把整个 surface 声明成�
 窗口不会被"压暗"——它只是把"没画东西的地方"排除掉。实测：窗口边缘留 40px
 全透明，模糊前后这两张图在那一圈的 RMSE 为 **0**，而中心区域差 0.043。
 
-### 4.5 渲染器必须换
+### 4.5 渲染器必须是 fx（且不能回退 pixman）
 
 scenefx 的 `wlr_scene_*` 会顶替 wlroots 的实现（同名符号，链接顺序
 `scene_deps = [scenefx, wlroots]`），而它的 `wlr_scene_output_commit()` 直接把
-render pass 强转成自己的 `fx_render_pass`。所以 effects 构建里
-`server->renderer` 必须是 `fx_renderer_create()` 的产物；塞一个 pixman/gles2
-的 wlroots renderer 进去会在 `fx_get_render_pass` 里断言死。
+render pass 强转成自己的 `fx_render_pass`。所以 `server->renderer` 必须是
+`fx_renderer_create()` 的产物；塞一个 pixman/gles2 的 wlroots renderer 进去会在
+`fx_get_render_pass` 里断言死。
 
-## 5. 两条构建互不污染
+fx renderer 只走 EGL/GLES2，没有 DRM 渲染节点（容器、纯 headless）时第一把必然
+失败。这时 `server.c` 会设 `WLR_RENDERER_FORCE_SOFTWARE=1` 重试一次，落到
+llvmpipe 的 surfaceless EGL——**唯一的降级方向**，回退到 pixman 会直接崩。
 
-| 能力 | 默认构建 | effects 构建 |
+## 5. 一套构建 + 运行期开关
+
+| 能力 | `[effects] enabled=false` | `true`（默认） |
 |---|---|---|
 | `ext_background_effect_manager_v1` 全局 | 有 | 有 |
-| capability | 0 | blur |
+| capability | 0 | blur（`blur=false` 时也是 0） |
 | `view->effect.blur` / region | 记录 | 记录 + 画 |
-| 圆角 | 记录 | 记录 + 画 |
+| 圆角 | 记录（半径按 0 算） | 记录 + 画 |
 | `dump_scene` 里的 blur 节点 | 无 | 有 |
-| `wctl get_tree` 顶层 `effects` | false | true |
+| `wctl get_tree` 顶层 `effects` / `effects_blur` | false / false | true / 按配置 |
 
-`#if WOODLAND_HAVE_EFFECTS` 只切"画不画"，不切"记不记"：单测、IPC、trace 在
-两种构建下行为一致，脚本不需要到处分支（分支点集中在"渲染结果"上）。
+配置只切"画不画"，不切"记不记"：单测、IPC、trace 在开关两侧行为一致，脚本的
+分支点集中在"渲染结果"上（`get_tree` 的 `effects`、`dump_scene` 的 blur 节点）。
 
 ## 6. 测试
 
 - `tests/unit/test_effect.c`：半径优先级（覆盖 > `[effects] corner_radius`）、
-  clamp、四角分配、region 裁剪（空/越界/全外/负坐标）、提交状态，以及逐 buffer
-  圆角的边判定（全窗口 / 中间 / 左上 / 右下 / 整条边 / 越界 / 上角本来就是 0）。
-- `tests/unit/test_session_lock.c`：effects 构建里必须用 `fx_renderer_create()`，
-  否则 scenefx 断言；没有 DRM 节点的机器上 skip（77），不伪装成通过。
-- `smoke-bg-effect`：capability、整窗/局部/越界/无对象/销毁五个场景的协议状态，
-  外加 **scene 节点断言**（effects 构建必须有铺满内容的 blur 节点，默认构建
-  必须没有）；再加一个 `--layer` 场景：layer surface 设模糊后必须出现铺满它、
-  四角为 0 的 blur 节点，surface 销毁后节点必须跟着消失。
+  clamp、四角分配、region 裁剪（空/越界/全外/负坐标）、提交状态、逐 buffer
+  圆角的边判定（全窗口 / 中间 / 左上 / 右下 / 整条边 / 越界 / 上角本来就是 0），
+  以及运行期开关的优先级（`enabled=false` 压过客户端覆盖与配置半径、
+  `blur=false` 只停模糊不停圆角、空 server/配置按关处理）。
+- `tests/unit/test_session_lock.c`：必须用 `fx_renderer_create()`，否则 scenefx
+  断言；没有 DRM 节点时先按 llvmpipe 重试，仍不行才 skip（77），不伪装成通过。
+- `smoke-bg-effect`：跑两遍。默认配置下断言 capability=1、整窗/局部/越界/
+  无对象/销毁五个场景的协议状态，外加 **scene 节点断言**（必须有一个铺满内容、
+  四角跟内容一致的 blur 节点）；`--layer` 场景断言 layer surface 的模糊会建出
+  铺满它、四角为 0 的节点，surface 销毁后节点跟着消失。第二遍用
+  `[effects] enabled=false` 重启，断言 `get_tree` 的 `effects`/`effects_blur`
+  为 false、capability=0、一个 blur 节点都没有，**但客户端设的区域照样记录**。
 - `smoke-xwayland`：标题栏底色断言改成 `±1%` 容差——wlroots renderer 与
   fx_renderer 在 sRGB 舍入上差一个最低位（247 vs 246），这不是画错了。
 
 ## 7. 已知限制
 
 - blur 的观感取决于 GPU/驱动，冒烟只断言"节点在、区域对"，不断言像素。
-  人工验证用「底层彩条窗口 + 半透明窗口 + `blur`」两张对照截图看边缘能量。
+  人工验证用「底层彩条窗口 + 半透明窗口 + `blur`」两张对照截图看边缘能量
+  （嵌套跑，别占 DRM）。
 - `set_blur_region` 只取区域的**包围盒**（`pixman_region32_extents`），不做
   逐矩形的多块裁剪。多矩形区域的中间空洞会被一起糊——协议允许，先记着。
-- `[effects] enabled/blur/shadow` 仍是预留字段，别当成生效开关。
+- `[effects] shadow` 仍是预留字段；`enabled` / `blur` 已经接线（默认 true）。
+- 运行期开关改 `enabled`/`blur` 后，已有窗口要等下一次 commit 才重画；
+  `reload_config` 会立刻遍历窗口重算并重播 capability。
 
 ## 8. 与 mango 的对照（代码级）
 
