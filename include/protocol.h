@@ -20,6 +20,7 @@ struct wlr_output;
  *   input.c   输入与选区：relative-pointer / pointer-gestures / primary-selection
  *   window.c  窗口：xdg-activation / xdg-toplevel-tag
  *   decoration.c 窗口装饰：treeland-decoration（按窗口的 SSD 定制）
+ *   background_effect.c 背景模糊：ext-background-effect-v1
  *   protocol.c 只管按序建立、逆序回收，以及下面这几个转发入口。
  *
  * 按语义完备程度分三档，档位决定了它是否真的改变行为：
@@ -28,12 +29,12 @@ struct wlr_output;
  *             idle-notify、idle-inhibit、keyboard-shortcuts-inhibit、
  *             output-power-management、output-management、gamma-control、
  *             drm-lease、relative-pointer、pointer-constraints、pointer-gestures、
- *             linux-drm-syncobj、xdg-activation、
- *             treeland-decoration 的边框与标题栏
+ *             linux-drm-syncobj、xdg-activation、treeland-decoration 的边框与标题栏、
+ *             ext-background-effect（仅 -Deffects=enabled 时 capability 才置位）
  *             —— 客户端请求会真的影响合成器行为。
  *   仅记录：  xdg-toplevel-tag（存下来、经 wctl 可见，但暂不参与窗口规则）；
- *             treeland-decoration 的圆角与阴影（wlr_scene 画不了圆角/模糊，
- *             要等 effects 里程碑接 scenefx，现在只记录 + 在 wctl 里可见）。
+ *             treeland-decoration 的圆角（effects 构建里已经真的画出来，默认
+ *             构建只能记录）与阴影（要一层模糊 buffer，还没做）。
  *   暂不接线：security-context（无沙箱校验时声明"我是沙箱"反而是假安全）、
  *             tearing-control（要改 scene 的 commit 路径传 tearing 位，
  *             属单独一版）、content-type（scene 不消费）、
