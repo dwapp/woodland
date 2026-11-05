@@ -85,5 +85,6 @@ void woodland_proto_decoration_finish(struct woodland_proto *proto);
 /* 背景效果族（background_effect.c）：ext-background-effect-v1 */
 bool woodland_proto_bg_effect_init(struct woodland_proto *proto);
 void woodland_proto_bg_effect_finish(struct woodland_proto *proto);
+void woodland_proto_bg_effect_refresh(struct woodland_proto *proto);
 
 #endif

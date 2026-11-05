@@ -29,12 +29,12 @@ struct wlr_output;
  *             idle-notify、idle-inhibit、keyboard-shortcuts-inhibit、
  *             output-power-management、output-management、gamma-control、
  *             drm-lease、relative-pointer、pointer-constraints、pointer-gestures、
- *             linux-drm-syncobj、xdg-activation、treeland-decoration 的边框与标题栏、
- *             ext-background-effect（仅 -Deffects=enabled 时 capability 才置位）
+ *             linux-drm-syncobj、xdg-activation、
+ *             treeland-decoration 的边框/标题栏/圆角、
+ *             ext-background-effect（capability 随 [effects] 运行期变化）
  *             —— 客户端请求会真的影响合成器行为。
  *   仅记录：  xdg-toplevel-tag（存下来、经 wctl 可见，但暂不参与窗口规则）；
- *             treeland-decoration 的圆角（effects 构建里已经真的画出来，默认
- *             构建只能记录）与阴影（要一层模糊 buffer，还没做）。
+ *             treeland-decoration 的阴影（要一层模糊 buffer，还没做）。
  *   暂不接线：security-context（无沙箱校验时声明"我是沙箱"反而是假安全）、
  *             tearing-control（要改 scene 的 commit 路径传 tearing 位，
  *             属单独一版）、content-type（scene 不消费）、
@@ -67,6 +67,15 @@ bool woodland_protocol_shortcuts_inhibited(struct woodland_server *server);
  */
 void woodland_protocol_output_changed(struct woodland_server *server);
 
+
+/**
+ * 配置热重载之后，把新的模糊能力位广播给已连接的客户端。
+ *
+ * ext-background-effect 的 capability 在 bind 时发一次，客户端之后不会再问；
+ * 所以 [effects] 开关变了要主动给所有已绑定的 manager 补一条（协议允许重复
+ * 发送，以最后一条为准）。
+ */
+void woodland_protocol_refresh_background_effect(struct woodland_server *server);
 
 /** 将 DRM 输出提议给 DRM lease 管理器 */
 void woodland_protocol_offer_drm_lease(struct woodland_server *server,

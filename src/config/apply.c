@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "cursor.h"
+#include "effect.h"
+#include "protocol.h"
 #include "seat.h"
 #include "ssd.h"
 #include "toml.h"
@@ -154,16 +156,37 @@ void woodland_config_apply(struct woodland_server *server, struct woodland_confi
         apply_cursor_config(server, &new_config->cursor, old_config ? &old_config->cursor : NULL);
     }
 
-    /* 5. 记入决策轨迹 */
-    woodland_trace_add("cfg_apply", 0, "path=%s placement=%s kb_changed=%d ssd_changed=%d",
+    /* 5. effects：圆角与模糊是运行期开关，改了要立刻重画 */
+    bool fx_changed =
+        !old_config || (new_config->effects.enabled != old_config->effects.enabled) ||
+        (new_config->effects.blur != old_config->effects.blur) ||
+        (new_config->effects.corner_radius != old_config->effects.corner_radius);
+
+    /* 6. 记入决策轨迹 */
+    woodland_trace_add("cfg_apply", 0,
+                       "path=%s placement=%s kb_changed=%d ssd_changed=%d fx_changed=%d",
                        new_config->loaded_path ? new_config->loaded_path : "defaults",
                        woodland_placement_policy_name(server->placement_policy), kb_changed,
-                       ssd_changed);
+                       ssd_changed, fx_changed);
 
-    /* 6. 替换配置指针并销毁旧配置 */
+    /* 7. 替换配置指针并销毁旧配置 */
     server->config = new_config;
     if (old_config) {
         woodland_config_destroy(old_config);
+    }
+
+    /*
+     * 8. effects 放在替换之后：woodland_effect_update 读的是 server->config，
+     *    先换指针再重画，否则用的还是旧开关。能力位也要重播一次——客户端只在
+     *    bind 时问过一次"你会不会模糊"。
+     */
+    if (fx_changed) {
+        struct woodland_view *view;
+        wl_list_for_each(view, &server->views, link)
+        {
+            woodland_effect_update(view);
+        }
+        woodland_protocol_refresh_background_effect(server);
     }
 }
 

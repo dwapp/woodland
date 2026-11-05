@@ -357,7 +357,7 @@ int main(int argc, char *argv[])
      * 第二轮是必须的，不是保险：bind 请求是在第一轮**分发**全局事件时才排进
      * 发送队列的，而第一轮等的那次 sync 早在 bind 之前就发出去了。所以第一轮
      * 返回时服务端还没看见 bind，更没来得及发 capabilities——这时读 bg_caps
-     * 永远是 0，只有 effects 构建会露馅（非 effects 构建期望值恰好也是 0）。
+     * 永远是 0，只有开了模糊的配置会露馅（关掉时期望值恰好也是 0）。
      */
     wl_display_roundtrip(display);
 

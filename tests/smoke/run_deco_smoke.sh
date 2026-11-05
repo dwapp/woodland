@@ -26,7 +26,7 @@ export XDG_RUNTIME_DIR="$(mktemp -d)"
 # 用户配置把它改掉
 export XDG_CONFIG_HOME="$XDG_RUNTIME_DIR/config"
 mkdir -p "$XDG_CONFIG_HOME"
-export WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_HEADLESS_OUTPUTS=1
+export WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1
 
 SMOKE_LOG="$XDG_RUNTIME_DIR/woodland.log"
 SMOKE_FLAGS="--self-check --trace"
@@ -65,8 +65,9 @@ while [ "$i" -lt 100 ]; do
 done
 [ -n "$SOCK" ] || smoke_fail "debug socket never appeared"
 
-# 圆角是不是真的画出来取决于构建：默认构建只记录，effects 构建交给 scenefx
-EFFECTS="$("$WCTL" -s "$SOCK" get_tree | jq -r '.effects')"
+# 圆角现在总是有渲染后端（scenefx 常开），能不能画出来取决于 [effects] enabled；
+# 默认配置是开的，所以这里的期望值写死"画"。"关掉后不长角"由 smoke-bg-effect
+# 的禁用场景覆盖。
 
 view_count() {
     "$WCTL" -s "$SOCK" get_tree 2>/dev/null | jq -r '.count // -1'
@@ -160,16 +161,12 @@ scenario bare border 0 0 0 0 0 titlebar 1
 expect '.views[0].ssd.margins == [0, 0, 0, 0]' "zero border + hidden titlebar means no decoration"
 stop_probe
 
-echo "== 圆角/阴影：圆角按构建决定，阴影只记录 =="
+echo "== 圆角/阴影：圆角真的画，阴影只记录 =="
 scenario effect radius 12 shadow 40 0 10 0 0 0 102
 expect '.views[0].deco.corner_radius == 12' "corner radius must be recorded"
 expect '.views[0].deco.shadow_radius == 40' "shadow radius must be recorded"
 expect '.views[0].deco.shadow_offset == [0, 10]' "shadow offset must be recorded"
-if [ "$EFFECTS" = "true" ]; then
-    expect '.views[0].deco.rendered == ["corner_radius"]' "effects build renders the corner radius"
-else
-    expect '.views[0].deco.rendered == []' "radius/shadow have no render backend"
-fi
+expect '.views[0].deco.rendered == ["corner_radius"]' "corner radius has a render backend"
 expect '.views[0].ssd.margins == [1, 27, 1, 1]' "radius/shadow must not change geometry"
 stop_probe
 
@@ -208,13 +205,10 @@ echo "== 决策轨迹与不变量 =="
 "$WCTL" -s "$SOCK" get_trace | jq -e '
     [.entries[] | select(.what == "deco")] | length >= 5' >/dev/null \
     || smoke_fail "deco trace entries missing"
-if [ "$EFFECTS" = "true" ]; then
-    # effects 构建里圆角有渲染后端，只有阴影还挂着"recorded"的说明
-    "$WCTL" -s "$SOCK" get_trace | jq -e '
-        [.entries[] | select(.what == "deco" and (.detail | contains("corner_radius"))
-                             and (.detail | contains("no render backend")))] | length == 0' >/dev/null \
-        || smoke_fail "corner radius must not claim to have no render backend"
-fi
+"$WCTL" -s "$SOCK" get_trace | jq -e '
+    [.entries[] | select(.what == "deco" and (.detail | contains("corner_radius"))
+                         and (.detail | contains("effects disabled")))] | length == 0' >/dev/null \
+    || smoke_fail "corner radius must not claim to be disabled"
 "$WCTL" -s "$SOCK" get_trace | jq -e '
     [.entries[] | select(.what == "deco" and (.detail | contains("shadow"))
                          and (.detail | contains("no render backend")))] | length >= 1' >/dev/null \

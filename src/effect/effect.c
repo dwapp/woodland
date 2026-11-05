@@ -7,9 +7,10 @@
  * 画在内容之前的 blur 节点。本文件只负责"什么时候用多大半径、糊哪一块"，
  * 也就是把协议/配置里的意图翻译成 scenefx 的节点参数。
  *
- * 默认构建（-Deffects=disabled）里 WOODLAND_HAVE_EFFECTS=0，渲染部分整个编掉，
- * 只剩半径/区域的换算与状态记录。这样单测、wctl 和 trace 在两种构建下行为
- * 一致，差别只在"画不画"。
+ * 渲染能力是固定的（scenefx 常开），画不画由运行期配置决定：[effects] enabled
+ * 是总开关，blur 单独管模糊，corner_radius 是默认半径。关掉的时候状态照样记录
+ * （get_tree 如实暴露客户端要了什么），只是不建节点——"记不记"和"画不画"仍然
+ * 分开，排查时不用猜是协议没到还是没画。
  *
  * 圆角叠加规则（见 woodland_effect_corners）：
  *   有标题栏 → 上沿被标题栏盖住，内容只圆下角，上角由 SSD 的矩形自己圆；
@@ -35,11 +36,24 @@
 #include "woodland.h"
 #include "woodland_config.h"
 
-/* ==================== 状态与换算（默认构建也编） ==================== */
+/* ==================== 运行期开关 ==================== */
+
+bool woodland_effect_server_enabled(const struct woodland_server *server)
+{
+    return server && server->config && server->config->effects.enabled;
+}
+
+bool woodland_effect_server_blur_enabled(const struct woodland_server *server)
+{
+    /* 模糊挂在总开关下面：enabled=false 时 blur=true 也不该生效 */
+    return woodland_effect_server_enabled(server) && server->config->effects.blur;
+}
+
+/* ==================== 状态与换算（纯函数 / 不碰节点） ==================== */
 
 int woodland_effect_corner_radius(const struct woodland_view *view)
 {
-    if (!view) {
+    if (!view || !woodland_effect_server_enabled(view->server)) {
         return 0;
     }
     int radius = 0;
@@ -156,8 +170,6 @@ void woodland_effect_set_blur_region(struct woodland_view *view, const pixman_re
 
 
 /* ==================== scenefx 落地 ==================== */
-
-#if WOODLAND_HAVE_EFFECTS
 
 /*
  * 这个 surface 是不是 root 自己，或者它的（可多层嵌套的）subsurface。
@@ -341,7 +353,7 @@ static void update_blur(struct woodland_view *view)
     if (!view->scene_tree) {
         return;
     }
-    if (!view->effect.blur) {
+    if (!view->effect.blur || !woodland_effect_server_blur_enabled(view->server)) {
         woodland_effect_blur_clear(view->scene_tree);
         return;
     }
@@ -445,7 +457,7 @@ void woodland_effect_layer_blur(struct woodland_layer_surface *layer, const stru
     }
     struct wlr_scene_tree *tree = layer->scene_layer_surface->tree;
     struct wlr_surface *surface = layer->layer_surface->surface;
-    if (!region) {
+    if (!region || !woodland_effect_server_blur_enabled(layer->server)) {
         woodland_effect_blur_clear(tree);
         return;
     }
@@ -463,38 +475,3 @@ void woodland_effect_update(struct woodland_view *view)
     update_corners(view);
     update_blur(view);
 }
-
-#else /* !WOODLAND_HAVE_EFFECTS */
-
-void woodland_effect_update(struct woodland_view *view)
-{
-    (void)view;
-}
-
-void woodland_effect_blur_clear(struct wlr_scene_tree *tree)
-{
-    (void)tree;
-}
-
-bool woodland_effect_blur_apply(struct wlr_scene_tree *tree, struct wlr_surface *surface, int x,
-                                int y, int width, int height, const struct wlr_box *region,
-                                const struct woodland_effect_corners *corners)
-{
-    (void)tree;
-    (void)surface;
-    (void)x;
-    (void)y;
-    (void)width;
-    (void)height;
-    (void)region;
-    (void)corners;
-    return false;
-}
-
-void woodland_effect_layer_blur(struct woodland_layer_surface *layer, const struct wlr_box *region)
-{
-    (void)layer;
-    (void)region;
-}
-
-#endif

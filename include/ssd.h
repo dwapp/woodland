@@ -150,7 +150,7 @@ void woodland_ssd_finish(void);
 bool woodland_ssd_titlebar_visible(const struct woodland_view *view);
 
 /**
- * 把圆角摊到 SSD 自己的矩形上（只在 -Deffects=enabled 里真的画得出来）。
+ * 把圆角摊到 SSD 自己的矩形上（[effects] enabled 关掉时半径已经折成 0）。
  *
  * 上沿（标题栏 + 上边框）圆上角、下边框圆下角，左右竖条保持直角——竖条只有
  * 1px 宽，硬套半径只会把边线啃掉一截。传进来的是"外框半径"，已经由调用方

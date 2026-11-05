@@ -18,11 +18,8 @@
 #include <wlr/xwayland.h>
 
 #include "capture.h"
-/* 必须在 WOODLAND_HAVE_EFFECTS 的判断之前：宏在这个头里 */
 #include "config.h"
-#if WOODLAND_HAVE_EFFECTS
 #include <scenefx/render/fx_renderer/fx_renderer.h>
-#endif
 #include "cursor.h"
 #include "ime.h"
 #include "ipc.h"
@@ -126,15 +123,21 @@ bool woodland_server_init(struct woodland_server *server)
     }
 
     /*
-     * 有 effects 时必须用 scenefx 的 fx renderer：scenefx 的 scene 把
-     * output->renderer 直接当 fx_renderer 用，塞一个 wlroots 的 pixman/gles2
-     * renderer 进去会按错误的结构布局读内存。
+     * scenefx 的 scene 把 output->renderer 直接当 fx_renderer 用，塞一个 wlroots
+     * 的 pixman/gles2 renderer 进去会按错误的结构布局读内存。所以渲染器只有
+     * fx_renderer 一条路，它强制走 EGL/GLES2。
+     *
+     * 没有 DRM 渲染节点的机器（容器、纯 headless）第一把必然失败。这时退到
+     * llvmpipe 的 surfaceless EGL——WLR_RENDERER_FORCE_SOFTWARE 正是 scenefx
+     * 用来跳过"找渲染节点"的开关。回退不到 pixman：scene 只认 fx render pass，
+     * 塞 pixman 进去会在 fx_get_render_pass 里断言死。
      */
-#if WOODLAND_HAVE_EFFECTS
     server->renderer = fx_renderer_create(server->backend);
-#else
-    server->renderer = wlr_renderer_autocreate(server->backend);
-#endif
+    if (!server->renderer) {
+        wlr_log(WLR_INFO, "no DRM render node, retrying with llvmpipe");
+        setenv("WLR_RENDERER_FORCE_SOFTWARE", "1", 0);
+        server->renderer = fx_renderer_create(server->backend);
+    }
     if (!server->renderer) {
         wlr_log(WLR_ERROR, "failed to create renderer");
         return false;
@@ -175,10 +178,9 @@ bool woodland_server_init(struct woodland_server *server)
         wlr_log(WLR_ERROR, "failed to create scene");
         return false;
     }
-#if WOODLAND_HAVE_EFFECTS
-    /* 模糊参数是 scene 全局的：3 遍 downsample 够糊，半径再大只会糊成一片 */
+    /* 模糊参数是 scene 全局的：3 遍 downsample 够糊，半径再大只会糊成一片。
+     * 运行期关掉模糊（[effects] blur=false）只是不再建 blur 节点，参数留着。 */
     wlr_scene_set_blur_data(server->scene, 3, 5, 0.0f, 1.0f, 1.0f, 1.0f);
-#endif
 
     if (!woodland_output_init(server)) {
         wlr_log(WLR_ERROR, "failed to init output");

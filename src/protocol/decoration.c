@@ -8,12 +8,12 @@
  * view->ssd_overrides 里写值，再由 SSD 自己去读。方向是单向的
  * （protocol → ssd），shell 不需要知道这个协议存在。
  *
- * 四类请求里，woodland 能画出来的按构建分档：
+ * 四类请求里，woodland 能画出来的分档：
  *
  *   边框    完整支持（宽度 + 颜色，scene rect 直接改）；
  *   标题栏  完整支持（hide 后边距只剩边框，命中区域同步收掉）；
- *   圆角    -Deffects=enabled 时交给 scenefx 裁（buffer/rect 的 corner radius），
- *           默认构建只记录——wlr_scene 的矩形与 surface 都没有"圆角裁剪"；
+ *   圆角    交给 scenefx 裁（buffer/rect 的 corner radius）；[effects] enabled
+ *           关掉时半径直接折成 0，不是"记了不画"；
  *   阴影    只记录：scenefx 有 shadow 节点，但窗口阴影要先决定"阴影算不算
  *           外框几何"（边距/吸附/最大化都得跟着改），留到单独一版。
  *
@@ -252,14 +252,15 @@ static void context_set_corner_radius(struct wl_client *client, struct wl_resour
     view->ssd_overrides.corner_radius_set = true;
     view->ssd_overrides.corner_radius = (int)radius;
     /*
-     * 圆角是有渲染后端之分的：effects 构建里 scenefx 真的会裁圆角，默认构建
-     * 只能记下来。轨迹里写清楚是哪一种，免得排查的人以为是自己没生效。
+     * 圆角能不能真的画出来取决于运行期配置（[effects] enabled）。轨迹里写清楚
+     * 是哪一种，免得排查的人以为是自己没生效。
      */
-#if WOODLAND_HAVE_EFFECTS
-    woodland_trace_add("deco", view->id, "corner_radius=%u", radius);
-#else
-    woodland_trace_add("deco", view->id, "corner_radius=%u recorded (no render backend)", radius);
-#endif
+    if (woodland_effect_server_enabled(view->server)) {
+        woodland_trace_add("deco", view->id, "corner_radius=%u", radius);
+    } else {
+        woodland_trace_add("deco", view->id,
+                           "corner_radius=%u recorded (effects disabled)", radius);
+    }
     context_apply(ctx);
 }
 

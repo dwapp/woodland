@@ -74,7 +74,7 @@ void woodland_config_default_init(struct woodland_config *config)
     config->ssd.border_width = WOODLAND_SSD_BORDER_W;
     config->ssd.button_width = WOODLAND_SSD_BUTTON_W;
     config->ssd.resize_grab_width = WOODLAND_SSD_RESIZE_GRAB_W;
-    /* 默认直角：圆角是 effects 构建才画得出来的东西，不在默认配置里"假装" */
+    /* 默认直角；半径只从 [effects] corner_radius 或协议覆盖来 */
     config->ssd.font = strdup("sans 10");
     config->ssd.active_title_color = 0xFFE1DEDB;    /* #e1dedb */
     config->ssd.inactive_title_color = 0xFFF7F6F4;  /* #f7f6f4 */
@@ -99,9 +99,10 @@ void woodland_config_default_init(struct woodland_config *config)
     config->cursor.theme = strdup("default");
     config->cursor.size = 24;
 
-    /* [effects] */
-    config->effects.enabled = false;
-    config->effects.blur = false;
+    /* [effects]：编译期常开，运行期可关。默认按"特效开"给，
+     * 想回到朴素外观就用 enabled=false（模糊与圆角一起停）。 */
+    config->effects.enabled = true;
+    config->effects.blur = true;
     config->effects.corner_radius = 0;
     config->effects.shadow = false;
 

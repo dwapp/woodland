@@ -7,13 +7,22 @@
 #include <wlr/util/box.h>
 
 struct woodland_layer_surface;
+struct woodland_server;
 struct woodland_view;
 struct wlr_scene_tree;
 struct wlr_surface;
 
 /*
+ * 运行期开关。编译期没有 effects 开关（scenefx 常开），"画不画"全看配置：
+ * [effects] enabled 是总开关，blur 单独管模糊。关掉之后协议状态照记
+ * （get_tree 里看得见客户端要了什么），只是不建节点。
+ */
+bool woodland_effect_server_enabled(const struct woodland_server *server);
+bool woodland_effect_server_blur_enabled(const struct woodland_server *server);
+
+/*
  * 四角圆角半径。顺序与 scenefx 的 fx_corner_radii 一致（顺时针），
- * 但这里只依赖 pixman/wlr_box，默认构建（没有 scenefx）也能编。
+ * 但这里只依赖 pixman/wlr_box，单测不用起渲染器。
  */
 struct woodland_effect_corners {
     int top_left;
@@ -37,7 +46,8 @@ struct woodland_effect_state {
 /**
  * 当前生效的圆角半径（0 = 直角）。
  *
- * 优先级：客户端的 treeland-decoration 覆盖 > [effects] corner_radius。
+ * 优先级：客户端的 treeland-decoration 覆盖 > [effects] corner_radius；
+ * [effects] enabled=false 时一律 0。
  */
 int woodland_effect_corner_radius(const struct woodland_view *view);
 
@@ -61,7 +71,7 @@ void woodland_effect_buffer_corners(const struct woodland_effect_corners *window
  *
  * x/y/width/height 是 blur 节点在 tree 里的位置与尺寸，region 是 surface 局部
  * 坐标的裁剪区（NULL = 关掉模糊），corners 为 NULL 表示直角。返回是否真的
- * 画了（默认构建里恒为 false）。
+ * 画了（配置关掉模糊时恒为 false）。
  */
 bool woodland_effect_blur_apply(struct wlr_scene_tree *tree, struct wlr_surface *surface, int x,
                                 int y, int width, int height, const struct wlr_box *region,
@@ -112,8 +122,8 @@ void woodland_effect_set_blur_region(struct woodland_view *view, const pixman_re
  * 重算一个视图的圆角与模糊。幂等，随时可调：
  * commit / SSD 重排 / map / 装饰覆盖变化之后都走这里。
  *
- * 没有编 effects 时只有状态在动，画面上什么都不会变——值照样记录在 view 上，
- * 由 get_tree 如实暴露。
+ * 配置关掉特效时这里同时负责"擦干净"：半径按 0 算、已有 blur 节点禁用，
+ * 值照样记录在 view 上，由 get_tree 如实暴露。
  */
 void woodland_effect_update(struct woodland_view *view);
 
