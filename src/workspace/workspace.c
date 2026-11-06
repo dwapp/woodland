@@ -10,6 +10,7 @@
 
 #include "focus.h"
 #include "trace.h"
+#include "layer.h"
 #include "workspace.h"
 #include "woodland.h"
 
@@ -142,6 +143,9 @@ void woodland_workspace_switch_focus(struct woodland_server *server,
     woodland_trace_add("workspace", 0, "%s -> %s restore=%d",
                        from ? from->name : "-", target->name,
                        restore_focus ? 1 : 0);
+
+    /* 切工作区后，确保仅当前工作区可见的全屏窗口隐藏 TOP layer（对齐 labwc） */
+    woodland_layer_update_top_layer_visibility(server);
 
     if (restore_focus) {
         /* 焦点回退会挑新工作区 z 序最上的窗口；若焦点在常驻的 layer

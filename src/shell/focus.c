@@ -21,6 +21,7 @@
 #endif
 
 #include "focus.h"
+#include "layer.h"
 #include "selfcheck.h"
 #include "session_lock.h"
 #include "ssd.h"
@@ -164,6 +165,7 @@ static void view_raise(struct woodland_view *view)
     wlr_scene_node_raise_to_top(&view->scene_tree->node);
     wl_list_remove(&view->link);
     wl_list_insert(&view->server->views, &view->link);
+    woodland_layer_update_top_layer_visibility(view->server);
 }
 
 void woodland_focus_view(struct woodland_view *view, bool raise)

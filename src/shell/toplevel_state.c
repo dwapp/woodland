@@ -28,6 +28,7 @@
 
 #include "focus.h"
 #include "output.h"
+#include "layer.h"
 #include "placement.h"
 #include "shell_internal.h"
 #include "ssd.h"
@@ -169,6 +170,7 @@ void woodland_view_set_fullscreen(struct woodland_view *view, bool fullscreen,
     }
     woodland_view_update_outputs(view);
     woodland_signal_emit(&view->server->view_changed, view);
+    woodland_layer_update_top_layer_visibility(view->server);
 }
 
 void woodland_view_set_minimized(struct woodland_view *view, bool minimized)
@@ -190,6 +192,7 @@ void woodland_view_set_minimized(struct woodland_view *view, bool minimized)
         wlr_foreign_toplevel_handle_v1_set_minimized(view->toplevel_handle, minimized);
     }
     woodland_signal_emit(&view->server->view_changed, view);
+    woodland_layer_update_top_layer_visibility(view->server);
 }
 
 static void xdg_toplevel_request_maximize(struct wl_listener *listener, void *data)
@@ -427,6 +430,9 @@ void woodland_view_update_outputs(struct woodland_view *view)
      */
     if (view && view->server) {
         woodland_signal_emit(&view->server->view_changed, view);
+        if (view->fullscreen) {
+            woodland_layer_update_top_layer_visibility(view->server);
+        }
     }
     if (!view || !view->server || !view->toplevel_handle) {
         return;
