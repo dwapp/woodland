@@ -794,8 +794,9 @@ static void handle_set_fullscreen(struct wl_client *client, struct wl_resource *
     struct wlr_output *output =
         output_resource ? wlr_output_from_resource(output_resource) : NULL;
     woodland_view_set_fullscreen(view, true, output);
+    /* null 输出是协议允许的"合成器挑"，别和"指定了输出"一起报成 applied */
     record_request(h->ftl, view->id, "set_fullscreen",
-                   output || !output_resource ? "applied" : "applied on current output");
+                   output_resource ? "applied" : "applied on compositor choice");
 }
 
 static void handle_unset_fullscreen(struct wl_client *client, struct wl_resource *resource)

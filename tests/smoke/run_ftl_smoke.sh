@@ -173,6 +173,10 @@ stop_probe
 echo "== set_fullscreen =="
 scenario fullscreen full
 expect '.views[0].fullscreen == true' "fullscreen request must be applied"
+expect '.toplevel_manager.last_request == "set_fullscreen"' "fullscreen request must be recorded"
+# probe 的 full 操作不传 output（NULL）：协议让合成器挑，outcome 必须如实说清
+expect '.toplevel_manager.last_outcome == "applied on compositor choice"' \
+    "null output must be reported as compositor choice"
 expect_probe 'state=.*fullscreen' "state event must report fullscreen"
 stop_probe
 
