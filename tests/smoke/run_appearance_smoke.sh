@@ -53,6 +53,9 @@ socket_name="$(ls "$XDG_RUNTIME_DIR/" 2>/dev/null | grep '^wayland-' | head -1)"
 [ -n "$socket_name" ] || smoke_fail "wayland socket did not appear"
 export WAYLAND_DISPLAY="$socket_name"
 smoke_wait_socket || smoke_fail "debug socket did not appear"
+# 圆角有没有渲染后端：与 deco smoke 同一口径（get_tree 顶层 effects 字段，
+# 编译期开关不参与时恒为 false），脚本据此分叉断言。
+EFFECTS="$("$WCTL" -s "$SOCK" get_tree | jq -r '.effects')"
 
 wctl_cmd() {
     "$WCTL" -s "$SOCK" -t 1000 "$1"
@@ -133,13 +136,28 @@ expect '.appearance.cursor_width == 8 and .appearance.cursor_height == 8
         and .appearance.last_request == "set_cursor_size"
         and .appearance.last_outcome == "clamped"' "cursor clamp"
 
+# 非方形请求降级到 square：wlr_xcursor_manager 尺寸是单值，广播的必须是实际
+# 生效值（32x32），不能把被降级的 height 原样报回去。
+set_req set_cursor_size 32 48
+expect '.appearance.cursor_width == 32 and .appearance.cursor_height == 32
+        and .appearance.last_outcome == "clamped"' "non-square cursor degraded to square"
+
 set_req set_titlebar_height 999
 expect '.appearance.titlebar_height == 200 and .appearance.last_outcome == "clamped"' "titlebar clamp"
 
 set_req set_corner_radius 12
-expect '.appearance.corner_radius == 12 and .appearance.last_outcome == "applied"' "radius"
+if [ "$EFFECTS" = "true" ]; then
+    expect '.appearance.corner_radius == 12 and .appearance.last_outcome == "applied"' "radius"
+else
+    # 没有渲染后端：值照记、广播报 0、outcome 如实报 recorded（不假装上屏）
+    expect '.appearance.corner_radius == 0 and .appearance.last_outcome == "recorded"' "radius recorded (no backend)"
+fi
 set_req set_corner_radius 99999
-expect '.appearance.corner_radius == 1000 and .appearance.last_outcome == "clamped"' "radius clamp"
+if [ "$EFFECTS" = "true" ]; then
+    expect '.appearance.corner_radius == 1000 and .appearance.last_outcome == "clamped"' "radius clamp"
+else
+    expect '.appearance.corner_radius == 0 and .appearance.last_outcome == "recorded"' "radius recorded (no backend)"
+fi
 
 set_req set_accent_color 300 0 0
 expect '.appearance.accent == [255,0,0] and .appearance.accent_set == true
