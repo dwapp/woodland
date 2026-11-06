@@ -91,7 +91,7 @@ printf '%s' "$_tree" | jq -e \
      and .shortcut_manager.last_outcome == "unbound"' >/dev/null \
     || smoke_fail "bind-key/unbind state wrong: $_tree"
 
-# ---- 三类 bind_failure：非法 key、枚举外动作、非法 flags ----
+# ---- 四类 bind_failure：非法 key、枚举外动作、非法 flags、flags=0 ----
 probe bind-failure "bad-key" "Ctrl+NoSuchKeyHere" 1 0 3
 _tree="$(wctl_cmd get_tree)" || smoke_fail "get_tree after bad-key failed"
 printf '%s' "$_tree" | jq -e \
@@ -101,6 +101,8 @@ printf '%s' "$_tree" | jq -e \
 
 probe bind-failure "bad-action" "Ctrl+Alt+T" 1 999 3
 probe bind-failure "bad-flags" "Ctrl+Alt+T" 8 0 3
+# flags==0：三种 trigger 位全不设，永远不命中，按 out-of-range 拒绝
+probe bind-failure "zero-flags" "Ctrl+Alt+Y" 0 0 3
 
 # ---- name_conflict / duplicate_binding / upsert ----
 probe name-conflict
@@ -165,11 +167,12 @@ printf '%s' "$_tree" | jq -e \
      and .shortcut_manager.capture_pending == false' >/dev/null \
     || smoke_fail "capture not_active state wrong: $_tree"
 
-# ---- capture：map 一个 toplevel 后尝试拿焦点；busy / destroy 取消 ----
-# headless 后端不提供键盘设备，seat 没有 keyboard，toplevel 拿不到键盘焦点，
-# 所以这几条在这里一律走 not_active：这是环境限制，不是协议分支没实现。
-# 有真实输入设备的环境会走到 pending / busy / captured，脚本的两条通用
-# 断言（capture_count 递增、没有协议错误）在两种环境下都成立。
+# ---- capture：map 一个 toplevel 后尝试拿焦点；destroy 取消 ----
+# headless 后端不提供键盘设备，seat 没有 keyboard，toplevel 拿不到键盘
+# 焦点，所以这几条在这里一律走 not_active：这是环境限制，不是协议分支
+# 没实现。注意 busy 依赖 drain_keycode 非零（那要一次真实 captured），在
+# headless 下必然测不到，所以 smoke 只断言计数与无协议错误，busy 分支
+# 的语义留给有真实输入设备的环境或单测覆盖。
 probe capture
 _tree="$(wctl_cmd get_tree)" || smoke_fail "get_tree after focused capture failed"
 printf '%s' "$_tree" | jq -e \
