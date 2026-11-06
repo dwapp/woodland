@@ -74,7 +74,7 @@ wctl --help
             {"seq":3,"ms":31,"obj":1,"what":"focus","detail":"prev=0 raise=1"}]}
 ```
 
-- `what` 是**稳定标签**（脚本会 grep），权威清单在 `include/trace.h`：`map` / `unmap` / `destroy` / `focus` / `focus_none` / `layer_focus` / `place` / `workspace` / `output_add` / `output_remove` / `cfg_apply` / `deco` / `bg_effect` / `action`。加新标签先改 trace.h 的清单，再发第一条轨迹。
+- `what` 是**稳定标签**（脚本会 grep），权威清单在 `include/trace.h`：`map` / `unmap` / `destroy` / `focus` / `focus_none` / `layer_focus` / `place` / `workspace` / `output_add` / `output_remove` / `cfg_apply` / `deco` / `bg_effect` / `action` / `shortcut`。加新标签先改 trace.h 的清单，再发第一条轨迹。
 - `detail` 只写**决策依据**（走了哪个分支、策略名、抑制窗口），不要抄 `get_tree` 已有的数值。
 - 关闭时零分配零格式化；打开后也不分配（一次 calloc）。**它只依赖 `util/json`，不许反向依赖任何业务模块**——否则会成为依赖环的入口。
 - 环的语义：`seq` 全局单调，`total` 是累计条数，`dropped = total - count` 就是被覆盖掉的条数。第一个 entry 的 `seq` 一定等于 `dropped`。
@@ -190,3 +190,12 @@ libwayland 的 errno，协议错误恒为 EPROTO=71）。见 `tests/smoke/deco_p
   "ignore" 当成"已生效"。bind 的特权校验只做到同 uid：woodland 没有 DDE 的
   privilege 服务，这不是权限边界。协议 XML 是 `protocols/treeland/` 下的只读
   副本（MIT，上游 `dde/`）；档位详见 `include/protocol.h` 头部注释。
+- **treeland-shortcut-manager-unstable-v3 已接线**（`feature/shortcut-manager-v3`）：
+  `acquire` 独占、bind/unbind 的四种 `bind_failure`、`capture_next_shortcut` 的
+  busy / not_active / aborted / interrupted 与 `activated` 事件都实现；动作里
+  0..20、22..23、32..39 真接窗口/工作区/贴边逻辑，21 与 24..31、40..45 置空。
+  **手势绑定只登记不触发**（woodland 没有触摸手势识别状态机），注册时写
+  `gesture_unwired` 轨迹，别把它当成"绑定已生效"。键盘事件由 seat 转发到
+  `woodland_protocol_shortcuts_key()`；指针 button/wheel 走
+  `server->shortcut_pointer_hook` 这个跨层钩子（shell/cursor.c 不反向链接
+  `protocol_lib`）。状态在 `wctl get_tree` 的 `shortcut_manager` 里。

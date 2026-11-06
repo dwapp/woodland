@@ -140,6 +140,17 @@ test_compositor_action = executable('test_compositor_action', 'test_compositor_a
               session_lock_lib, ime_lib, capture_lib])
 test('compositor_action', test_compositor_action)
 
+# treeland-shortcut-manager-v3：PortableText 解析 / 有效性 / 匹配 / 动作分档。
+# 纯逻辑，但 shortcut.c.o 会拉入窗口与工作区动作，链接列表跟
+# test_compositor_action 一样长；xkbcommon 只被本测试直接用到。
+test_shortcut = executable('test_shortcut', 'test_shortcut.c',
+  dependencies: [scene_deps, wayland_server, xkbcommon],
+  include_directories: woodland_inc,
+  link_with: [protocol_lib, workspace_lib, trace_lib, util_lib, shell_lib,
+              output_lib, cursor_lib, layer_lib, ssd_lib, effect_lib, seat_lib,
+              session_lock_lib, ime_lib, capture_lib, ipc_lib])
+test('shortcut', test_shortcut)
+
 vk_xml = meson.project_source_root() + '/subprojects/wlroots/protocol/virtual-keyboard-unstable-v1.xml'
 im_xml = meson.project_source_root() + '/subprojects/wlroots/protocol/input-method-unstable-v2.xml'
 

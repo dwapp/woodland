@@ -83,6 +83,12 @@ static const struct ipc_field_doc get_tree_fields[] = {
      "treeland-compositor-action: available (bool), trigger_count (int), "
      "last_action (int, 0 before any trigger), "
      "last_outcome (str|null: none|switched|no_workspace|unsupported|invalid)"},
+    {"shortcut_manager", "obj",
+     "treeland-shortcut-manager-v3: available (bool), acquired (bool), "
+     "manager_count (int), binding_count (int), capture_count (int), "
+     "capture_pending (bool), activation_count (int), last_action (int), "
+     "last_outcome (str|null), last_activation (str|null), bindings (obj[]: "
+     "name, kind: key|swipe|hold, key, flags, finger, direction, action)"},
     {"focus", "obj", "same fields as get_focus"},
     {"views", "obj[]",
      "per view: id, kind, z, title, app_id, tag, workspace, "
@@ -500,6 +506,9 @@ static void ipc_get_tree(struct woodland_server *server, struct woodland_json *o
     woodland_json_obj_int(&action_obj, "last_action", action_last);
     woodland_json_obj_str(&action_obj, "last_outcome", action_outcome);
     woodland_json_obj_close(&action_obj);
+
+    woodland_json_obj_key(&obj, "shortcut_manager");
+    woodland_protocol_shortcut_status(server, out);
 
     woodland_json_obj_key(&obj, "focus");
     struct woodland_json_obj focus_obj;

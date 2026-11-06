@@ -113,14 +113,23 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data)
         return;
     }
 
-    bool handled = false;
-    uint32_t modifiers = wlr_keyboard_get_modifiers(keyboard->wlr_keyboard);
     /*
      * 焦点 surface 若持有 keyboard-shortcuts-inhibit，合成器键位要让路
      * （游戏、远程桌面全屏抓键就靠这个）。抑制器随焦点走，切走即失效，
      * 所以不存在"客户端把 Alt+Tab 永久吞掉"的死角。
+     *
+     * 全局快捷键（treeland-shortcut-manager-v3）与一次性捕获排在内置
+     * Alt+ 键位之前：capture 要抢在绑定前面，绑定命中后按键也不该再发给
+     * 焦点 surface。抑制器生效时三者一起让路。
      */
     bool inhibited = woodland_protocol_shortcuts_inhibited(server);
+    if (!inhibited &&
+        woodland_protocol_shortcuts_key(server, keyboard->wlr_keyboard, event)) {
+        return;
+    }
+
+    bool handled = false;
+    uint32_t modifiers = wlr_keyboard_get_modifiers(keyboard->wlr_keyboard);
     if (!inhibited && (modifiers & WLR_MODIFIER_ALT) &&
         event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
         for (int i = 0; i < nsyms; i++) {

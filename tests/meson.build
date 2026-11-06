@@ -145,6 +145,47 @@ if get_option('test').enabled()
          timeout: 90)
   endif
 
+  # treeland-shortcut-manager-v3：acquire 独占、bind_failure、upsert、手势
+  # 只登记、capture 的失败与取消。探针要一个真正 map 的 toplevel 来拿键盘
+  # 焦点，所以除仓库内 XML 外还要系统 wayland-protocols 的 xdg-shell；
+  # 缺依赖就不注册，免得把构建搞挂。
+  shortcut_xml = meson.project_source_root() / 'protocols' / 'treeland' / 'treeland-shortcut-manager-unstable-v3.xml'
+  shortcut_xdg_xml = wp_datadir / 'stable' / 'xdg-shell' / 'xdg-shell.xml'
+  if wayland_client_dep.found() and wp_dep.found() and wayland_scanner.found() and fs.exists(shortcut_xml) and fs.exists(shortcut_xdg_xml)
+    shortcut_probe_srcs = [
+      'smoke/shortcut_probe.c',
+      custom_target('shortcut-manager-client-header',
+        input: shortcut_xml,
+        output: 'treeland-shortcut-manager-unstable-v3-client-protocol.h',
+        command: [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@']),
+      custom_target('shortcut-manager-client-code',
+        input: shortcut_xml,
+        output: 'treeland-shortcut-manager-unstable-v3-protocol.c',
+        command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@']),
+      # 前缀与 deco_probe 的 xdg-shell 目标错开：同一个 build 目录里
+      # custom_target 的输出名不能重复。
+      custom_target('shortcut-xdg-shell-client-header',
+        input: shortcut_xdg_xml,
+        output: 'shortcut-xdg-shell-client-protocol.h',
+        command: [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@']),
+      custom_target('shortcut-xdg-shell-client-code',
+        input: shortcut_xdg_xml,
+        output: 'shortcut-xdg-shell-protocol.c',
+        command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@']),
+    ]
+
+    shortcut_probe = executable('shortcut_probe', shortcut_probe_srcs,
+                                dependencies: [wayland_client_dep])
+    test('smoke-shortcut',
+         find_program('sh'),
+         args: [meson.current_source_dir() / 'smoke' / 'run_shortcut_smoke.sh',
+                woodland_bin.full_path(),
+                shortcut_probe.full_path(),
+                wctl_bin.full_path()],
+         is_parallel: false,
+         timeout: 120)
+  endif
+
   # output-management 的事件顺序回归（apply 的 succeeded 必须先于新一轮
   # configuration + done）。协议 xml 属于 wlr-protocols（不在
   # wayland-protocols 里），只认系统安装位置：wrap 内的 wlroots 属于嵌套

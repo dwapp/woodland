@@ -15,6 +15,9 @@ struct woodland_proto_decoration;
 struct woodland_proto_bg_effect;
 struct woodland_proto_wallpaper;
 struct woodland_proto_compositor_action;
+struct woodland_proto_shortcut;
+struct wlr_keyboard;
+struct wlr_keyboard_key_event;
 struct wlr_output;
 struct wlr_viewporter;
 struct wlr_presentation;
@@ -50,6 +53,7 @@ struct woodland_proto {
     struct woodland_proto_bg_effect *bg_effect;   /* background_effect.c */
     struct woodland_proto_wallpaper *wallpaper;   /* wallpaper.c */
     struct woodland_proto_compositor_action *compositor_action; /* compositor_action.c */
+    struct woodland_proto_shortcut *shortcut; /* shortcut.c */
 };
 
 /* 空闲与抑制族（idle.c）：idle-notify / idle-inhibit / keyboard-shortcuts-inhibit */
@@ -107,5 +111,15 @@ void woodland_proto_wallpaper_output_added(struct woodland_proto *proto,
 /* shell 动作族（compositor_action.c）：treeland-compositor-action-v1 */
 bool woodland_proto_compositor_action_init(struct woodland_proto *proto);
 void woodland_proto_compositor_action_finish(struct woodland_proto *proto);
+
+/* 快捷键族（shortcut.c）：treeland-shortcut-manager-v3 */
+bool woodland_proto_shortcut_init(struct woodland_proto *proto);
+void woodland_proto_shortcut_finish(struct woodland_proto *proto);
+/** 键盘事件先过 capture，再过已注册的 key binding；true 表示事件被消费。 */
+bool woodland_proto_shortcut_key(struct woodland_proto *proto,
+                                 struct wlr_keyboard *keyboard,
+                                 const struct wlr_keyboard_key_event *event);
+/** 指针 button / wheel 事件：pending capture 时被 interrupted 并消费。 */
+bool woodland_proto_shortcut_pointer(struct woodland_proto *proto);
 
 #endif
