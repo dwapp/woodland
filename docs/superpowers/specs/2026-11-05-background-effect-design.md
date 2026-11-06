@@ -1,7 +1,7 @@
 # ext-background-effect-v1 与圆角渲染设计规格
 
 > 日期：2026-11-05
-> 状态：已实现（协议 + 渲染；scenefx 常开，模糊由 `[effects]` 运行期开关控制）
+> 状态：已实现（协议 + 渲染；编译期默认开启 scenefx，模糊由 `[effects]` 运行期开关控制）
 > 协议定义：wayland-protocols ≥ 1.41 `staging/ext-background-effect/ext-background-effect-v1.xml`
 > 参考实现：`/home/ut004971@uos/work/doors`（wlroots 0.21 内建同名协议 + 自研 shader）、
 > treeland vendored 的 wlroots MR5304；`/home/ut004971@uos/work/mango`（scenefx 用法对照，
@@ -71,7 +71,7 @@ layer surface 这条路径不是可选项：面板是模糊最常见的用户，
 `reload_config` 改了开关会再广播一次（协议允许重复发送，以最后一条为准）。
 这一点被 `smoke-bg-effect` 的 CAPS 阶段钉住（开 → 1，关 → 0）。
 
-## 4. 渲染（`src/effect/effect.c`，scenefx 常开）
+## 4. 渲染（`src/effect/effect.c`）
 
 ### 4.1 节点位置：贴 surface，且用 tree 的坐标系
 
@@ -132,7 +132,9 @@ render pass 强转成自己的 `fx_render_pass`。所以 `server->renderer` 必�
 
 fx renderer 只走 EGL/GLES2，没有 DRM 渲染节点（容器、纯 headless）时第一把必然
 失败。这时 `server.c` 会设 `WLR_RENDERER_FORCE_SOFTWARE=1` 重试一次，落到
-llvmpipe 的 surfaceless EGL——**唯一的降级方向**，回退到 pixman 会直接崩。
+llvmpipe 的 surfaceless EGL——**启用 effects 时唯一的降级方向**，回退到 pixman
+会直接崩。没有 GLES2 可用的环境（如 CI 无 GPU）则用 `-Deffects=disabled` 整体
+退回 wlroots 直出，特效代码不参与链接。
 
 ## 5. 一套构建 + 运行期开关
 

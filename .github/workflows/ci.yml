@@ -45,7 +45,9 @@ jobs:
         run: |
           mkdir -p "$XDG_RUNTIME_DIR"
           chmod 700 "$XDG_RUNTIME_DIR"
-          meson setup build -Dtest=enabled
+          # 默认开启 effects（scenefx + fx_renderer），但 runner 没有 GPU：
+          # 显式关掉，保持 pixman 纯软件渲染，让所有 smoke / 单测都能跑。
+          meson setup build -Dtest=enabled -Deffects=disabled
       - name: Build
         run: meson compile -C build
       - name: Test

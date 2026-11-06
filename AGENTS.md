@@ -3,7 +3,7 @@
 ## 全局认识
 
 - `woodland` 是**纯 C + wlroots** 的通用轻量 Wayland 合成器，目标是**兼容 treeland 生态（主要是协议）**，但**不复刻 treeland 的全部逻辑**。单体结构（sway/labwc 风格），单用户、运行在用户 session 内。
-- 无 Qt/QML 依赖。渲染默认走 `wlr_scene` 直出；特效经 scenefx 实现且**默认关闭**。
+- 无 Qt/QML 依赖。渲染默认走 `wlr_scene` 直出；特效经 scenefx 实现，**编译期默认开启**（`-Deffects=enabled`），运行期由 `[effects] enabled` 控制（默认 true）。
 - wlroots 经 meson wrap 下载，**锁定 tag 0.20.2**（不跟随 master）；scenefx 锁定 0.5（随 `effects` 选项启用）。两者都**不 vendored**。
 - 许可证：GPL-2.0-only。
 
@@ -29,16 +29,16 @@ meson test -C build --print-errorlogs  # 跑全部测试
 ```
 
 - 编译选项：`c_std=c11`、`warning_level=2` + `werror=true`（**警告即错误**）、`-DWLR_USE_UNSTABLE -D_POSIX_C_SOURCE=200809L`。
-- 特性开关在 `meson_options.txt`：`effects`（默认 false）、`tiling-layout`（默认 false）、`xwayland`（默认 true）、`test`（默认 false，跑测试要开）。
+- 特性开关在 `meson_options.txt`：`effects`（默认 true）、`tiling-layout`（默认 false）、`xwayland`（默认 true）、`test`（默认 false，跑测试要开）。
 - 特性开关经 `configure_file` 生成 `build/config.h`，用 `WOODLAND_HAVE_*` 宏。
-- 冒烟测试用 headless 后端：`tests/smoke/run_headless.sh` 内部以 `WLR_BACKENDS=headless WLR_RENDERER=pixman` 后台启动 + `kill -TERM` + 等退出码 0（M1 起追加 `WLR_HEADLESS_OUTPUTS=1`）。ASan 验证用 `meson setup build-asan -Db_sanitize=address,undefined -Dtest=enabled`。
+- 冒烟测试用 headless 后端：`tests/smoke/run_headless.sh` 内部以 `WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1` 后台启动 + `kill -TERM` + 等退出码 0。脚本里残留的 `WLR_RENDERER=pixman` 只在 `-Deffects=disabled` 构建生效——启用 effects 时 `fx_renderer_create()` 不读这个变量，按 `WLR_RENDERER_FORCE_SOFTWARE` / `WLR_RENDER_DRM_DEVICE` 找渲染节点。ASan 验证用 `meson setup build-asan -Db_sanitize=address,undefined -Dtest=enabled`。
 - **冒烟脚本一律先 `. tests/smoke/lib.sh` 再 `smoke_init <名字>`。** 失败时它把现场落到 `build/meson-logs/smoke/<名字>/`：`compositor.log`、`meta.txt`（参数 / socket / 退出码），有 `WCTL` 和 `SOCK` 时还会抓 `get_tree` / `get_focus` / `self_check` / `get_trace` / `dump_scene` 的 JSON 和一张 `screenshot.png`。脚本自己的收尾写成 `smoke_cleanup()`（dump 之后才调用），断言失败用 `smoke_fail "..."`。**不要再用 `cat 日志; exit 1`**——那正是"只有一行结论、没有现场"的老写法。
 - **CI 跑在 `archlinux:base-devel`，不要换回 `debian:stable`。** wlroots 0.20 要 wayland >= 1.24、libdrm >= 2.4.129、xkbcommon >= 1.8、pixman >= 0.43，bookworm 一个都不满足，meson 会退到 wrap 里逐个编 fallback，链条断在第一个 wayland 子项目（`Dependency "expat" not found`）。缺 expat 只是表象，补它只会把失败推到下一个依赖。
 - **顶层 `meson.build` 里给 `wlroots` 包的那层 `declare_dependency` 别删。** wlroots 作为子项目构建时，`wayland-scanner` 生成的协议头落在 `build/subprojects/wlroots/protocol/`，而它自己只导出 `include/`，于是 `wlr/types/wlr_layer_shell_v1.h` 里 `#include "wlr-layer-shell-unstable-v1-protocol.h"` 直接编译失败。系统装过 wlroots 的机器上 `/usr/include` 有这个头，问题会被掩盖——**本地能编不代表能编**。
 
-### scenefx 必读（随 -Deffects=enabled 编译期启用）
+### scenefx 必读（随 -Deffects=enabled 编译期启用，现为默认）
 
-启用特效构建（`-Deffects=enabled`）时使用 scenefx 0.5，它**自带一套同名 `wlr_scene_*`** 符号（链接顺序 `scene_deps = [scenefx, wlroots]`），带来 blur / 圆角 / 阴影节点。在启用了 effects 的构建中，运行期还可通过 `[effects] enabled=false` 动态关闭效果。五条硬约束：
+启用特效构建（`-Deffects=enabled`，默认）时使用 scenefx 0.5，它**自带一套同名 `wlr_scene_*`** 符号（链接顺序 `scene_deps = [scenefx, wlroots]`），带来 blur / 圆角 / 阴影节点。运行期还可通过 `[effects] enabled=false` 动态关闭效果（CI 无 GPU 时用 `-Deffects=disabled` 整体退回 pixman 直出）。五条硬约束：
 
 1. **`.c` 里只 `#include "scene.h"`，不要直接 include `wlr/types/wlr_scene.h` 或 `scenefx/...`。** `include/scene.h` 是唯一入口，按 `WOODLAND_HAVE_EFFECTS` 宏切入正确的场景头文件。
 2. **宏判断必须在 `#include "config.h"` 之后。** 避免未定义宏直接参与 `#if` 判断被当作 0 处理。

@@ -20,7 +20,7 @@ Woodland 的目标是**兼容 treeland 生态（主要是协议）**：一个基
 
 - 纯 C + wlroots 实现，无 Qt/QML 依赖。
 - 线缆级兼容 treeland 私有协议（见第 7 节分级）；目标是兼容 treeland 生态（主要是协议），而非复刻 treeland 的逻辑。
-- 性能优先：默认渲染路径为 wlr_scene 直出；特效经 scenefx 实现且默认关闭。
+- 性能优先：默认渲染路径为 wlr_scene 直出；特效经 scenefx 实现，编译期默认开启、运行期默认开（可关）。
 - 代码整洁/简约：单体结构（sway 风格），避免过度抽象。
 
 ### 2.3 非目标（显式砍掉）
@@ -50,7 +50,7 @@ Woodland 的目标是**兼容 treeland 生态（主要是协议）**：一个基
 | 配置 | 配置文件 + key-value Wayland 协议 |
 | 会话/登录/锁屏 | 无内置登录；session 走 seatd/logind；锁屏走 ext-session-lock-v1（外部屏保） |
 | XWayland | 完整支持（wlr_xwayland） |
-| 特效 | scenefx 实现模糊/圆角/阴影等（scenefx 0.5，经 wrap 下载）；编译期 feature flag + 运行期配置，**默认关闭** |
+| 特效 | scenefx 实现模糊/圆角/阴影等（scenefx 0.5，经 wrap 下载）；编译期 feature flag + 运行期配置，**编译期默认开启**、运行期由 `[effects] enabled` 控制（默认 true） |
 | 布局 | 单体内置（sway 风格）；**默认堆叠（stacking）布局**，支持运行时切换模式，不同工作区可为不同模式 |
 
 ## 5. 架构组织
@@ -73,7 +73,7 @@ woodland/
 │   ├── protocols/             # 私有协议实现（分级，见第 7 节）
 │   ├── config/                # 配置解析 + key-value 协议服务端
 │   ├── decorations/           # SSD 标题栏/边框/阴影（可选）
-│   ├── effects/               # scenefx 模糊/圆角/阴影（可选，默认关）
+│   ├── effects/               # scenefx 模糊/圆角/阴影（默认开，运行期可关）
 │   ├── ime/                   # 输入法协议 + 候选面板
 │   ├── wallpaper/             # 壁纸协议协调(manager + shell)，不渲染
 │   └── dbus/                  # session D-Bus 服务（屏保控制等）
@@ -92,7 +92,7 @@ woodland/
 | `workspace` | 工作区模型；12 工作区切换；窗口跨工作区移动；"显示在所有工作区"。 |
 | `config` | 配置文件解析(默认值)+ key-value 协议服务端(运行时热更新)。 |
 | `decorations` | SSD：标题栏、边框、圆角、阴影；与 xdg-decoration 联动，支持"半 CSD 半 SSD"。 |
-| `effects` | 基于 scenefx 的模糊、圆角、阴影等特效；编译期+运行期双开关，默认关。 |
+| `effects` | 基于 scenefx 的模糊、圆角、阴影等特效；编译期+运行期双开关，默认开（可 `-Deffects=disabled` 退回直出）。 |
 | `ime` | input-method-v2、text-input-v3；内置候选面板。 |
 | `wallpaper` | 壁纸协议协调者：实现 `treeland-wallpaper-manager-unstable-v1`（存储/校验/通知壁纸源）与 `treeland-wallpaper-shell-unstable-v1`（壁纸 surface 角色 + 播放控制）；不渲染壁纸内容。 |
 | `dbus` | session D-Bus 服务：暴露屏保控制接口（激活/恢复/抑制），供外部屏保程序对接（单用户无需私有协议中转）。 |
@@ -119,7 +119,7 @@ struct woodland_layout {
 
 - 默认渲染路径：`wlr_scene` 节点直出，无额外合成开销。
 - 特效（阴影、圆角、模糊、过渡动画、多任务视图缩放动画）均为**可选项**：
-  - 编译期：`meson_options.txt` 中 `-Deffects=enabled/disabled`（默认 disabled）。
+  - 编译期：`meson_options.txt` 中 `-Deffects=enabled/disabled`（默认 enabled）。
   - 运行期：配置文件 `[effects] enabled`（默认 true）总开关，`blur`（默认 true）模糊开关，
     `corner_radius` 是圆角半径。关掉后协议状态照记、只是不建节点。
 - 需要特效时，使用 **scenefx**（wlroots 生态的 scene 扩展库）实现模糊、圆角、阴影等：scenefx 在 wlr_scene 之上提供 scene 节点装饰能力（圆角 clip、阴影、blur 等），避免自研渲染管线。
@@ -209,7 +209,7 @@ struct woodland_layout {
 - `output`：模式、缩放、刷新率、主屏、镜像组。
 - `input`：键盘布局、指针加速、触摸板设置。
 - `general`：工作区数量、默认布局模式（堆叠等）、焦点策略。
-- `effects`：总开关 + 各特效子开关（默认关）。
+- `effects`：总开关 + 各特效子开关（默认开）。
 - `decorations`：SSD 开关、标题栏高度、圆角半径。
 - `wallpaper` / `screensaver`：壁纸默认源路径、屏保超时。
 
@@ -257,8 +257,8 @@ struct woodland_layout {
 
 - 构建：meson + meson wrap。**wlroots 与 scenefx 均通过 meson wrap 下载**（不 vendored），锁定版本：wlroots 0.20.2、scenefx 0.5。
 - `subprojects/wlroots.wrap`（revision = 0.20.2）与 `subprojects/scenefx.wrap`（revision = 0.5），参考 swayfx 的 `subproject('scenefx', required: false)` + `dependency('scenefx-0.5', fallback: 'scenefx')` 写法。
-- 依赖（运行时最小集）：libinput、xkbcommon、pixman、libdrm、libseat/libsystemd(logind)、libdisplay-info、wayland、wlroots(经 wrap)、scenefx(可选，随 effects，经 wrap)。
-- 编译期 feature flags（`meson_options.txt`）：`effects`（默认 false，启用时引入 scenefx）、`tiling-layout`（默认 false）、`xwayland`（默认 true）。
+- 依赖（运行时最小集）：libinput、xkbcommon、pixman、libdrm、libseat/libsystemd(logind)、libdisplay-info、wayland、wlroots(经 wrap)、scenefx(随 effects，经 wrap；effects 默认启用)。
+- 编译期 feature flags（`meson_options.txt`）：`effects`（默认 true，启用时引入 scenefx，关闭时退回 wlroots 直出）、`tiling-layout`（默认 false）、`xwayland`（默认 true）。
 
 ## 14. 测试策略
 
@@ -272,7 +272,7 @@ struct woodland_layout {
 1. **wlroots API 破坏**：wlroots 每次 minor 升级会破坏 API。缓解：锁定 tag 0.20.2，升级时集中适配；跟随上游 tag 而非 master。
 2. **treeland 私有协议是实验性**（treeland-protocols 自述）：协议可能不向后兼容地变更。缓解：vendored XML 快照 + 版本记录，定期同步上游。
 3. **线缆级兼容的边界**：DDE 专属协议若客户端强制要求完整语义（如 dock 依赖 dde-shell overlay 的精确行为），可能仍有兼容缺口。缓解：在实现中优先保证 `dde-shell-v2` 的 surface 角色与 skip 位域行为正确，其余降级。
-4. **特效与性能目标的内在张力**：即使特效可选，实现特效的代码路径也会增加核心复杂度。缓解：特效代码全部隔离在 `src/effects/`，默认编译开关关闭时不进入核心路径。
+4. **特效与性能目标的内在张力**：即使特效可关，实现特效的代码路径也会增加核心复杂度。缓解：特效代码全部隔离在 `src/effect/`，`-Deffects=disabled` 时退回 wlroots 直出、不进入特效路径。
 ## 16. 验收标准（DoD）
 
 1. `meson setup build && meson compile -C build` 无警告通过（`-Wall -Wextra -Werror` 可选开启），meson wrap 依赖可自动下载。
@@ -281,5 +281,5 @@ struct woodland_layout {
 4. 线缆兼容级协议客户端绑定不报协议错误。
 5. 中文输入法（fcitx5 或等价实现）候选面板正常显示。
 6. 配置文件与 key-value 协议运行时改配置即时生效。
-7. 特效默认关闭时，`effects.enable=false` 下渲染路径无特效开销（可测量帧时间无显著差异）。
+7. 特效运行期关闭时，`[effects] enabled=false` 下渲染路径无特效开销（可测量帧时间无显著差异）。
 8. 许可证检查通过（GPL-2.0-only，无不兼容代码混入）。

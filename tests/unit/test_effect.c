@@ -4,8 +4,8 @@
  * 运行期开关怎么压过一切。
  *
  * 不建 compositor、不碰 GPU——这些函数把"协议/配置里的意图"翻译成"要画多大
- * 半径、糊哪一块"。scenefx 是常开的，画不画由 [effects] 决定，所以这里既测
- * 配置生效的情况，也测 enabled=false 时"记录归记录、半径归 0"。
+ * 半径、糊哪一块"。画不画由 [effects] 决定，所以这里既测配置生效的情况，
+ * 也测 enabled=false 时"记录归记录、半径归 0"。
  */
 #include <assert.h>
 #include <stdio.h>

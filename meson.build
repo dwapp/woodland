@@ -14,7 +14,7 @@ add_project_arguments([
   '-D_POSIX_C_SOURCE=200809L',
 ], language: 'c')
 
-# scenefx（随 effects 选项，默认不启用；wrap 文件保留作占位）
+# scenefx（随 effects 选项，默认启用；关闭时走 wlroots 直出，wrap 文件保留作占位）
 scenefx = dependency('scenefx-0.5', fallback: 'scenefx',
                      required: get_option('effects'))
 # wlroots（锁定 0.20.x）
