@@ -130,15 +130,17 @@ static void session_lock_output_show_crash_prompt(struct woodland_session_lock_o
     const float color_sub[4] = {0.95f, 0.95f, 0.95f, 1.0f};  // 亮白
     const float color_hint[4] = {0.70f, 0.70f, 0.70f, 1.0f}; // 辅助灰
 
+    /* 锁屏提示用内置字体：它要在"客户端全崩了"的时候也画得出来，不该依赖
+     * 控制中心设过什么外观 */
     woodland_text_buffer_update(lo->crash_title, "[ Session Locked ]", box.width, 32, color_title,
-                                1.0f);
+                                1.0f, NULL);
     woodland_text_buffer_update(lo->crash_sub,
                                 "The lockscreen process has crashed or terminated unexpectedly.",
-                                box.width, 24, color_sub, 1.0f);
+                                box.width, 24, color_sub, 1.0f, NULL);
     woodland_text_buffer_update(
         lo->crash_hint,
         "Press Ctrl+Alt+F2..F6 to switch to a TTY to log in and unlock or restart lockscreen.",
-        box.width, 24, color_hint, 1.0f);
+        box.width, 24, color_hint, 1.0f, NULL);
 
     int title_w = woodland_text_buffer_get_width(lo->crash_title);
     int sub_w = woodland_text_buffer_get_width(lo->crash_sub);

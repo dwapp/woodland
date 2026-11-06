@@ -33,6 +33,12 @@ struct woodland_config_decorations {
     uint32_t inactive_title_color;
     uint32_t active_border_color;
     uint32_t inactive_border_color;
+    /*
+     * 文件里显式给过颜色。默认色与内置浅色调色板同值，光看数值分不出
+     * "用户要这个颜色"和"没写所以拿默认"——而 treeland-appearance 的
+     * 深色方案要不要盖掉它们，取决于这个区分。
+     */
+    bool colors_specified;
 };
 
 struct woodland_config_keyboard {
@@ -92,6 +98,28 @@ struct woodland_config_effects {
     bool shadow;
 };
 
+/*
+ * [appearance]：treeland-appearance-manager 的运行期写入。
+ *
+ * 为什么不把这些值留在协议族里：消费方是 ssd / icon / effect 三个模块，而
+ * 项目规定依赖只能单向（协议层可以调它们，它们不能反向依赖协议层）。放在
+ * 配置对象里，三者都只是"读 server->config"，协议层负责写——和
+ * view->ssd_overrides 同一套思路，只是粒度是用户级而不是窗口级。
+ *
+ * 语义边界：这些字段**不落盘**。配置文件是初值来源，SIGHUP 重载会把它们
+ * 重置回文件里的值（协议改的是"此刻"，不是"以后"）。想持久化就写文件。
+ *
+ * 只有真有渲染消费方的设置在这里；monospace_font / window_opacity 这类
+ * woodland 还没有消费方的，存在协议族里，wctl 标成 recorded_only。
+ */
+struct woodland_config_appearance {
+    bool color_scheme_set; /* 协议设过配色方案；false 时按浅色渲染 */
+    bool dark;             /* color_scheme_set && 方案是 dark */
+    bool accent_set;       /* 协议设过强调色 */
+    uint32_t accent_rgb;   /* 0xRRGGBB，只影响激活窗口的边框 */
+    char *icon_theme;      /* NULL = 未设，按 icon.c 的内置主题表找图标 */
+};
+
 struct woodland_config {
     char *loaded_path; /* 实际生效的文件路径，无文件或内置默认时为 NULL */
     struct woodland_config_general general;
@@ -100,6 +128,7 @@ struct woodland_config {
     struct woodland_config_touchpad touchpad;
     struct woodland_config_cursor cursor;
     struct woodland_config_effects effects;
+    struct woodland_config_appearance appearance;
     struct wl_list output_rules; /* struct woodland_config_output_rule.link */
 };
 

@@ -15,6 +15,7 @@ struct woodland_proto_decoration;
 struct woodland_proto_bg_effect;
 struct woodland_proto_wallpaper;
 struct woodland_proto_compositor_action;
+struct woodland_proto_appearance;
 struct woodland_proto_shortcut;
 struct wlr_keyboard;
 struct wlr_keyboard_key_event;
@@ -53,6 +54,7 @@ struct woodland_proto {
     struct woodland_proto_bg_effect *bg_effect;   /* background_effect.c */
     struct woodland_proto_wallpaper *wallpaper;   /* wallpaper.c */
     struct woodland_proto_compositor_action *compositor_action; /* compositor_action.c */
+    struct woodland_proto_appearance *appearance; /* appearance.c */
     struct woodland_proto_shortcut *shortcut; /* shortcut.c */
 };
 
@@ -111,6 +113,12 @@ void woodland_proto_wallpaper_output_added(struct woodland_proto *proto,
 /* shell 动作族（compositor_action.c）：treeland-compositor-action-v1 */
 bool woodland_proto_compositor_action_init(struct woodland_proto *proto);
 void woodland_proto_compositor_action_finish(struct woodland_proto *proto);
+
+/* 外观族（appearance.c）：treeland-appearance / -manager（观测 + 特权配置） */
+bool woodland_proto_appearance_init(struct woodland_proto *proto);
+void woodland_proto_appearance_finish(struct woodland_proto *proto);
+/** 配置热重载后把当前外观全量重播给观测端（值可能整体回退）。 */
+void woodland_proto_appearance_refresh(struct woodland_proto *proto);
 
 /* 快捷键族（shortcut.c）：treeland-shortcut-manager-v3 */
 bool woodland_proto_shortcut_init(struct woodland_proto *proto);

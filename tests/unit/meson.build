@@ -140,6 +140,17 @@ test_compositor_action = executable('test_compositor_action', 'test_compositor_a
               session_lock_lib, ime_lib, capture_lib])
 test('compositor_action', test_compositor_action)
 
+# treeland-appearance / -manager：set_* 分档表、越界裁剪、字体描述串的拆分合成。
+# 纯逻辑，不建 display；裁剪上界来自 cursor.h / ssd.h，字体串解析在 ssd_lib
+# （pango），所以链接列表跟 test_compositor_action 一样长。
+test_appearance = executable('test_appearance', 'test_appearance.c',
+  dependencies: [scene_deps, wayland_server, cairo, pangocairo],
+  include_directories: woodland_inc,
+  link_with: [protocol_lib, workspace_lib, trace_lib, util_lib, shell_lib,
+              output_lib, cursor_lib, layer_lib, ssd_lib, effect_lib, seat_lib,
+              session_lock_lib, ime_lib, capture_lib])
+test('appearance', test_appearance)
+
 # treeland-shortcut-manager-v3：PortableText 解析 / 有效性 / 匹配 / 动作分档。
 # 纯逻辑，但 shortcut.c.o 会拉入窗口与工作区动作，链接列表跟
 # test_compositor_action 一样长；xkbcommon 只被本测试直接用到。

@@ -17,15 +17,79 @@ struct woodland_text_buffer {
     int height;
 };
 
-/* 标题字体（对齐 labwc 默认主题 font_activewindow: sans, size 10） */
+/*
+ * 标题字体：配置里的 [decorations] font 是 pango 描述串（"Sans 10"），
+ * 由调用方逐次传入——treeland-appearance-manager 可以随时改它，所以不能
+ * 在模块里缓存一份；NULL/空串时用内置默认（对齐 labwc 默认主题）。
+ */
 #define WOODLAND_SSD_FONT "Sans 10"
 
 /* 给 pango layout 套用统一字体 */
-static void apply_font(PangoLayout *layout)
+static void apply_font(PangoLayout *layout, const char *font_desc)
 {
-    PangoFontDescription *desc = pango_font_description_from_string(WOODLAND_SSD_FONT);
+    const char *desc_str = (font_desc && *font_desc) ? font_desc : WOODLAND_SSD_FONT;
+    PangoFontDescription *desc = pango_font_description_from_string(desc_str);
+    if (!desc) {
+        return;
+    }
     pango_layout_set_font_description(layout, desc);
     pango_font_description_free(desc);
+}
+
+/* ==================== 字体描述串的拆分/合成（协议层要用） ==================== */
+
+bool woodland_font_split(const char *desc, char *family, size_t family_len, double *size_pt)
+{
+    if (family && family_len) {
+        family[0] = '\0';
+    }
+    if (size_pt) {
+        *size_pt = 0.0;
+    }
+    if (!desc || !*desc) {
+        return false;
+    }
+    PangoFontDescription *pd = pango_font_description_from_string(desc);
+    if (!pd) {
+        return false;
+    }
+    const char *fam = pango_font_description_get_family(pd);
+    bool has_family = fam != NULL;
+    if (has_family && family && family_len) {
+        snprintf(family, family_len, "%s", fam);
+    }
+    if (size_pt) {
+        *size_pt = pango_font_description_get_size(pd) / (double)PANGO_SCALE;
+    }
+    pango_font_description_free(pd);
+    return has_family;
+}
+
+bool woodland_font_with(const char *desc, const char *family, double size_pt, char *buf,
+                        size_t len)
+{
+    if (!buf || len == 0) {
+        return false;
+    }
+    const char *base = (desc && *desc) ? desc : WOODLAND_SSD_FONT;
+    PangoFontDescription *pd = pango_font_description_from_string(base);
+    if (!pd) {
+        return false;
+    }
+    if (family && *family) {
+        pango_font_description_set_family(pd, family);
+    }
+    if (size_pt > 0.0) {
+        pango_font_description_set_size(pd, (int)(size_pt * PANGO_SCALE + 0.5));
+    }
+    char *text = pango_font_description_to_string(pd);
+    pango_font_description_free(pd);
+    if (!text) {
+        return false;
+    }
+    int n = snprintf(buf, len, "%s", text);
+    g_free(text);
+    return n > 0 && (size_t)n < len;
 }
 
 /* ==================== cairo 图像 surface → wlr_buffer ==================== */
@@ -115,7 +179,7 @@ void woodland_text_buffer_destroy(struct woodland_text_buffer *tb)
 }
 
 /* 计算文本宽度（逻辑像素），-1 表示空 */
-static int text_measure(const char *text)
+static int text_measure(const char *text, const char *font_desc)
 {
     if (!text || !*text) {
         return -1;
@@ -123,7 +187,7 @@ static int text_measure(const char *text)
     cairo_surface_t *surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
     cairo_t *c = cairo_create(surf);
     PangoLayout *layout = pango_cairo_create_layout(c);
-    apply_font(layout);
+    apply_font(layout, font_desc);
     pango_layout_set_text(layout, text, -1);
     pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
     int w, h;
@@ -135,7 +199,8 @@ static int text_measure(const char *text)
 }
 
 void woodland_text_buffer_update(struct woodland_text_buffer *tb, const char *text, int max_width,
-                                 int height, const float color[4], float scale)
+                                 int height, const float color[4], float scale,
+                                 const char *font_desc)
 {
     if (!tb) {
         return;
@@ -156,7 +221,7 @@ void woodland_text_buffer_update(struct woodland_text_buffer *tb, const char *te
         scale = 1.0f;
     }
 
-    int natural_w = text_measure(text);
+    int natural_w = text_measure(text, font_desc);
     if (natural_w <= 0) {
         natural_w = 1;
     }
@@ -181,7 +246,7 @@ void woodland_text_buffer_update(struct woodland_text_buffer *tb, const char *te
     cairo_set_source_rgba(c, color[0], color[1], color[2], color[3]);
 
     PangoLayout *layout = pango_cairo_create_layout(c);
-    apply_font(layout);
+    apply_font(layout, font_desc);
     pango_layout_set_text(layout, text, -1);
     pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
     pango_layout_set_width(layout, logical_w * PANGO_SCALE);

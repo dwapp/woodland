@@ -22,6 +22,21 @@ static const float COLOR_TITLE_TEXT_ACTIVE[4] = {0.188f, 0.188f, 0.188f,
 static const float COLOR_TITLE_TEXT_INACTIVE[4] = {0.588f, 0.588f, 0.588f,
                                                    1.0f}; /* #969696 非激活弱化 */
 
+/*
+ * 深色配色方案的内置调色板。
+ *
+ * 由 treeland-appearance-manager 的 set_color_scheme 选择，但**只在用户没有在
+ * 配置文件里显式写颜色时**生效（[decorations] colors_specified）：写了颜色
+ * 就是"我要这个颜色"，控制中心的一次请求不该把它盖掉。两个色板都取整数灰阶，
+ * 和浅色板一样只用一种色相，避免和客户端的主题打架。
+ */
+static const float COLOR_TITLEBAR_ACTIVE_DARK[4] = {0.169f, 0.169f, 0.169f, 1.0f};   /* #2b2b2b */
+static const float COLOR_TITLEBAR_INACTIVE_DARK[4] = {0.125f, 0.125f, 0.125f, 1.0f}; /* #202020 */
+static const float COLOR_BORDER_DARK[4] = {0.239f, 0.239f, 0.239f, 1.0f};            /* #3d3d3d */
+static const float COLOR_TITLE_TEXT_ACTIVE_DARK[4] = {0.902f, 0.902f, 0.902f, 1.0f}; /* #e6e6e6 */
+static const float COLOR_TITLE_TEXT_INACTIVE_DARK[4] = {0.549f, 0.549f, 0.549f,
+                                                        1.0f}; /* #8c8c8c */
+
 /* 按钮态高亮覆盖层：GXDE/Deepin 风格，关闭按钮悬停警示红，最小化/最大化轻量暗色半透明 */
 static const float COLOR_BUTTON_HOVER[4] = {0.0f, 0.0f, 0.0f, 0.08f};
 static const float COLOR_BUTTON_PRESSED[4] = {0.0f, 0.0f, 0.0f, 0.18f};
@@ -142,14 +157,31 @@ static void rgba_to_rgba_float(uint32_t rgba, float out[4])
 
 static void ssd_get_titlebar_color(const struct woodland_view *view, bool active, float out[4])
 {
-    if (view && view->server && view->server->config && view->server->config->loaded_path) {
-        uint32_t c = active ? view->server->config->ssd.active_title_color
-                            : view->server->config->ssd.inactive_title_color;
+    const struct woodland_config *cfg = (view && view->server) ? view->server->config : NULL;
+
+    /* 深色方案优先于内置浅色板，但排在用户显式颜色之后 */
+    if (cfg && cfg->appearance.color_scheme_set && cfg->appearance.dark &&
+        !cfg->ssd.colors_specified) {
+        const float *dark = active ? COLOR_TITLEBAR_ACTIVE_DARK : COLOR_TITLEBAR_INACTIVE_DARK;
+        memcpy(out, dark, sizeof(float) * 4);
+        return;
+    }
+    if (cfg && cfg->loaded_path) {
+        uint32_t c = active ? cfg->ssd.active_title_color : cfg->ssd.inactive_title_color;
         color_to_rgba_float(c, out);
         return;
     }
     const float *def = active ? COLOR_TITLEBAR_ACTIVE : COLOR_TITLEBAR_INACTIVE;
     memcpy(out, def, sizeof(float) * 4);
+}
+
+/* 强调色（0xRRGGBB，协议里没有 alpha）→ premultiplied RGBA，按不透明处理 */
+static void accent_to_rgba_float(uint32_t rgb, float out[4])
+{
+    out[0] = ((rgb >> 16) & 0xFF) / 255.0f;
+    out[1] = ((rgb >> 8) & 0xFF) / 255.0f;
+    out[2] = (rgb & 0xFF) / 255.0f;
+    out[3] = 1.0f;
 }
 
 static void ssd_get_border_color(const struct woodland_view *view, bool active, float out[4])
@@ -163,13 +195,43 @@ static void ssd_get_border_color(const struct woodland_view *view, bool active, 
         rgba_to_rgba_float(view->ssd_overrides.border_rgba, out);
         return;
     }
-    if (view && view->server && view->server->config && view->server->config->loaded_path) {
-        uint32_t c = active ? view->server->config->ssd.active_border_color
-                            : view->server->config->ssd.inactive_border_color;
+    const struct woodland_config *cfg = (view && view->server) ? view->server->config : NULL;
+    /*
+     * 强调色只染激活窗口的边框：它代表"焦点在哪"，给非激活窗口也上色就
+     * 分不出哪个是当前窗口了。用户显式配了边框色时不覆盖（同配色方案的规矩）。
+     */
+    if (cfg && cfg->appearance.accent_set && !cfg->ssd.colors_specified && active) {
+        accent_to_rgba_float(cfg->appearance.accent_rgb, out);
+        return;
+    }
+    if (cfg && cfg->appearance.color_scheme_set && cfg->appearance.dark &&
+        !cfg->ssd.colors_specified) {
+        memcpy(out, COLOR_BORDER_DARK, sizeof(float) * 4);
+        return;
+    }
+    if (cfg && cfg->loaded_path) {
+        uint32_t c = active ? cfg->ssd.active_border_color : cfg->ssd.inactive_border_color;
         color_to_rgba_float(c, out);
         return;
     }
     memcpy(out, COLOR_BORDER, sizeof(float) * 4);
+}
+
+/* 标题文字颜色：跟随配色方案（配置里没有单独的标题文字色键） */
+static const float *ssd_title_text_color(const struct woodland_view *view, bool active)
+{
+    const struct woodland_config *cfg = (view && view->server) ? view->server->config : NULL;
+    if (cfg && cfg->appearance.color_scheme_set && cfg->appearance.dark) {
+        return active ? COLOR_TITLE_TEXT_ACTIVE_DARK : COLOR_TITLE_TEXT_INACTIVE_DARK;
+    }
+    return active ? COLOR_TITLE_TEXT_ACTIVE : COLOR_TITLE_TEXT_INACTIVE;
+}
+
+/* 标题字体：配置里的 pango 描述串，NULL 交给 text_buffer 的内置默认 */
+static const char *ssd_font(const struct woodland_view *view)
+{
+    const struct woodland_config *cfg = (view && view->server) ? view->server->config : NULL;
+    return cfg ? cfg->ssd.font : NULL;
 }
 
 void woodland_ssd_get_margins(struct woodland_view *view, struct woodland_ssd_margins *margins)
@@ -451,9 +513,9 @@ static void ssd_layout(struct woodland_ssd *ssd)
         if (avail_w < 1) {
             avail_w = 1;
         }
-        const float *text_color = ssd->active ? COLOR_TITLE_TEXT_ACTIVE : COLOR_TITLE_TEXT_INACTIVE;
+        const float *text_color = ssd_title_text_color(ssd->view, ssd->active);
         woodland_text_buffer_update(ssd->title_text, ssd->view->title, avail_w, th, text_color,
-                                    1.0f);
+                                    1.0f, ssd_font(ssd->view));
 
         int title_w = woodland_text_buffer_get_width(ssd->title_text);
         int tx = (w - title_w) / 2;
@@ -861,6 +923,37 @@ void woodland_ssd_set_corner_radius(struct woodland_view *view, int radius)
     (void)view;
     (void)radius;
 #endif
+}
+
+/*
+ * 用户级外观变了（标题栏高度/字体/配色方案/强调色/图标主题），重排这个窗口。
+ *
+ * 与 woodland_ssd_deco_changed 的差别：这里还要丢掉图标缓存键。图标按
+ * app_id 缓存，只有键被清掉，ssd_update_icon 才会重新按新主题查一遍——
+ * 少了这一行，"改了图标主题"只对之后新开的窗口生效，看着像没生效。
+ */
+void woodland_ssd_refresh(struct woodland_view *view)
+{
+    struct woodland_ssd *ssd = view ? view->ssd : NULL;
+    if (!ssd) {
+        /* 还没 map：新值都在 config 里，创建时会读到 */
+        return;
+    }
+    free(ssd->icon_key);
+    ssd->icon_key = NULL;
+    woodland_ssd_deco_changed(view);
+}
+
+void woodland_ssd_refresh_all(struct woodland_server *server)
+{
+    if (!server || !server->views.next) {
+        return;
+    }
+    struct woodland_view *view;
+    wl_list_for_each(view, &server->views, link)
+    {
+        woodland_ssd_refresh(view);
+    }
 }
 
 void woodland_ssd_finish(void)
