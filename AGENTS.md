@@ -75,7 +75,7 @@ wctl --help
             {"seq":3,"ms":31,"obj":1,"what":"focus","detail":"prev=0 raise=1"}]}
 ```
 
-- `what` 是**稳定标签**（脚本会 grep），权威清单在 `include/trace.h`：`map` / `unmap` / `destroy` / `focus` / `focus_none` / `layer_focus` / `place` / `workspace` / `output_add` / `output_remove` / `cfg_apply` / `deco` / `bg_effect` / `action` / `shortcut` / `appearance`。加新标签先改 trace.h 的清单，再发第一条轨迹。
+- `what` 是**稳定标签**（脚本会 grep），权威清单在 `include/trace.h`：`map` / `unmap` / `destroy` / `focus` / `focus_none` / `layer_focus` / `place` / `workspace` / `output_add` / `output_remove` / `cfg_apply` / `deco` / `bg_effect` / `action` / `shortcut` / `appearance` / `ftl`。加新标签先改 trace.h 的清单，再发第一条轨迹。
 - `detail` 只写**决策依据**（走了哪个分支、策略名、抑制窗口），不要抄 `get_tree` 已有的数值。
 - 关闭时零分配零格式化；打开后也不分配（一次 calloc）。**它只依赖 `util/json`，不许反向依赖任何业务模块**——否则会成为依赖环的入口。
 - 环的语义：`seq` 全局单调，`total` 是累计条数，`dropped = total - count` 就是被覆盖掉的条数。第一个 entry 的 `seq` 一定等于 `dropped`。
@@ -236,3 +236,19 @@ libwayland 的 errno，协议错误恒为 EPROTO=71）。见 `tests/smoke/deco_p
   `smoke-appearance`（11 条初始推送 / 广播 / clamp / 枚举外静默忽略 / 只记录 /
   已映射窗口的 SSD 边距真跟着变）。状态在 `wctl get_tree` 的 `appearance` 里，
   每条处置结果写 `appearance` 轨迹。
+- **treeland-foreign-toplevel-manager-unstable-v3 已接线**（`feature/foreign-toplevel-v3`）：
+  窗口列表（toplevel/finished + identifier/title/app_id/pid/parent/output_enter|leave）、
+  状态位 `state`（maximized/minimized/activated/fullscreen/attention）与
+  `set_*`/`activate`/`close` 请求都真接 woodland 的窗口状态机（`activate` 走
+  `woodland_focus_view`，最小化中的窗口先恢复再聚焦）。三处**故意不做到位**，别当成 bug：
+  ① `get_dock_preview_context` 的对象与 `invalid_surface`/`context_already_exists` 校验完整，
+  但 `show` / `show_tooltip_surface` 只记账、`enter`/`leave` 永不发——woodland 不做 treeland
+  的缩略图/tooltip 弹层动效；② `set_icon_geometry` 只记录（没有最小化动画）；③ `done` 不做
+  treeland 的 idle 延迟批处理，改为**差量刷新**（属性有变才发事件 + 一条 `done`）。
+  另外 `set_maximized` 等请求的 `state` 事件由 `woodland_view_changed` 信号驱动，不是请求返回时同步发。
+  跨层钩子是 `struct woodland_server` 上的三条信号 `view_mapped` / `view_unmapped` /
+  `view_changed`——改动它们要连 `woodland_signal_emit()`（判空的包装）一起改，
+  否则栈上 memset 出来的 `struct woodland_server` 单测会段错误。协议 XML 是
+  `protocols/treeland/` 下的只读副本（MIT，上游 `dde/`）；档位详见 `include/protocol.h`
+  头部注释，状态在 `wctl get_tree` 的 `toplevel_manager` 与每个 view 的 `foreign_toplevel` 里，
+  轨迹标签 `ftl`，探针 `tests/smoke/ftl_probe.c`。

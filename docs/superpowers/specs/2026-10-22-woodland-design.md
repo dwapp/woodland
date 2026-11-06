@@ -150,7 +150,7 @@ struct woodland_layout {
 
 | 协议 | 说明 |
 | --- | --- |
-| `treeland-foreign-toplevel-manager-unstable-v2` | 顶层窗口观察 + dock 预览（通用合成器刚需） |
+| `treeland-foreign-toplevel-manager-unstable-v3` | 顶层窗口观察 + dock 预览（通用合成器刚需）。**上游已用 v3 取代 v2**，woodland 直接实现 v3；dock preview context 只做对象/错误码校验与记账，不渲染缩略图与 tooltip 弹层 |
 | `treeland-shortcut-manager-unstable-v3` | 全局快捷键 + 手势（通用合成器刚需） |
 | `treeland-compositor-action-unstable-v1` | 合成器动作（工作区切换/显示桌面/锁屏/缩放等） |
 | `treeland-appearance-manager-unstable-v1` | 特权外观配置（光标/字体/强调色等） |

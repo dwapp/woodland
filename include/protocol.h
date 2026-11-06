@@ -8,6 +8,8 @@
 
 struct woodland_server;
 struct woodland_workspace;
+struct woodland_view;
+struct woodland_json;
 struct wlr_input_device;
 struct wlr_output;
 
@@ -28,6 +30,7 @@ struct wlr_output;
  *   compositor_action.c shell 动作：treeland-compositor-action（工作区切换）
  *   appearance.c 用户级外观：treeland-appearance（观测）/ -manager（特权配置）
  *   shortcut.c 全局快捷键与一次性捕获：treeland-shortcut-manager-v3
+ *   foreign_toplevel.c 窗口列表：treeland-foreign-toplevel-manager-v3
  *   protocol.c 只管按序建立、逆序回收，以及下面这几个转发入口。
  *
  * 按语义完备程度分档，档位决定了它是否真的改变行为：
@@ -51,6 +54,12 @@ struct wlr_output;
  *             置空但可观测（trace / wctl / 日志），不假装生效。bind 的
  *             "非特权客户端"判定只做到同 uid，woodland 没有 DDE 的
  *             privileged 服务，取舍写在 compositor_action.c 文件头。
+ *   部分实现：treeland-foreign-toplevel-manager-v3 的 dock preview context——
+ *             对象与请求照协议校验（invalid_surface / context_already_exists），
+ *             但缩略图/tooltip popover 是 treeland 的 QML 特效，woodland 不实现，
+ *             因此 show / show_tooltip_surface 只记账（trace + wctl），enter /
+ *             leave 永不发送。窗口列表、状态、activate/close/maximize/minimize/
+ *             fullscreen 这些**语义**部分是完整的。
  *   treeland-shortcut-manager-v3：acquire 独占、bind/unbind 的四种
  *             bind_failure、capture 的 busy/not_active/aborted/interrupted
  *             与 activated 事件语义完整；动作 0..20、22..23、32..39 真接
@@ -62,7 +71,9 @@ struct wlr_output;
  *   仅记录：  xdg-toplevel-tag（存下来、经 wctl 可见，但暂不参与窗口规则）；
  *             treeland-decoration 的阴影（要一层模糊 buffer，还没做）；
  *             treeland-appearance-manager 的 monospace_font（没有等宽字体
- *             消费方）与 window_opacity（要逐窗口 alpha，属单独一版）。
+ *             消费方）与 window_opacity（要逐窗口 alpha，属单独一版）；
+ *             treeland-foreign-toplevel-manager-v3 的 set_icon_geometry
+ *             （最小化动画的提示，woodland 没有动画）。
  *   暂不接线：security-context（无沙箱校验时声明"我是沙箱"反而是假安全）、
  *             tearing-control（要改 scene 的 commit 路径传 tearing 位，
  *             属单独一版）、content-type（scene 不消费）、
@@ -297,5 +308,42 @@ void woodland_protocol_appearance_status(struct woodland_server *server,
  * 回到文件里的浅色。
  */
 void woodland_protocol_refresh_appearance(struct woodland_server *server);
+
+/* ==================== treeland-foreign-toplevel-manager-v3 ==================== */
+
+/*
+ * 一个窗口的状态位。协议用 uint32 数组表达，位在上面的顺序就是 XML 里
+ * state 枚举的取值（maximized=0 … attention=4）。
+ *
+ * 抽成纯函数是因为它是唯一"算错了客户端就理解错"的地方：状态事件的数组
+ * 少一位、顺序反了，都不会崩，只会让 Dock 的图标一直显示成最大化的样子。
+ */
+struct woodland_toplevel_state {
+    bool maximized;
+    bool minimized;
+    bool activated;
+    bool fullscreen;
+    bool attention;
+};
+
+/**
+ * 编码成协议要的 uint32 数组（升序、只含置位的项），返回写入个数。
+ *
+ * cap 不足时截断并返回 cap：调用方的缓冲按 5 个开，正常永远够。
+ */
+size_t woodland_protocol_toplevel_state_encode(const struct woodland_toplevel_state *state,
+                                               uint32_t *out, size_t cap);
+
+/** 本协议族的全局诊断（bind 数、跟踪的窗口数、最近一次请求怎么处置）。 */
+void woodland_protocol_toplevel_status(struct woodland_server *server,
+                                       struct woodland_json *out);
+
+/**
+ * 单个视图在本协议里的对外形态（identifier、几个客户端各拿一个 handle）。
+ *
+ * 协议族没建起来时写 {"tracked": false}，调用方不必自己判空。
+ */
+void woodland_protocol_toplevel_view_status(struct woodland_view *view,
+                                            struct woodland_json *out);
 
 #endif

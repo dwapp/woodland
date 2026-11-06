@@ -19,6 +19,7 @@
  *   compositor_action.c shell 动作（treeland-compositor-action-v1）
  *   appearance.c  用户级外观（treeland-appearance / -manager：观测 + 特权配置）
  *   shortcut.c    全局快捷键与一次性捕获（treeland-shortcut-manager-v3）
+ *   foreign_toplevel.c 窗口列表（treeland-foreign-toplevel-manager-v3）
  * 分层的原因不是"文件太大了"：这几块的状态机各不相干，混在一个文件里时
  * init 的失败回滚和 finish 的逆序拆除要横跨十几组监听器，漏一行就是悬挂
  * 指针；拆开之后每族的建立与回收在同一个文件里，加协议只动一处。
@@ -106,6 +107,10 @@ bool woodland_protocol_init(struct woodland_server *server) {
     if (!woodland_proto_window_init(proto)) {
         return false;
     }
+    /* 窗口列表：只依赖视图链表与 seat/output，不依赖别的族 */
+    if (!woodland_proto_toplevel_init(proto)) {
+        return false;
+    }
     /* shell 动作只依赖 workspace（上面已建好），不被其它族依赖 */
     if (!woodland_proto_compositor_action_init(proto)) {
         return false;
@@ -170,6 +175,7 @@ void woodland_protocol_finish(struct woodland_server *server)
     woodland_proto_appearance_finish(proto);
     woodland_proto_shortcut_finish(proto);
     woodland_proto_compositor_action_finish(proto);
+    woodland_proto_toplevel_finish(proto);
     woodland_proto_window_finish(proto);
     woodland_proto_input_finish(proto);
     woodland_proto_output_finish(proto);

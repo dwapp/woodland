@@ -201,6 +201,15 @@ void woodland_view_set_parent(struct woodland_view *view, struct woodland_view *
 /** 更新窗口在 foreign-toplevel 中的所属显示器（触发 output_enter/output_leave）。 */
 void woodland_view_update_outputs(struct woodland_view *view);
 
+/**
+ * 视图此刻是否（部分）落在给定输出上。
+ *
+ * 与 woodland_view_update_outputs 共用同一份判定：外框与输出相交即算可见，
+ * 外框还没算出来时退到"窗口所属输出"。协议层要按输出做差量时用它，
+ * 免得自己抄一遍（抄出来的答案迟早和任务栏看到的不一致）。
+ */
+bool woodland_view_on_output(struct woodland_view *view, struct wlr_output *output);
+
 bool woodland_shell_init(struct woodland_server *server);
 void woodland_shell_finish(struct woodland_server *server);
 

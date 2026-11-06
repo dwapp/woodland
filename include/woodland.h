@@ -77,6 +77,20 @@ struct woodland_server {
      * 壁纸族负责在建立/销毁时置上、置空。
      */
     struct wlr_scene_tree *wallpaper_tree;
+    /*
+     * 视图状态通知：data 都是 struct woodland_view *。
+     *
+     * 和 workspace_changed / output_removed 同一个理由——shell 层不能反向
+     * 调用协议层（只链 shell_lib 的单元测试会缺符号）。协议族要跟窗口的
+     * 出现/消失/属性变化，就在这三条信号上挂监听：
+     *   view_mapped   视图完成 map（已放置、已聚焦、已建 SSD）
+     *   view_unmapped 视图 unmap，或即将销毁（先发这条再 free，见 shell.c）
+     *   view_changed  标题 / app_id / 状态位 / 父窗 / 所属输出发生变化
+     * 没有监听者时 emit 是空操作，代价可以忽略。
+     */
+    struct wl_signal view_mapped;
+    struct wl_signal view_unmapped;
+    struct wl_signal view_changed;
     struct wlr_output_layout *output_layout;
     struct wlr_scene_output_layout *scene_layout;
 
@@ -218,5 +232,23 @@ struct woodland_server {
     const char *config_path;        // -c 配置文件路径
     struct woodland_config *config; // 运行时配置
 };
+
+/**
+ * 发一条挂在 server 上的通知（view_mapped / view_changed / workspace_changed…）。
+ *
+ * 为什么要包一层：单元测试会在**栈上伪造** struct woodland_server（见
+ * tests/unit/test_view.c、test_workspace.c），那里不会跑 woodland_shell_init，
+ * 于是这些 wl_signal 的 listener_list 全零。wl_signal_emit_mutable 直接遍历
+ * 那条链表，全零就是空指针解引用——看起来像"改了一行通知把六个单测搞崩了"。
+ *
+ * 判 next 就够：wl_list_init() 把 next/prev 指回自己，初始化过的一律非空；
+ * 只有 memset 出来的才是 NULL。零成本，且不需要每个测试自己补 wl_signal_init。
+ */
+static inline void woodland_signal_emit(struct wl_signal *signal, void *data)
+{
+    if (signal && signal->listener_list.next) {
+        wl_signal_emit_mutable(signal, data);
+    }
+}
 
 #endif

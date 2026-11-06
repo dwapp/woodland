@@ -17,6 +17,7 @@ struct woodland_proto_wallpaper;
 struct woodland_proto_compositor_action;
 struct woodland_proto_appearance;
 struct woodland_proto_shortcut;
+struct woodland_proto_toplevel;
 struct wlr_keyboard;
 struct wlr_keyboard_key_event;
 struct wlr_output;
@@ -56,6 +57,7 @@ struct woodland_proto {
     struct woodland_proto_compositor_action *compositor_action; /* compositor_action.c */
     struct woodland_proto_appearance *appearance; /* appearance.c */
     struct woodland_proto_shortcut *shortcut; /* shortcut.c */
+    struct woodland_proto_toplevel *toplevel; /* foreign_toplevel.c */
 };
 
 /* 空闲与抑制族（idle.c）：idle-notify / idle-inhibit / keyboard-shortcuts-inhibit */
@@ -129,5 +131,9 @@ bool woodland_proto_shortcut_key(struct woodland_proto *proto,
                                  const struct wlr_keyboard_key_event *event);
 /** 指针 button / wheel 事件：pending capture 时被 interrupted 并消费。 */
 bool woodland_proto_shortcut_pointer(struct woodland_proto *proto);
+
+/* 窗口列表族（foreign_toplevel.c）：treeland-foreign-toplevel-manager-v3 */
+bool woodland_proto_toplevel_init(struct woodland_proto *proto);
+void woodland_proto_toplevel_finish(struct woodland_proto *proto);
 
 #endif
