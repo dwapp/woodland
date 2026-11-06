@@ -34,7 +34,7 @@ bool woodland_output_get_tearing_allowance(struct woodland_output *output)
     if (!view) {
         return false;
     }
-    if (view->tearing_hint != 1) {
+    if (view->tearing_hint != WOODLAND_TEARING_ASYNC) {
         return false;
     }
     if (!woodland_view_on_output(view, output->wlr_output)) {

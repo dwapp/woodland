@@ -378,7 +378,7 @@ static void append_view_details(struct woodland_server *server, struct woodland_
     woodland_json_obj_bool(&obj, "focusable", woodland_view_focusable(view));
     woodland_json_obj_bool(&obj, "scene_visible",
                            view->scene_tree && view->scene_tree->node.enabled);
-    woodland_json_obj_bool(&obj, "tearing", view->tearing_hint == 1);
+    woodland_json_obj_bool(&obj, "tearing", view->tearing_hint == WOODLAND_TEARING_ASYNC);
     obj_view_id(&obj, "parent", view->parent);
 
     /*

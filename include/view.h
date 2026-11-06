@@ -39,6 +39,12 @@ enum woodland_view_type {
     WOODLAND_VIEW_XWAYLAND,
 };
 
+/** 客户端撕裂提示（wp_tearing_control_v1 presentation_hint）。 */
+enum woodland_tearing_hint {
+    WOODLAND_TEARING_VSYNC = 0,
+    WOODLAND_TEARING_ASYNC = 1,
+};
+
 struct woodland_view {
     struct wl_list link; // woodland_server.views
     struct woodland_server *server;
@@ -96,7 +102,7 @@ struct woodland_view {
     struct wlr_xdg_toplevel_decoration_v1 *deco; // zxdg decoration 对象
     struct wl_listener deco_destroy;             // zxdg_decoration 销毁监听器
     struct wl_listener deco_request_mode;        // zxdg_decoration 模式请求监听器
-    uint32_t tearing_hint;                       // wp_tearing_control_v1: 0 = vsync, 1 = async
+    enum woodland_tearing_hint tearing_hint;
     struct wlr_box saved_geometry;               // 退出 max/fullscreen 时恢复
     /*
      * 贴边铺满（snap to edge）：

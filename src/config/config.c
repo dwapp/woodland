@@ -67,7 +67,7 @@ void woodland_config_default_init(struct woodland_config *config)
     config->general.workspace_count = 10;
     config->general.focus_follows_mouse = false;
     config->general.snap_distance = WOODLAND_SNAP_DISTANCE;
-    config->general.allow_tearing = true;
+    config->general.allow_tearing = false;
 
     /* [decorations] */
     config->ssd.enabled = true;
