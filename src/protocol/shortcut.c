@@ -35,6 +35,13 @@
  *     compositor_action.c 一样只校验对端 uid 与合成器相同，挡住跨用户连接。
  *   - 「用户 session 切换时延迟 bind/unbind」没有实现：woodland 是单用户
  *     session 合成器，绑定一律立即生效。
+ *   - 裸 Meta（Super 单独按下）只能被 capture 捕获，不能 bind_key：协议
+ *     capture_next_shortcut 的 validity 规则明文包含「the Meta (Super) key
+ *     pressed alone」，而 bind_key 引用同一套规则，严格说 bind_key 也应
+ *     接受 "Meta"。woodland 故意不做：全局注册一个裸 Super 绑定会吃掉
+ *     整个桌面生态里大量以 Super 开头的组合键（Super 按下即命中、还拦
+ *     不住后续修饰键），收益配不上复杂度。capture 语义不变，bind 对
+ *     "Meta" 报 invalid_argument——这是记录在案的偏差，不是疏漏。
  *   - keyboard-shortcuts-inhibit 期间由 seat 跳过本层（见 seat.c），抑制器
  *     优先于全局快捷键，和内置 Alt+ 键位一致。
  *
@@ -314,7 +321,12 @@ woodland_shortcut_key_parse(const char *text, struct woodland_shortcut_key *out)
     if (!last || !*last) {
         return WOODLAND_SC_PARSE_NO_KEY;
     }
-    /* 单独一个修饰键不是可匹配的组合；Meta 单独按下的路径由 capture 处理 */
+    /*
+     * 单独一个修饰键不是可匹配的组合，裸 Meta 也一样。协议按
+     * capture_next_shortcut 的 validity 规则要求 bind_key 接受 "Meta"，
+     * woodland 有意不收这个组合（理由见文件头「部分实现」），因此统一
+     * 走 NO_KEY；capture 里裸 Meta 的路径是独立的 held_mods 特判。
+     */
     uint32_t ignored_bit = 0;
     if (token_is_modifier(last, &ignored_bit)) {
         return WOODLAND_SC_PARSE_NO_KEY;
@@ -925,7 +937,8 @@ static void manager_handle_bind_key(struct wl_client *client, struct wl_resource
         shortcut_record(sc, OUTCOME_INVALID_ARGUMENT, action,
                         "bind_key name=%s key=%s parse=%s",
                         name ? name : "", key ? key : "", woodland_shortcut_parse_name(pr));
-    } else if ((flags & ~SC_FLAG_MASK) != 0) {
+    } else if (flags == 0 || (flags & ~SC_FLAG_MASK) != 0) {
+        /* 三种 trigger 位全不设的绑定永远不会命中，按 out-of-range 拒掉 */
         err = TREELAND_SHORTCUT_MANAGER_V3_BIND_ERROR_INVALID_ARGUMENT;
         shortcut_record(sc, OUTCOME_INVALID_ARGUMENT, action,
                         "bind_key name=%s flags=%u out of range", name, flags);
@@ -1271,9 +1284,16 @@ bool woodland_proto_shortcut_key(struct woodland_proto *proto,
     sc->last_pressed = press;
     sc->last_keycode = event->keycode;
 
-    /* captured 之后那一次 key_release 要吞掉，不能再去触发已注册的绑定 */
-    if (sc->drain_keycode == event->keycode && !press) {
-        sc->drain_keycode = 0;
+    /*
+     * captured 之后那一次 key 的收尾要吞掉，不能再去触发已注册的绑定。
+     * 协议只说 consume the key_release，但同键的 auto-repeat 也在 drain
+     * 窗口内：它发生在 release 之前，不一起吞掉就会穿透去匹配绑定（若
+     * 恰好有个带 REPEAT flag 的同组合绑定就会误触发）。
+     */
+    if (sc->drain_keycode == event->keycode) {
+        if (!press) {
+            sc->drain_keycode = 0;
+        }
         return true;
     }
 
@@ -1334,6 +1354,15 @@ static void shortcut_handle_focus_change(struct wl_listener *listener, void *dat
     struct woodland_proto_shortcut *sc =
         wl_container_of(listener, sc, focus_change);
     (void)data;
+    /*
+     * 焦点一旦变化，上一次 captured 遗留的 drain 窗口就不再可靠：release
+     * 可能永远不来（客户端断连 / 设备拔掉），留着会让之后所有 capture
+     * 永久报 busy。这里和 capture 的 aborted 一起清理。
+     */
+    if (sc->drain_keycode != 0) {
+        woodland_trace_add("shortcut", 0, "drain cleared on focus change");
+        sc->drain_keycode = 0;
+    }
     if (!sc->capture || sc->capture->terminal) {
         return;
     }
