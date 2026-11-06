@@ -1,7 +1,7 @@
 # treeland-decoration-unstable-v1 支持设计规格
 
 > 日期：2026-11-05
-> 状态：已实现（协议语义完整；圆角真的画出来——scenefx 常开，能不能画由
+> 状态：已实现（协议语义完整；圆角真的画出来——scenefx 默认开启，能不能画由
 > `[effects] enabled` 决定，阴影仍只记录，见 §4）
 > 参考实现：treeland `src/modules/decoration/decorationmanagerinterfacev1.cpp`
 > （Apache-2.0 OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only）
@@ -84,7 +84,8 @@ woodland_proto_decoration
 ## 4. 渲染能力与取舍
 
 协议允许合成器"按自己的策略处理，并把越界值 clamp 到支持的上界"。woodland
-的渲染能力是编译期固定的（scenefx 常开），画不画由 `[effects] enabled` 决定：
+的渲染能力是编译期固定的（`-Deffects` 决定 scenefx 是否参与链接，默认开启），
+画不画再由 `[effects] enabled` 决定：
 
 | `[effects] enabled` | 场景库 | 圆角 | 阴影 |
 |---|---|---|---|

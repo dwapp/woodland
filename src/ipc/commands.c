@@ -475,7 +475,8 @@ static void ipc_get_tree(struct woodland_server *server, struct woodland_json *o
                           woodland_placement_policy_name(server->placement_policy));
     woodland_json_obj_bool(&obj, "self_check", server->self_check);
     /* 这台合成器此刻会不会画圆角/模糊：脚本据此决定 deco.rendered 的期望值。
-     * 编译期没有开关了，这里是 [effects] enabled 的实时值。 */
+     * 编译期开关（-Deffects）只决定 scenefx 是否参与链接，这里是 [effects]
+     * enabled 的实时值。 */
 #if WOODLAND_HAVE_EFFECTS
     woodland_json_obj_bool(&obj, "effects", woodland_effect_server_enabled(server));
     woodland_json_obj_bool(&obj, "effects_blur",

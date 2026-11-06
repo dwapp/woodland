@@ -13,9 +13,9 @@ struct wlr_scene_tree;
 struct wlr_surface;
 
 /*
- * 运行期开关。编译期没有 effects 开关（scenefx 常开），"画不画"全看配置：
- * [effects] enabled 是总开关，blur 单独管模糊。关掉之后协议状态照记
- * （get_tree 里看得见客户端要了什么），只是不建节点。
+ * 运行期开关。编译期由 -Deffects 决定 scenefx 是否参与链接（WOODLAND_HAVE_EFFECTS），
+ * "画不画"再看配置：[effects] enabled 是总开关，blur 单独管模糊。关掉之后协议状态
+ * 照记（get_tree 里看得见客户端要了什么），只是不建节点。
  */
 bool woodland_effect_server_enabled(const struct woodland_server *server);
 bool woodland_effect_server_blur_enabled(const struct woodland_server *server);

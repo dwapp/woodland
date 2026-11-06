@@ -99,8 +99,8 @@ void woodland_config_default_init(struct woodland_config *config)
     config->cursor.theme = strdup("default");
     config->cursor.size = 24;
 
-    /* [effects]：编译期常开，运行期可关。默认按"特效开"给，
-     * 想回到朴素外观就用 enabled=false（模糊与圆角一起停）。 */
+    /* [effects]：编译期由 -Deffects 决定 scenefx 是否参与链接，运行期可关。
+     * 默认按"特效开"给，想回到朴素外观就用 enabled=false（模糊与圆角一起停）。 */
     config->effects.enabled = true;
     config->effects.blur = true;
     config->effects.corner_radius = 0;

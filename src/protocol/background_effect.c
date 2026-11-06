@@ -11,9 +11,10 @@
  * （和 wlroots 上游实现同一条路），state 结构里的 pixman region 由它负责
  * 初始化/拷贝/释放。
  *
- * 能力位跟着**运行期配置**（[effects] enabled/blur）走，不跟编译期：scenefx 一定
- * 在，但关掉模糊时如实报 capability=0，客户端据此知道"这台的合成器不会模糊"，
- * 而不是设了区域一点反应都没有。bind 时现算，配置热重载后再广播一次。
+ * 能力位跟着**运行期配置**（[effects] enabled/blur）走，叠加在编译期开关之上：
+ * 关掉特效构建（-Deffects=disabled）或关掉运行时 blur 时都如实报 capability=0，
+ * 客户端据此知道"这台的合成器不会模糊"，而不是设了区域一点反应都没有。
+ * bind 时现算，配置热重载后再广播一次。
  */
 #include <pixman.h>
 #include <stdlib.h>
