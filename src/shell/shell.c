@@ -120,6 +120,8 @@ void woodland_view_set_activated(struct woodland_view *view, bool activated)
     /* 记下我们要求的状态：X11 后端没有可回读的 activated 字段，
      * 而三态同步与不变量检查都需要这个真值 */
     view->activated = activated;
+    /* 激活态是协议里 state 数组的一项，变化要广播（协议层按差量决定发不发） */
+    woodland_signal_emit(&view->server->view_changed, view);
 #if WOODLAND_HAVE_XWAYLAND
     if (view->type == WOODLAND_VIEW_XWAYLAND) {
         if (view->xwayland_surface) {
@@ -242,6 +244,8 @@ void woodland_view_map(struct woodland_view *view)
     /* CSD 视图没有 SSD，map 之后补一次圆角/模糊（SSD 视图由 ssd_create 覆盖） */
     woodland_effect_update(view);
     woodland_selfcheck_schedule(server, "map");
+    /* 协议层在这里拿"窗口出现了"的第一手通知（foreign-toplevel 类） */
+    woodland_signal_emit(&server->view_mapped, view);
 }
 
 void woodland_view_unmap(struct woodland_view *view)
@@ -249,6 +253,8 @@ void woodland_view_unmap(struct woodland_view *view)
     /* 记在函数开头：后面的 focus_none / fallback 也会各写一条，
      * 顺序就是真实的因果顺序（先 unmap，再处理焦点） */
     woodland_trace_add("unmap", view->id, "mapped=%d", view->mapped ? 1 : 0);
+    /* 先告诉协议层窗口要消失了：此时 view 还完整，属性都还读得到 */
+    woodland_signal_emit(&view->server->view_unmapped, view);
     if (view == view->server->grabbed_view) {
         woodland_cursor_reset_mode(view->server);
     }
@@ -293,6 +299,13 @@ void woodland_view_destroy(struct woodland_view *view)
 {
     woodland_trace_add("destroy", view->id, "type=%s mapped=%d",
                        view->type == WOODLAND_VIEW_XWAYLAND ? "x11" : "xdg", view->mapped ? 1 : 0);
+    /*
+     * 这里也要发一次 view_unmapped：xdg 的销毁路径不经过 woodland_view_unmap，
+     * 而客户端随时可能直接 destroy surface。协议层据此发 closed 并收掉句柄；
+     * 重复发是幂等的（entry 已经没了就什么都不做）。
+     * 顺序很关键——必须在 free(view) 之前，回调里 view 还是完整的。
+     */
+    woodland_signal_emit(&view->server->view_unmapped, view);
     /* 销毁中的视图不能作为回退目标，也不能被 focus_current 反查到：
      * 先清焦点（只改状态，不挑新目标），等视图摘出链表后再回退 */
     woodland_session_lock_handle_view_destroy(view->server, view);
@@ -591,6 +604,11 @@ static void server_new_toplevel_decoration(struct wl_listener *listener, void *d
 bool woodland_shell_init(struct woodland_server *server)
 {
     wl_list_init(&server->views);
+
+    /* 视图通知（协议层挂监听）：没有监听者时 emit 是空操作 */
+    wl_signal_init(&server->view_mapped);
+    wl_signal_init(&server->view_unmapped);
+    wl_signal_init(&server->view_changed);
 
     server->xdg_shell = wlr_xdg_shell_create(server->display, 3);
     if (!server->xdg_shell) {

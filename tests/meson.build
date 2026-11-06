@@ -186,6 +186,47 @@ if get_option('test').enabled()
          timeout: 120)
   endif
 
+  # treeland-foreign-toplevel-manager-v3：窗口列表、handle 请求回灌、dock
+  # preview 的校验路径。探针要建一个真 xdg 窗口（窗口列表里得有窗口），
+  # 所以除仓库内 XML 外还要系统 wayland-protocols 的 xdg-shell；缺依赖就
+  # 不注册，免得把构建搞挂。
+  ftl_xml = meson.project_source_root() / 'protocols' / 'treeland' / 'treeland-foreign-toplevel-manager-unstable-v3.xml'
+  ftl_xdg_xml = wp_datadir / 'stable' / 'xdg-shell' / 'xdg-shell.xml'
+  if wayland_client_dep.found() and wp_dep.found() and wayland_scanner.found() and fs.exists(ftl_xml) and fs.exists(ftl_xdg_xml)
+    ftl_probe_srcs = [
+      'smoke/ftl_probe.c',
+      custom_target('ftl-manager-client-header',
+        input: ftl_xml,
+        output: 'treeland-foreign-toplevel-manager-unstable-v3-client-protocol.h',
+        command: [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@']),
+      custom_target('ftl-manager-client-code',
+        input: ftl_xml,
+        output: 'treeland-foreign-toplevel-manager-unstable-v3-protocol.c',
+        command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@']),
+      # 前缀与 deco_probe 的 xdg-shell 目标错开：同一个 build 目录里
+      # custom_target 的输出名不能重复。
+      custom_target('ftl-xdg-shell-client-header',
+        input: ftl_xdg_xml,
+        output: 'ftl-xdg-shell-client-protocol.h',
+        command: [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@']),
+      custom_target('ftl-xdg-shell-client-code',
+        input: ftl_xdg_xml,
+        output: 'ftl-xdg-shell-protocol.c',
+        command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@']),
+    ]
+
+    ftl_probe = executable('ftl_probe', ftl_probe_srcs,
+                           dependencies: [wayland_client_dep])
+    test('smoke-foreign-toplevel',
+         find_program('sh'),
+         args: [meson.current_source_dir() / 'smoke' / 'run_ftl_smoke.sh',
+                woodland_bin.full_path(),
+                ftl_probe.full_path(),
+                wctl_bin.full_path()],
+         is_parallel: false,
+         timeout: 150)
+  endif
+
   # output-management 的事件顺序回归（apply 的 succeeded 必须先于新一轮
   # configuration + done）。协议 xml 属于 wlr-protocols（不在
   # wayland-protocols 里），只认系统安装位置：wrap 内的 wlroots 属于嵌套

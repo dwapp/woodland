@@ -151,6 +151,17 @@ test_appearance = executable('test_appearance', 'test_appearance.c',
               session_lock_lib, ime_lib, capture_lib])
 test('appearance', test_appearance)
 
+# treeland-foreign-toplevel-manager-v3：state 数组编码（纯函数）。
+# 链接列表跟 test_compositor_action 一样长——protocol_lib 里的族文件互相引用
+# shell 的窗口状态机。
+test_foreign_toplevel = executable('test_foreign_toplevel', 'test_foreign_toplevel.c',
+  dependencies: [scene_deps, wayland_server],
+  include_directories: woodland_inc,
+  link_with: [protocol_lib, workspace_lib, trace_lib, util_lib, shell_lib,
+              output_lib, cursor_lib, layer_lib, ssd_lib, effect_lib, seat_lib,
+              session_lock_lib, ime_lib, capture_lib])
+test('foreign_toplevel', test_foreign_toplevel)
+
 # treeland-shortcut-manager-v3：PortableText 解析 / 有效性 / 匹配 / 动作分档。
 # 纯逻辑，但 shortcut.c.o 会拉入窗口与工作区动作，链接列表跟
 # test_compositor_action 一样长；xkbcommon 只被本测试直接用到。

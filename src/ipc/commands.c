@@ -100,12 +100,20 @@ static const struct ipc_field_doc get_tree_fields[] = {
      "request_count, applied_count, recorded_count, invalid_count, "
      "last_request (str|null), last_outcome (str: none|applied|clamped|"
      "recorded|invalid)"},
+    {"toplevel_manager", "obj",
+     "treeland-foreign-toplevel-manager-v3: available (bool), bindings (int), "
+     "toplevels (int: mapped windows tracked), contexts (int: dock preview "
+     "contexts), request_count (int), last_request (str|null), "
+     "last_outcome (str|null), dock_request_count (int), "
+     "last_dock_request (str|null), dock_preview (str: always \"recorded\", "
+     "the popover itself is not rendered)"},
     {"focus", "obj", "same fields as get_focus"},
     {"views", "obj[]",
      "per view: id, kind, z, title, app_id, tag, workspace, "
      "output, mapped, placed, minimized, maximized, "
      "fullscreen, override_redirect, csd, focused, "
      "activated, focusable, scene_visible, parent, "
+     "foreign_toplevel{tracked,identifier,handles,icon_geometry}, "
      "outer[x,y,w,h], content[x,y,w,h], "
      "ssd{present,active,margins}, "
      "deco{managed,titlebar,border_width,border_rgba,"
@@ -370,6 +378,14 @@ static void append_view_details(struct woodland_server *server, struct woodland_
                            view->scene_tree && view->scene_tree->node.enabled);
     obj_view_id(&obj, "parent", view->parent);
 
+    /*
+     * treeland-foreign-toplevel-manager-v3 眼里的这个窗口：identifier 是
+     * 客户端用来指代窗口的稳定值，handles 是"有几个客户端各拿了一份"。
+     * 协议层没建起来时这里只有 {"tracked": false}。
+     */
+    woodland_json_obj_key(&obj, "foreign_toplevel");
+    woodland_protocol_toplevel_view_status(view, out);
+
     struct wlr_box outer = {0};
     woodland_view_outer_box(view, &outer);
     obj_box(&obj, "outer", &outer);
@@ -525,6 +541,9 @@ static void ipc_get_tree(struct woodland_server *server, struct woodland_json *o
     /* 用户级外观：既是最新值，也是"哪几条只记录不渲染"的唯一可查处 */
     woodland_json_obj_key(&obj, "appearance");
     woodland_protocol_appearance_status(server, out);
+
+    woodland_json_obj_key(&obj, "toplevel_manager");
+    woodland_protocol_toplevel_status(server, out);
 
     woodland_json_obj_key(&obj, "focus");
     struct woodland_json_obj focus_obj;

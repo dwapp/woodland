@@ -126,6 +126,7 @@ void woodland_view_set_maximized(struct woodland_view *view, bool maximized)
         wlr_foreign_toplevel_handle_v1_set_fullscreen(view->toplevel_handle, view->fullscreen);
     }
     woodland_view_update_outputs(view);
+    woodland_signal_emit(&view->server->view_changed, view);
 }
 
 void woodland_view_set_fullscreen(struct woodland_view *view, bool fullscreen,
@@ -167,6 +168,7 @@ void woodland_view_set_fullscreen(struct woodland_view *view, bool fullscreen,
         wlr_foreign_toplevel_handle_v1_set_maximized(view->toplevel_handle, view->maximized);
     }
     woodland_view_update_outputs(view);
+    woodland_signal_emit(&view->server->view_changed, view);
 }
 
 void woodland_view_set_minimized(struct woodland_view *view, bool minimized)
@@ -187,6 +189,7 @@ void woodland_view_set_minimized(struct woodland_view *view, bool minimized)
     if (view->toplevel_handle) {
         wlr_foreign_toplevel_handle_v1_set_minimized(view->toplevel_handle, minimized);
     }
+    woodland_signal_emit(&view->server->view_changed, view);
 }
 
 static void xdg_toplevel_request_maximize(struct wl_listener *listener, void *data)
@@ -252,6 +255,7 @@ void woodland_view_set_title(struct woodland_view *view, const char *title)
     if (view->ssd) {
         woodland_ssd_update(view);
     }
+    woodland_signal_emit(&view->server->view_changed, view);
 }
 
 void woodland_view_set_tag(struct woodland_view *view, const char *tag)
@@ -279,6 +283,7 @@ void woodland_view_set_app_id(struct woodland_view *view, const char *app_id)
     if (view->ssd) {
         woodland_ssd_update(view);
     }
+    woodland_signal_emit(&view->server->view_changed, view);
 }
 
 void woodland_view_set_parent(struct woodland_view *view, struct woodland_view *parent)
@@ -290,6 +295,7 @@ void woodland_view_set_parent(struct woodland_view *view, struct woodland_view *
             (parent && parent->toplevel_handle) ? parent->toplevel_handle : NULL;
         wlr_foreign_toplevel_handle_v1_set_parent(view->toplevel_handle, parent_handle);
     }
+    woodland_signal_emit(&view->server->view_changed, view);
 }
 
 static void xdg_toplevel_set_title(struct wl_listener *listener, void *data)
@@ -409,6 +415,14 @@ void woodland_view_init_handles(struct woodland_view *view)
 
 void woodland_view_update_outputs(struct woodland_view *view)
 {
+    /*
+     * 先广播"窗口状态变了"：所属输出是 foreign-toplevel 的属性之一，而这里
+     * 是它唯一会变的地方。放在最前面，下面的早退路径（没有 toplevel 句柄、
+     * 没有布局）也不会漏掉通知——协议层自己会重新算它需要的那份。
+     */
+    if (view && view->server) {
+        woodland_signal_emit(&view->server->view_changed, view);
+    }
     if (!view || !view->server || !view->toplevel_handle) {
         return;
     }
@@ -418,39 +432,40 @@ void woodland_view_update_outputs(struct woodland_view *view)
         return;
     }
 
-    struct wlr_box view_box = {0};
-    if (view->mapped) {
-        woodland_view_outer_box(view, &view_box);
-    }
-
-    struct woodland_output *primary_wo = NULL;
-    if (view->mapped && (view_box.width <= 0 || view_box.height <= 0)) {
-        primary_wo = woodland_output_for_view(view);
-    }
-
     struct woodland_output *wo;
     wl_list_for_each(wo, &server->outputs, link)
     {
         if (!wo->wlr_output) {
             continue;
         }
-
-        bool on_output = false;
-        if (view->mapped) {
-            if (view_box.width > 0 && view_box.height > 0) {
-                on_output =
-                    wlr_output_layout_intersects(server->output_layout, wo->wlr_output, &view_box);
-            } else if (wo == primary_wo) {
-                on_output = true;
-            }
-        }
-
-        if (on_output) {
+        if (woodland_view_on_output(view, wo->wlr_output)) {
             wlr_foreign_toplevel_handle_v1_output_enter(view->toplevel_handle, wo->wlr_output);
         } else {
             wlr_foreign_toplevel_handle_v1_output_leave(view->toplevel_handle, wo->wlr_output);
         }
     }
+}
+
+bool woodland_view_on_output(struct woodland_view *view, struct wlr_output *output)
+{
+    if (!view || !view->server || !output) {
+        return false;
+    }
+    /* 没 map 的窗口不属于任何输出：它的位置只是"下次摆在哪"的草稿 */
+    if (!view->mapped) {
+        return false;
+    }
+    struct wlr_box box = {0};
+    woodland_view_outer_box(view, &box);
+    if (box.width > 0 && box.height > 0) {
+        return view->server->output_layout &&
+               wlr_output_layout_intersects(view->server->output_layout, output, &box);
+    }
+    /* 外框还没算出来（刚 map、客户端还没提交内容）：退到"窗口所属输出"。
+     * 不这么做会得到"这个窗口哪个输出都不在"的短暂真空，Dock 那一侧的
+     * output_enter 就永远补不上了。 */
+    struct woodland_output *wo = woodland_output_for_view(view);
+    return wo && wo->wlr_output == output;
 }
 
 /* ==================== 监听器注册 ==================== */
