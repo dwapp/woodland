@@ -33,6 +33,7 @@ meson test -C build --print-errorlogs  # 跑全部测试
 - 特性开关经 `configure_file` 生成 `build/config.h`，用 `WOODLAND_HAVE_*` 宏。
 - 冒烟测试用 headless 后端：`tests/smoke/run_headless.sh` 内部以 `WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1` 后台启动 + `kill -TERM` + 等退出码 0。脚本里残留的 `WLR_RENDERER=pixman` 只在 `-Deffects=disabled` 构建生效——启用 effects 时 `fx_renderer_create()` 不读这个变量，按 `WLR_RENDERER_FORCE_SOFTWARE` / `WLR_RENDER_DRM_DEVICE` 找渲染节点。ASan 验证用 `meson setup build-asan -Db_sanitize=address,undefined -Dtest=enabled`。
 - **冒烟脚本一律先 `. tests/smoke/lib.sh` 再 `smoke_init <名字>`。** 失败时它把现场落到 `build/meson-logs/smoke/<名字>/`：`compositor.log`、`meta.txt`（参数 / socket / 退出码），有 `WCTL` 和 `SOCK` 时还会抓 `get_tree` / `get_focus` / `self_check` / `get_trace` / `dump_scene` 的 JSON 和一张 `screenshot.png`。脚本自己的收尾写成 `smoke_cleanup()`（dump 之后才调用），断言失败用 `smoke_fail "..."`。**不要再用 `cat 日志; exit 1`**——那正是"只有一行结论、没有现场"的老写法。
+- **自写的 Wayland 探针要 roundtrip 两次，收事件要走 prepare_read。** 第一次 roundtrip 只拿到 global 列表：registry 回调里发的 `bind` 被排进出站缓冲，但同一批事件里那个 sync 回调已经把 roundtrip 的 `done` 置上了，dispatch 循环立刻退出，缓冲里剩下的 `bind` 没人 flush——合成器根本没看见 bind，也就一条事件都不会推。第二次 roundtrip 开头那次 flush 才把 bind 发出去。同理，收广播不能只调 `wl_display_dispatch_pending()`（它只分发已进内存队列的事件，socket 不读）：要 `wl_display_prepare_read()` → `poll()` → `wl_display_read_events()` → `wl_display_dispatch_pending()` 这套。`tests/smoke/appearance_probe.c` 是现成样例。
 - **CI 跑在 `archlinux:base-devel`，不要换回 `debian:stable`。** wlroots 0.20 要 wayland >= 1.24、libdrm >= 2.4.129、xkbcommon >= 1.8、pixman >= 0.43，bookworm 一个都不满足，meson 会退到 wrap 里逐个编 fallback，链条断在第一个 wayland 子项目（`Dependency "expat" not found`）。缺 expat 只是表象，补它只会把失败推到下一个依赖。
 - **顶层 `meson.build` 里给 `wlroots` 包的那层 `declare_dependency` 别删。** wlroots 作为子项目构建时，`wayland-scanner` 生成的协议头落在 `build/subprojects/wlroots/protocol/`，而它自己只导出 `include/`，于是 `wlr/types/wlr_layer_shell_v1.h` 里 `#include "wlr-layer-shell-unstable-v1-protocol.h"` 直接编译失败。系统装过 wlroots 的机器上 `/usr/include` 有这个头，问题会被掩盖——**本地能编不代表能编**。
 
@@ -74,7 +75,7 @@ wctl --help
             {"seq":3,"ms":31,"obj":1,"what":"focus","detail":"prev=0 raise=1"}]}
 ```
 
-- `what` 是**稳定标签**（脚本会 grep），权威清单在 `include/trace.h`：`map` / `unmap` / `destroy` / `focus` / `focus_none` / `layer_focus` / `place` / `workspace` / `output_add` / `output_remove` / `cfg_apply` / `deco` / `bg_effect` / `action` / `shortcut`。加新标签先改 trace.h 的清单，再发第一条轨迹。
+- `what` 是**稳定标签**（脚本会 grep），权威清单在 `include/trace.h`：`map` / `unmap` / `destroy` / `focus` / `focus_none` / `layer_focus` / `place` / `workspace` / `output_add` / `output_remove` / `cfg_apply` / `deco` / `bg_effect` / `action` / `shortcut` / `appearance`。加新标签先改 trace.h 的清单，再发第一条轨迹。
 - `detail` 只写**决策依据**（走了哪个分支、策略名、抑制窗口），不要抄 `get_tree` 已有的数值。
 - 关闭时零分配零格式化；打开后也不分配（一次 calloc）。**它只依赖 `util/json`，不许反向依赖任何业务模块**——否则会成为依赖环的入口。
 - 环的语义：`seq` 全局单调，`total` 是累计条数，`dropped = total - count` 就是被覆盖掉的条数。第一个 entry 的 `seq` 一定等于 `dropped`。
@@ -199,3 +200,31 @@ libwayland 的 errno，协议错误恒为 EPROTO=71）。见 `tests/smoke/deco_p
   `woodland_protocol_shortcuts_key()`；指针 button/wheel 走
   `server->shortcut_pointer_hook` 这个跨层钩子（shell/cursor.c 不反向链接
   `protocol_lib`）。状态在 `wctl get_tree` 的 `shortcut_manager` 里。
+- **treeland-appearance-unstable-v1 / -manager-unstable-v1 已实现**
+  （`feature/treeland-appearance`）：观测端 bind 后立刻推 11 项当前值、变更时广播；
+  管理端 11 个 `set_*` 里 **9 条真生效、2 条只记录**（`set_monospace_font`、
+  `set_window_opacity`，woodland 没有等宽字体消费方、也没有逐窗口 alpha 路径），
+  档位表在 `include/protocol.h` 的 `woodland_appearance_settings[]`，
+  `wctl get_tree` 的 `recorded_only` 由它生成而不是另手写一份。
+  几条不成文的规矩：
+  ① **生效值写进 `server->config`，不落盘。** 协议请求是"会话内的用户级设置"，
+  `SIGHUP` 重载会把 config 整个换掉、值跟着回退，重载末尾由
+  `woodland_protocol_refresh_appearance()` 给所有观测端重播一遍全量值——别在
+  config 之外再存一份"协议设过的值"当事实源。
+  ② **深色方案不能盖掉用户手写的颜色。** `[decorations]` 里显式写过
+  titlebar/border 颜色时 `ssd.colors_specified` 为真，此时 `set_color_scheme`
+  只影响 `wlr_xcursor`/图标/强调色那一侧的默认值，不动 SSD 配色。
+  ③ **改字体走 `woodland_font_with(desc, family, size_pt, ...)`，不要"拆成
+  family+size 再拼"。** `Bold` 是 pango 的 weight 而不是 family 的一部分，
+  拆再拼会把字重丢掉；正确做法是在原描述串的 pango 对象上 `set_family` /
+  `set_size` 再 `to_string`。
+  ④ **换光标主题用 `woodland_cursor_apply_theme()`**（先建新 manager、成功再
+  销毁旧的，主题不可用时回落默认并写日志）。旧实现是先销毁再建，中途失败会让
+  `server->cursor->xcursor_manager` 变 NULL。
+  ⑤ 图标主题要真的影响渲染：`icon_find_path()` 在 pixmaps 之前查
+  `/usr/share/icons/<theme>` 等目录，缓存键含 theme，切换时清缓存并
+  `woodland_ssd_refresh_all()` 抹掉 `ssd->icon_key`。
+  回归：`tests/unit/test_appearance.c`（档位表自洽、clamp 边界、字体描述串），
+  `smoke-appearance`（11 条初始推送 / 广播 / clamp / 枚举外静默忽略 / 只记录 /
+  已映射窗口的 SSD 边距真跟着变）。状态在 `wctl get_tree` 的 `appearance` 里，
+  每条处置结果写 `appearance` 轨迹。
