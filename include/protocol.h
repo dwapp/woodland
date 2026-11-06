@@ -26,6 +26,7 @@ struct wlr_output;
  *   background_effect.c 背景模糊：ext-background-effect-v1
  *   wallpaper.c 壁纸：treeland-wallpaper-shell / -manager / -notifier
  *   compositor_action.c shell 动作：treeland-compositor-action（工作区切换）
+ *   appearance.c 用户级外观：treeland-appearance（观测）/ -manager（特权配置）
  *   shortcut.c 全局快捷键与一次性捕获：treeland-shortcut-manager-v3
  *   protocol.c 只管按序建立、逆序回收，以及下面这几个转发入口。
  *
@@ -37,6 +38,8 @@ struct wlr_output;
  *             drm-lease、relative-pointer、pointer-constraints、pointer-gestures、
  *             linux-drm-syncobj、xdg-activation、
  *             treeland-decoration 的边框/标题栏/圆角、
+ *             treeland-appearance（bind 即推送 + 变化广播，9 项真生效）、
+ *             treeland-appearance-manager 的 9 条 set_*（同上一一对应）、
  *             ext-background-effect（capability 随 [effects] 运行期变化）
  *             —— 客户端请求会真的影响合成器行为。
  *   委派实现：treeland-wallpaper-shell / -manager / -notifier
@@ -57,7 +60,9 @@ struct wlr_output;
  *             多用户 session 的延迟 bind 与真正的特权判定同样未做，
  *             取舍写在 shortcut.c 文件头。
  *   仅记录：  xdg-toplevel-tag（存下来、经 wctl 可见，但暂不参与窗口规则）；
- *             treeland-decoration 的阴影（要一层模糊 buffer，还没做）。
+ *             treeland-decoration 的阴影（要一层模糊 buffer，还没做）；
+ *             treeland-appearance-manager 的 monospace_font（没有等宽字体
+ *             消费方）与 window_opacity（要逐窗口 alpha，属单独一版）。
  *   暂不接线：security-context（无沙箱校验时声明"我是沙箱"反而是假安全）、
  *             tearing-control（要改 scene 的 commit 路径传 tearing 位，
  *             属单独一版）、content-type（scene 不消费）、
@@ -244,4 +249,53 @@ bool woodland_protocol_shortcuts_pointer(struct woodland_server *server);
 /** 把 shortcut 族的只读状态写成一个完整 JSON 对象，给 wctl get_tree 用。 */
 void woodland_protocol_shortcut_status(struct woodland_server *server,
                                        struct woodland_json *out);
+
+/* ==================== treeland-appearance / -manager ==================== */
+
+/*
+ * set_* 请求的处置分档。
+ *
+ * 表和实现放在一起（src/protocol/appearance.c），这里是它的公开视图：wctl 的
+ * recorded_only 列表和单元测试都从这张表生成，避免"改了一个请求的档位、
+ * 忘了同步文档/测试"。
+ */
+enum woodland_appearance_effect {
+    WOODLAND_APPEARANCE_APPLIED = 0, /* 有渲染消费方，客户端能看到变化 */
+    WOODLAND_APPEARANCE_RECORDED,    /* 只记录：woodland 还没有消费方 */
+};
+
+struct woodland_appearance_setting {
+    const char *request;  /* 协议请求名，如 "set_cursor_theme" */
+    enum woodland_appearance_effect effect;
+    const char *consumer; /* 谁消费它；RECORDED 时恒为 NULL */
+};
+
+/** 全部 set_* 的分档表（11 项）。count 出参可为 NULL。 */
+const struct woodland_appearance_setting *woodland_appearance_settings(size_t *count);
+
+/** 按请求名查分档；未知返回 NULL。 */
+const struct woodland_appearance_setting *woodland_appearance_setting_find(const char *request);
+
+/*
+ * 越界裁剪：协议要求把 0 / 超大值收到"合成器支持的范围"，而不是回一个错误
+ * （两张 XML 都没有错误枚举）。纯函数，单测直接调，不必起合成器。
+ */
+uint32_t woodland_appearance_clamp_cursor_size(uint32_t value);
+uint32_t woodland_appearance_clamp_titlebar_height(uint32_t value); /* 0 合法 = 隐藏 */
+uint32_t woodland_appearance_clamp_corner_radius(uint32_t value);
+uint32_t woodland_appearance_clamp_font_size(uint32_t value); /* points * 10 */
+
+/** 外观状态（观测者/管理者数量、当前值、最近一次处置）写进 get_tree。 */
+void woodland_protocol_appearance_status(struct woodland_server *server,
+                                         struct woodland_json *out);
+
+/**
+ * 配置热重载之后把当前外观全量重播给观测端。
+ *
+ * 重载会把协议写进 config 的运行期值重置回文件值，订阅 treeland-appearance
+ * 的客户端必须收到变化；否则控制中心显示的还是它刚设的深色，而合成器已经
+ * 回到文件里的浅色。
+ */
+void woodland_protocol_refresh_appearance(struct woodland_server *server);
+
 #endif

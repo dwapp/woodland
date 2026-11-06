@@ -2,6 +2,8 @@
 #include "icon.h"
 #include "config.h"
 #include "view.h"
+#include "woodland.h"
+#include "woodland_config.h"
 
 #include <cairo.h>
 #include <ctype.h>
@@ -270,7 +272,54 @@ static bool check_path_exists(const char *path, char **out)
     return false;
 }
 
-char *woodland_icon_find_path(const char *app_id)
+/*
+ * 在某个图标主题目录里找 target。
+ *
+ * 先找用户目录再找系统目录（~/.local/share/icons 优先，和 XDG_DATA_DIRS 的
+ * 语义一致）；主题名由 treeland-appearance-manager 设，空表示不指定。
+ */
+static bool find_in_theme(const char *theme, const char *target, char **out)
+{
+    if (!theme || !*theme) {
+        return false;
+    }
+    static const char *const subdirs[] = {
+        "scalable/apps", "48x48/apps", "32x32/apps", "24x24/apps", "16x16/apps",
+    };
+    char root[512];
+    char path[2048];
+    const char *home = getenv("HOME");
+    for (int pass = 0; pass < 3; pass++) {
+        if (pass == 0) {
+            if (!home || !*home) {
+                continue;
+            }
+            snprintf(root, sizeof(root), "%s/.local/share/icons/%s", home, theme);
+        } else if (pass == 1) {
+            snprintf(root, sizeof(root), "/usr/share/icons/%s", theme);
+        } else {
+            snprintf(root, sizeof(root), "/usr/local/share/icons/%s", theme);
+        }
+        for (size_t s = 0; s < sizeof(subdirs) / sizeof(subdirs[0]); s++) {
+            snprintf(path, sizeof(path), "%s/%s/%s.svg", root, subdirs[s], target);
+            if (check_path_exists(path, out)) {
+                return true;
+            }
+            snprintf(path, sizeof(path), "%s/%s/%s.png", root, subdirs[s], target);
+            if (check_path_exists(path, out)) {
+                return true;
+            }
+            snprintf(path, sizeof(path), "%s/%s/%s", root, subdirs[s], target);
+            if (check_path_exists(path, out)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+/* theme 为 NULL 时就是旧行为：只走 pixmaps + 内置主题表 */
+static char *icon_find_path(const char *app_id, const char *theme)
 {
     if (!app_id || !*app_id) {
         return NULL;
@@ -291,6 +340,12 @@ char *woodland_icon_find_path(const char *app_id)
 
     char *result = NULL;
     char path[1024];
+
+    /* 2.5 协议指定的图标主题：它排在通用主题表之前，这样 set_icon_theme
+     * 才真的改变图标，而不是"没找到时才有区别" */
+    if (find_in_theme(theme, target, &result)) {
+        goto done;
+    }
 
     /* 3. 在 /usr/share/pixmaps/ 查找 */
     snprintf(path, sizeof(path), "/usr/share/pixmaps/%s.svg", target);
@@ -332,6 +387,11 @@ char *woodland_icon_find_path(const char *app_id)
 done:
     free(desktop_icon);
     return result;
+}
+
+char *woodland_icon_find_path(const char *app_id)
+{
+    return icon_find_path(app_id, NULL);
 }
 
 /* ==================== 图像加载与渲染 ==================== */
@@ -399,6 +459,9 @@ static cairo_surface_t *load_image_surface(const char *filepath, int size, float
 struct icon_cache_entry {
     struct wl_list link;
     char *app_id;
+    /* 图标主题：同一个 app_id 在不同主题下是不同的图，缓存键必须带上它，
+     * 否则切主题后老窗口还拿着旧图标（看着像只对了一部分窗口生效） */
+    char *theme;
     int size;
     float scale;
     struct wlr_buffer *buffer;
@@ -410,6 +473,7 @@ static void free_cache_entry(struct icon_cache_entry *entry)
 {
     wl_list_remove(&entry->link);
     free(entry->app_id);
+    free(entry->theme);
     if (entry->buffer) {
         if (!entry->buffer->dropped) {
             wlr_buffer_drop(entry->buffer);
@@ -438,18 +502,26 @@ struct wlr_buffer *woodland_ssd_get_icon_buffer(struct woodland_view *view, int 
     if (!app_id) {
         app_id = "default";
     }
+    /* 图标主题来自 treeland-appearance-manager（写进 config）；没设过就是 NULL，
+     * 走内置主题表的老路径 */
+    const char *theme = (view->server && view->server->config)
+                            ? view->server->config->appearance.icon_theme
+                            : NULL;
 
     /* 1. 查找缓存 */
     struct icon_cache_entry *entry;
     wl_list_for_each(entry, &icon_cache, link)
     {
-        if (entry->size == size && entry->scale == scale && strcmp(entry->app_id, app_id) == 0) {
+        const char *entry_theme = entry->theme ? entry->theme : "";
+        const char *want_theme = theme ? theme : "";
+        if (entry->size == size && entry->scale == scale && strcmp(entry->app_id, app_id) == 0 &&
+            strcmp(entry_theme, want_theme) == 0) {
             return entry->buffer;
         }
     }
 
     /* 2. 检索文件路径并解码 */
-    char *icon_path = woodland_icon_find_path(app_id);
+    char *icon_path = icon_find_path(app_id, theme);
     cairo_surface_t *surf = NULL;
     if (icon_path) {
         surf = load_image_surface(icon_path, size, scale);
@@ -475,6 +547,7 @@ struct wlr_buffer *woodland_ssd_get_icon_buffer(struct woodland_view *view, int 
     struct icon_cache_entry *new_entry = calloc(1, sizeof(*new_entry));
     if (new_entry) {
         new_entry->app_id = strdup(app_id);
+        new_entry->theme = theme ? strdup(theme) : NULL;
         new_entry->size = size;
         new_entry->scale = scale;
         new_entry->buffer = wlr_buffer_lock(buf);

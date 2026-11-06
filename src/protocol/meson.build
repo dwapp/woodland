@@ -18,6 +18,8 @@ foreach p : [['treeland-decoration-unstable-v1', 'treeland-decoration'],
              ['treeland-wallpaper-shell-unstable-v1', 'treeland-wallpaper-shell'],
              ['treeland-wallpaper-manager-unstable-v1', 'treeland-wallpaper-manager'],
              ['treeland-compositor-action-unstable-v1', 'treeland-compositor-action'],
+             ['treeland-appearance-unstable-v1', 'treeland-appearance'],
+             ['treeland-appearance-manager-unstable-v1', 'treeland-appearance-manager'],
              ['treeland-shortcut-manager-unstable-v3', 'treeland-shortcut-manager']]
   proto_xml = treeland_xml_dir / (p[0] + '.xml')
   # 服务端只需要 header + 接口表：server-header 给实现用的函数声明，
@@ -49,6 +51,7 @@ protocol_lib = static_library('woodland-protocol',
   'wallpaper.c',
   'wallpaper_config.c',
   'compositor_action.c',
+  'appearance.c',
   'shortcut.c',
   proto_srcs,
   # '.'：生成的头文件落在 build/src/protocol/，就近取

@@ -89,6 +89,17 @@ static const struct ipc_field_doc get_tree_fields[] = {
      "capture_pending (bool), activation_count (int), last_action (int), "
      "last_outcome (str|null), last_activation (str|null), bindings (obj[]: "
      "name, kind: key|swipe|hold, key, flags, finger, direction, action)"},
+    {"appearance", "obj",
+     "treeland-appearance: available (bool), observer_count, manager_count, "
+     "cursor_theme (str), cursor_width/height (int), font (str), font_family, "
+     "font_size_pt10, monospace_font (str|null), icon_theme (str), accent "
+     "(int[3]), accent_set (bool), window_opacity_milli (int), "
+     "window_opacity_set (bool), color_scheme (str: light|dark), "
+     "color_scheme_set (bool), titlebar_height (int), corner_radius (int), "
+     "recorded_only (str[]: settings that are stored but not rendered), "
+     "request_count, applied_count, recorded_count, invalid_count, "
+     "last_request (str|null), last_outcome (str: none|applied|clamped|"
+     "recorded|invalid)"},
     {"focus", "obj", "same fields as get_focus"},
     {"views", "obj[]",
      "per view: id, kind, z, title, app_id, tag, workspace, "
@@ -510,6 +521,10 @@ static void ipc_get_tree(struct woodland_server *server, struct woodland_json *o
 
     woodland_json_obj_key(&obj, "shortcut_manager");
     woodland_protocol_shortcut_status(server, out);
+
+    /* 用户级外观：既是最新值，也是"哪几条只记录不渲染"的唯一可查处 */
+    woodland_json_obj_key(&obj, "appearance");
+    woodland_protocol_appearance_status(server, out);
 
     woodland_json_obj_key(&obj, "focus");
     struct woodland_json_obj focus_obj;

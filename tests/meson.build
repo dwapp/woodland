@@ -275,6 +275,34 @@ if get_option('test').enabled()
                   wctl_bin.full_path()],
            is_parallel: false,
            timeout: 90)
+
+      # treeland-appearance / -manager：bind 即推送、set_* 广播、越界 clamp、
+      # 枚举外值忽略、只记录项不假装生效；再借 deco_probe 的顶层窗口确认
+      # 标题栏高度真的改到了 SSD 边距上（不是只改了配置）。
+      appearance_probe_srcs = ['smoke/appearance_probe.c']
+      foreach p : [[meson.project_source_root() / 'protocols' / 'treeland' /
+                    'treeland-appearance-unstable-v1.xml', 'treeland-appearance-unstable-v1'],
+                   [meson.project_source_root() / 'protocols' / 'treeland' /
+                    'treeland-appearance-manager-unstable-v1.xml',
+                    'treeland-appearance-manager-unstable-v1']]
+        appearance_probe_srcs += custom_target(p[1] + '-client-header',
+          input: p[0], output: p[1] + '-client-protocol.h',
+          command: [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@'])
+        appearance_probe_srcs += custom_target(p[1] + '-client-code',
+          input: p[0], output: p[1] + '-protocol.c',
+          command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'])
+      endforeach
+      appearance_probe = executable('appearance_probe', appearance_probe_srcs,
+                                    dependencies: [wayland_client_dep])
+      test('smoke-appearance',
+           find_program('sh'),
+           args: [meson.current_source_dir() / 'smoke' / 'run_appearance_smoke.sh',
+                  woodland_bin.full_path(),
+                  appearance_probe.full_path(),
+                  wctl_bin.full_path(),
+                  deco_probe.full_path()],
+           is_parallel: false,
+           timeout: 90)
     endif
   endif
 endif

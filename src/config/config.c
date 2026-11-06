@@ -145,6 +145,7 @@ void woodland_config_destroy(struct woodland_config *config)
     free(config->keyboard.model);
     free(config->touchpad.accel_profile);
     free(config->cursor.theme);
+    free(config->appearance.icon_theme);
     free_output_rules(&config->output_rules);
     free(config);
 }
@@ -275,6 +276,11 @@ struct woodland_config *woodland_config_parse_string(const char *content, size_t
             toml_get_string(ssd, "active_border_color", NULL), cfg->ssd.active_border_color);
         cfg->ssd.inactive_border_color = parse_color(
             toml_get_string(ssd, "inactive_border_color", NULL), cfg->ssd.inactive_border_color);
+        /* "用户显式指定过颜色"：任意一个键出现就算。这决定深色方案能不能
+         * 盖掉颜色——没写过才是"默认"，写过就是"我要这个"。 */
+        cfg->ssd.colors_specified =
+            toml_get(ssd, "active_title_color") || toml_get(ssd, "inactive_title_color") ||
+            toml_get(ssd, "active_border_color") || toml_get(ssd, "inactive_border_color");
     }
 
     /* 3. [input.keyboard] 或 [keyboard] */
@@ -553,6 +559,20 @@ void woodland_config_dump_json(const struct woodland_config *config, struct wood
     woodland_json_obj_int(&fx, "corner_radius", config->effects.corner_radius);
     woodland_json_obj_bool(&fx, "shadow", config->effects.shadow);
     woodland_json_obj_close(&fx);
+
+    /*
+     * appearance：协议运行期写入的值。和文件里的键分开报，免得读的人以为
+     * 这些能写进 config.toml（它们不落盘，见 woodland_config.h 的注释）。
+     */
+    woodland_json_obj_key(&root, "appearance");
+    struct woodland_json_obj ap;
+    woodland_json_obj_open(&ap, out);
+    woodland_json_obj_bool(&ap, "color_scheme_set", config->appearance.color_scheme_set);
+    woodland_json_obj_str(&ap, "color_scheme", config->appearance.dark ? "dark" : "light");
+    woodland_json_obj_bool(&ap, "accent_set", config->appearance.accent_set);
+    woodland_json_obj_int(&ap, "accent_rgb", (long long)config->appearance.accent_rgb);
+    woodland_json_obj_str(&ap, "icon_theme", config->appearance.icon_theme);
+    woodland_json_obj_close(&ap);
 
     /* outputs */
     woodland_json_obj_key(&root, "outputs");

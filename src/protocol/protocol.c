@@ -17,6 +17,7 @@
  *   background_effect.c 背景模糊（ext-background-effect-v1）
  *   wallpaper.c  壁纸（treeland-wallpaper-shell / -manager / -notifier）
  *   compositor_action.c shell 动作（treeland-compositor-action-v1）
+ *   appearance.c  用户级外观（treeland-appearance / -manager：观测 + 特权配置）
  *   shortcut.c    全局快捷键与一次性捕获（treeland-shortcut-manager-v3）
  * 分层的原因不是"文件太大了"：这几块的状态机各不相干，混在一个文件里时
  * init 的失败回滚和 finish 的逆序拆除要横跨十几组监听器，漏一行就是悬挂
@@ -113,6 +114,13 @@ bool woodland_protocol_init(struct woodland_server *server) {
     if (!woodland_proto_shortcut_init(proto)) {
         return false;
     }
+    /*
+     * 外观族：光标/字体/图标/配色都在别的模块里消费，本族只做"设进去 + 广播"。
+     * 放在 shortcut 之后是因为它谁都不被依赖，位置只影响 finish 的对称顺序。
+     */
+    if (!woodland_proto_appearance_init(proto)) {
+        return false;
+    }
     if (!woodland_proto_drm_lease_init(proto)) {
         return false;
     }
@@ -140,6 +148,13 @@ void woodland_protocol_refresh_background_effect(struct woodland_server *server)
     }
 }
 
+void woodland_protocol_refresh_appearance(struct woodland_server *server)
+{
+    if (server && server->proto) {
+        woodland_proto_appearance_refresh(server->proto);
+    }
+}
+
 void woodland_protocol_finish(struct woodland_server *server)
 {
     struct woodland_proto *proto = server->proto;
@@ -152,6 +167,7 @@ void woodland_protocol_finish(struct woodland_server *server)
     woodland_proto_bg_effect_finish(proto);
     woodland_proto_decoration_finish(proto);
     woodland_proto_drm_lease_finish(proto);
+    woodland_proto_appearance_finish(proto);
     woodland_proto_shortcut_finish(proto);
     woodland_proto_compositor_action_finish(proto);
     woodland_proto_window_finish(proto);

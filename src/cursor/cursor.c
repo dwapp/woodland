@@ -4,6 +4,7 @@
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_xcursor_manager.h>
 #include <wlr/util/edges.h>
+#include <wlr/util/log.h>
 
 #include "cursor.h"
 #include "woodland.h"
@@ -71,6 +72,67 @@ void woodland_cursor_set(struct woodland_server *server, const char *name)
 {
     wlr_cursor_unset_image(server->cursor);
     wlr_cursor_set_xcursor(server->cursor, server->xcursor_manager, name);
+}
+
+/* 建一个 manager 并确保它至少能加载 1x 一套；失败时自己回收干净 */
+static struct wlr_xcursor_manager *manager_create(const char *theme, int size)
+{
+    struct wlr_xcursor_manager *mgr = wlr_xcursor_manager_create(theme, size);
+    if (!mgr) {
+        return NULL;
+    }
+    if (!wlr_xcursor_manager_load(mgr, 1)) {
+        wlr_xcursor_manager_destroy(mgr);
+        return NULL;
+    }
+    return mgr;
+}
+
+bool woodland_cursor_apply_theme(struct woodland_server *server, const char *theme, int size,
+                                 const char **effective)
+{
+    if (effective) {
+        *effective = NULL;
+    }
+    if (!server || !server->cursor) {
+        return false;
+    }
+    if (size <= 0) {
+        size = WOODLAND_CURSOR_DEFAULT_SIZE;
+    }
+    if (theme && !*theme) {
+        theme = NULL;
+    }
+
+    /*
+     * 先建新的、成了再拆旧的：直接 destroy 再 create 的话，主题名拼错
+     * （create 不校验主题是否存在，load 才会失败）就会把光标管理器弄成
+     * NULL，之后每一次 woodland_cursor_set 都是空指针解引用。
+     */
+    struct wlr_xcursor_manager *mgr = manager_create(theme, size);
+    const char *used = theme;
+    if (!mgr && theme) {
+        /* 协议原文：请求的主题没装上就退到默认主题，不是"什么都不做" */
+        wlr_log(WLR_INFO, "cursor: theme '%s' unavailable, falling back to default", theme);
+        mgr = manager_create(NULL, size);
+        used = NULL;
+    }
+    if (!mgr) {
+        wlr_log(WLR_ERROR, "cursor: cannot create xcursor manager (size=%d)", size);
+        return false;
+    }
+
+    if (server->xcursor_manager) {
+        wlr_xcursor_manager_destroy(server->xcursor_manager);
+    }
+    server->xcursor_manager = mgr;
+    /* 光标形状可能正停在 resize 上，重设成默认箭头由调用方决定；这里只
+     * 重设一次，保证新主题立刻可见 */
+    woodland_cursor_set(server, "default");
+    if (effective) {
+        *effective = used ? used : "default";
+    }
+    return true;
 }
 
 const char *woodland_cursor_resize_name(uint32_t edges)

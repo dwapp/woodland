@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 struct woodland_view;
+struct woodland_server;
 struct wlr_scene_tree;
 
 /* SSD 几何常量（对齐 labwc 默认主题，见 theme_builtin()） */
@@ -141,6 +142,18 @@ bool woodland_ssd_content_size(const struct woodland_view *view, int *width, int
 
 /** 释放 SSD 全局缓存与资源。 */
 void woodland_ssd_finish(void);
+
+/**
+ * 用户级外观变了：重排这个窗口并丢掉图标缓存（下次 update 重新取）。
+ *
+ * 与 woodland_ssd_deco_changed 的差别只在图标与字体：那两样有缓存键/缓存串，
+ * 不清就等于"改了没反应"。treeland-appearance-manager 的 set_font /
+ * set_icon_theme / set_titlebar_height / set_color_scheme 都走这里。
+ */
+void woodland_ssd_refresh(struct woodland_view *view);
+
+/** 对所有视图跑一遍 woodland_ssd_refresh（含未 map 的，它们只是空操作）。 */
+void woodland_ssd_refresh_all(struct woodland_server *server);
 
 /**
  * 标题栏当前是否可见（隐藏或者配置高度为 0 都算不可见）。

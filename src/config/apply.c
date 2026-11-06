@@ -76,35 +76,28 @@ static void apply_ssd_config(struct woodland_server *server,
             if (view->ssd) {
                 woodland_ssd_destroy(view);
             }
-        } else {
-            if (!view->ssd && !view->deco_csd && view->mapped) {
-                woodland_ssd_create(view);
-            } else if (view->ssd) {
-                woodland_ssd_update(view);
-            }
+            continue;
         }
+        if (!view->ssd && !view->deco_csd && view->mapped) {
+            /* 新建时直接读新配置，不需要再刷 */
+            woodland_ssd_create(view);
+            continue;
+        }
+        /* 已存在的 SSD：颜色/字体/标题栏高度/图标主题可能都变了，统一重排。
+         * 单靠 ssd_update() 不会重取字体与图标（它们有缓存键）。 */
+        woodland_ssd_refresh(view);
     }
 }
 
 static void apply_cursor_config(struct woodland_server *server,
-                                const struct woodland_config_cursor *cur_cfg,
-                                const struct woodland_config_cursor *old_cur_cfg)
+                                const struct woodland_config_cursor *cur_cfg)
 {
-    if (!server || !cur_cfg || !server->cursor || !server->xcursor_manager) {
+    if (!server || !cur_cfg || !server->cursor) {
         return;
     }
-    bool theme_changed = !old_cur_cfg || str_diff(cur_cfg->theme, old_cur_cfg->theme);
-
-    if (theme_changed && server->xcursor_manager) {
-        wlr_xcursor_manager_destroy(server->xcursor_manager);
-        server->xcursor_manager = wlr_xcursor_manager_create(cur_cfg->theme, cur_cfg->size);
-        if (server->xcursor_manager) {
-            wlr_xcursor_manager_load(server->xcursor_manager, 1);
-        }
-    } else if (server->xcursor_manager) {
-        wlr_xcursor_manager_load(server->xcursor_manager, cur_cfg->size);
-    }
-    woodland_cursor_set(server, "default");
+    /* 主题与尺寸一起交给 cursor 模块：它先建新的、成了再拆旧的，主题名拼错
+     * 也不会把管理器弄成 NULL（旧代码直接 destroy-then-create 有这个坑） */
+    woodland_cursor_apply_theme(server, cur_cfg->theme, cur_cfg->size, NULL);
 }
 
 void woodland_config_apply(struct woodland_server *server, struct woodland_config *new_config)
@@ -132,17 +125,25 @@ void woodland_config_apply(struct woodland_server *server, struct woodland_confi
         apply_keyboard_config(server, &new_config->keyboard);
     }
 
-    /* 3. ssd */
+    /* 3. ssd：几何（标题栏/边框/按钮）、颜色、字体，以及协议写进 config 的
+     *    配色方案/强调色——它们渲染在 SSD 上，所以归在同一次刷新里 */
     bool ssd_changed =
         !old_config || (new_config->ssd.enabled != old_config->ssd.enabled) ||
         (new_config->ssd.titlebar_height != old_config->ssd.titlebar_height) ||
         (new_config->ssd.border_width != old_config->ssd.border_width) ||
         (new_config->ssd.button_width != old_config->ssd.button_width) ||
         (new_config->ssd.resize_grab_width != old_config->ssd.resize_grab_width) ||
+        (new_config->ssd.colors_specified != old_config->ssd.colors_specified) ||
+        str_diff(new_config->ssd.font, old_config->ssd.font) ||
         (new_config->ssd.active_title_color != old_config->ssd.active_title_color) ||
         (new_config->ssd.inactive_title_color != old_config->ssd.inactive_title_color) ||
         (new_config->ssd.active_border_color != old_config->ssd.active_border_color) ||
-        (new_config->ssd.inactive_border_color != old_config->ssd.inactive_border_color);
+        (new_config->ssd.inactive_border_color != old_config->ssd.inactive_border_color) ||
+        (new_config->appearance.color_scheme_set != old_config->appearance.color_scheme_set) ||
+        (new_config->appearance.dark != old_config->appearance.dark) ||
+        (new_config->appearance.accent_set != old_config->appearance.accent_set) ||
+        (new_config->appearance.accent_rgb != old_config->appearance.accent_rgb) ||
+        str_diff(new_config->appearance.icon_theme, old_config->appearance.icon_theme);
 
     if (ssd_changed) {
         apply_ssd_config(server, &new_config->ssd);
@@ -153,7 +154,7 @@ void woodland_config_apply(struct woodland_server *server, struct woodland_confi
                        str_diff(new_config->cursor.theme, old_config->cursor.theme);
 
     if (cur_changed) {
-        apply_cursor_config(server, &new_config->cursor, old_config ? &old_config->cursor : NULL);
+        apply_cursor_config(server, &new_config->cursor);
     }
 
     /* 5. effects：圆角与模糊是运行期开关，改了要立刻重画 */
@@ -188,6 +189,16 @@ void woodland_config_apply(struct woodland_server *server, struct woodland_confi
         }
         woodland_protocol_refresh_background_effect(server);
     }
+
+    /*
+     * 9. 外观观测者补一次全量。
+     *
+     * 文件重载会把 treeland-appearance-manager 写进去的运行期值一起重置
+     * （文件是持久化来源，协议只改"此刻"），订阅了 treeland-appearance 的
+     * 客户端必须收到变化——否则控制中心那边显示的还是它刚才设的深色，
+     * 而合成器已经回到文件里的浅色。
+     */
+    woodland_protocol_refresh_appearance(server);
 }
 
 bool woodland_config_reload(struct woodland_server *server)
