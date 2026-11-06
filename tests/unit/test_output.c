@@ -77,6 +77,9 @@ int main(void) {
     assert(n_after_vr == 1);
     wlr_output_destroy(vr_out);
 
+    /* 撕裂判定：无焦点视图时不允许撕裂 */
+    struct woodland_output *test_o = wl_container_of(server.outputs.next, test_o, link);
+    assert(!woodland_output_get_tearing_allowance(test_o));
     /* 拔除：信号必须发出一次，且发出时该输出已不在链表里 */
     struct removed_probe probe = { .server = &server };
     probe.listener.notify = handle_removed;

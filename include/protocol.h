@@ -39,7 +39,7 @@ struct wlr_output;
  *             idle-notify、idle-inhibit、keyboard-shortcuts-inhibit、
  *             output-power-management、output-management、gamma-control、
  *             drm-lease、relative-pointer、pointer-constraints、pointer-gestures、
- *             linux-drm-syncobj、xdg-activation、
+ *             linux-drm-syncobj、tearing-control、xdg-activation、
  *             treeland-decoration 的边框/标题栏/圆角、
  *             treeland-appearance（bind 即推送 + 变化广播，9 项真生效）、
  *             treeland-appearance-manager 的 9 条 set_*（同上一一对应）、
@@ -75,9 +75,7 @@ struct wlr_output;
  *             treeland-foreign-toplevel-manager-v3 的 set_icon_geometry
  *             （最小化动画的提示，woodland 没有动画）。
  *   暂不接线：security-context（无沙箱校验时声明"我是沙箱"反而是假安全）、
- *             tearing-control（要改 scene 的 commit 路径传 tearing 位，
- *             属单独一版）、content-type（scene 不消费）、
- *             session-lock / xdg-foreign
+ *             content-type（scene 不消费）、session-lock / xdg-foreign
  *             （各自需要一套独立状态机，见里程碑文档）。
  */
 bool woodland_protocol_init(struct woodland_server *server);

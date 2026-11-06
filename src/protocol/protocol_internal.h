@@ -18,6 +18,25 @@ struct woodland_proto_compositor_action;
 struct woodland_proto_appearance;
 struct woodland_proto_shortcut;
 struct woodland_proto_toplevel;
+struct woodland_proto_tearing;
+struct woodland_tearing_controller;
+
+struct woodland_proto_tearing {
+    struct woodland_server *server;
+    struct wlr_tearing_control_manager_v1 *manager;
+    struct wl_listener new_object;
+    struct wl_listener view_mapped;
+    bool watching_views;
+    struct wl_list controllers; // struct woodland_tearing_controller.link
+};
+
+struct woodland_tearing_controller {
+    struct woodland_proto_tearing *tearing;
+    struct wlr_tearing_control_v1 *tearing_control;
+    struct wl_listener set_hint;
+    struct wl_listener destroy;
+    struct wl_list link;
+};
 struct wlr_keyboard;
 struct wlr_keyboard_key_event;
 struct wlr_output;
@@ -58,6 +77,7 @@ struct woodland_proto {
     struct woodland_proto_appearance *appearance; /* appearance.c */
     struct woodland_proto_shortcut *shortcut; /* shortcut.c */
     struct woodland_proto_toplevel *toplevel; /* foreign_toplevel.c */
+    struct woodland_proto_tearing *tearing;   /* tearing.c */
 };
 
 /* 空闲与抑制族（idle.c）：idle-notify / idle-inhibit / keyboard-shortcuts-inhibit */
@@ -135,5 +155,9 @@ bool woodland_proto_shortcut_pointer(struct woodland_proto *proto);
 /* 窗口列表族（foreign_toplevel.c）：treeland-foreign-toplevel-manager-v3 */
 bool woodland_proto_toplevel_init(struct woodland_proto *proto);
 void woodland_proto_toplevel_finish(struct woodland_proto *proto);
+
+/* 撕裂控制族（tearing.c）：wp_tearing_control_manager_v1 */
+bool woodland_proto_tearing_init(struct woodland_proto *proto);
+void woodland_proto_tearing_finish(struct woodland_proto *proto);
 
 #endif

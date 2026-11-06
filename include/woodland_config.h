@@ -20,6 +20,7 @@ struct woodland_config_general {
     uint32_t workspace_count;
     bool focus_follows_mouse;
     int32_t snap_distance;
+    bool allow_tearing;
 };
 
 struct woodland_config_decorations {
