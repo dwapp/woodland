@@ -61,6 +61,79 @@ void woodland_layer_arrange(struct woodland_server *server, struct woodland_outp
     }
 }
 
+void woodland_layer_update_top_layer_visibility(struct woodland_server *server)
+{
+    if (!server || !server->outputs.next) {
+        return;
+    }
+
+    uint32_t top = ZWLR_LAYER_SHELL_V1_LAYER_TOP;
+    struct woodland_output *output;
+
+    /* 先启用所有有效输出的 TOP layer */
+    wl_list_for_each(output, &server->outputs, link) {
+        if (!output->wlr_output || !output->wlr_output->enabled || !output->layer_tree[top]) {
+            continue;
+        }
+        wlr_scene_node_set_enabled(&output->layer_tree[top]->node, true);
+    }
+
+    if (!server->views.next) {
+        return;
+    }
+
+    /*
+     * 沿 Z 序链表从顶到底遍历（server->views 表头为最顶层）：
+     * 若遇到当前工作区的可见全屏窗口，且该输出在更上层未被其他窗口覆盖，
+     * 则将该输出对应的 TOP layer 隐藏（对齐 labwc desktop_update_top_layer_visibility）。
+     */
+    size_t num_outputs = wl_list_length(&server->outputs);
+    if (num_outputs == 0) {
+        return;
+    }
+
+    struct woodland_output **covered = calloc(num_outputs, sizeof(*covered));
+    size_t num_covered = 0;
+
+    struct woodland_view *view;
+    wl_list_for_each(view, &server->views, link) {
+        if (!view->mapped || view->minimized || view->override_redirect) {
+            continue;
+        }
+        if (server->active_workspace && view->workspace != server->active_workspace) {
+            continue;
+        }
+
+        wl_list_for_each(output, &server->outputs, link) {
+            if (!output->wlr_output || !output->wlr_output->enabled) {
+                continue;
+            }
+            if (!woodland_view_on_output(view, output->wlr_output)) {
+                continue;
+            }
+
+            bool already_covered = false;
+            for (size_t i = 0; i < num_covered; i++) {
+                if (covered[i] == output) {
+                    already_covered = true;
+                    break;
+                }
+            }
+
+            if (view->fullscreen && !already_covered) {
+                if (output->layer_tree[top]) {
+                    wlr_scene_node_set_enabled(&output->layer_tree[top]->node, false);
+                }
+            }
+
+            if (!already_covered && num_covered < num_outputs) {
+                covered[num_covered++] = output;
+            }
+        }
+    }
+    free(covered);
+}
+
 /* ==================== 焦点（任务 3 完整实现，本任务先提供供 commit 调用） ==================== */
 
 void woodland_layer_try_focus(struct woodland_server *server,

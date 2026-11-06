@@ -283,6 +283,7 @@ void woodland_view_unmap(struct woodland_view *view)
         wl_list_remove(&view->link);
         view->mapped = false;
         woodland_view_update_outputs(view);
+        woodland_layer_update_top_layer_visibility(view->server);
     }
     /* unmap 时销毁 SSD（避免残留空装饰）；remap 时按 deco_csd 重建 */
     if (view->ssd) {
@@ -318,6 +319,7 @@ void woodland_view_destroy(struct woodland_view *view)
     if (view->mapped) {
         wl_list_remove(&view->link);
         view->mapped = false;
+        woodland_layer_update_top_layer_visibility(view->server);
     }
     /* foreign-toplevel handle 与 listener */
     if (view->toplevel_handle) {

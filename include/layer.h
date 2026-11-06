@@ -50,4 +50,10 @@ struct wlr_layer_surface_v1 *woodland_layer_surface_at(
 struct woodland_layer_surface *woodland_layer_surface_from_wlr_surface(
     struct wlr_surface *surface);
 
+/**
+ * 根据当前工作区全屏窗口的遮挡情况动态更新 TOP layer 的可见性（对齐 labwc）。
+ * 当全屏窗口可见且上方没有其他窗口遮挡时，隐藏 TOP layer；否则恢复显示。
+ */
+void woodland_layer_update_top_layer_visibility(struct woodland_server *server);
+
 #endif
