@@ -4,7 +4,7 @@
 #
 # 这个脚本本身就是"AI 调试面"的用法示例：不再数像素，直接断言状态。
 #
-# 用法: sh run_ipc_smoke.sh <woodland 二进制> <wctl 二进制>
+# 用法: sh run_ipc_smoke.sh <woodland 二进制> <wctl 二进制> [客户端命令]
 set -eu
 
 # 公共壳：失败时把日志 + 状态快照 + 决策轨迹落到 meson-logs/smoke/ipc/
@@ -13,15 +13,18 @@ smoke_init ipc
 
 BIN="${1:-./build/src/woodland}"
 WCTL="${2:-./build/src/wctl/wctl}"
+CLIENT="${3:-weston-simple-shm}"
 [ -x "$BIN" ] || { echo "binary not found: $BIN" >&2; exit 125; }
 [ -x "$WCTL" ] || { echo "wctl not found: $WCTL" >&2; exit 125; }
 
-for tool in jq weston-simple-shm; do
-    command -v "$tool" >/dev/null 2>&1 || {
-        echo "$tool not found, skip ipc smoke" >&2
-        exit 77
-    }
-done
+command -v jq >/dev/null 2>&1 || {
+    echo "jq not found, skip ipc smoke" >&2
+    exit 77
+}
+if [ ! -x "$CLIENT" ] && ! command -v "$CLIENT" >/dev/null 2>&1; then
+    echo "$CLIENT not found, skip ipc smoke" >&2
+    exit 77
+fi
 
 unset WAYLAND_DISPLAY
 export XDG_RUNTIME_DIR="$(mktemp -d)"
@@ -44,7 +47,7 @@ smoke_cleanup() {
 }
 
 SMOKE_FLAGS="--self-check --trace"
-"$BIN" --self-check --trace -s "weston-simple-shm" >"$SMOKE_LOG" 2>&1 &
+"$BIN" --self-check --trace -s "$CLIENT" >"$SMOKE_LOG" 2>&1 &
 comp_pid=$!
 
 # 等调试 socket 出现
