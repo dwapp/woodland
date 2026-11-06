@@ -103,7 +103,8 @@ struct woodland_proto_appearance {
 
     /*
      * 协议设过的光标尺寸。config 只有单个 size（wlr_xcursor_manager 只吃一个），
-     * 但协议要求把 width/height 都报回去；宽高不等时按宽度取，另记一条 trace。
+     * 但协议要求把 width/height 都报回去；宽高不等时按宽度取 square（height 也
+     * 记成宽度），广播的也是这个实际生效值，另记一条 trace 说明降级。
      */
     int32_t cursor_width;
     int32_t cursor_height;
@@ -130,6 +131,9 @@ static const struct woodland_appearance_setting appearance_settings[] = {
     {"set_window_opacity", WOODLAND_APPEARANCE_RECORDED, NULL},
     {"set_color_scheme", WOODLAND_APPEARANCE_APPLIED, "ssd palette"},
     {"set_titlebar_height", WOODLAND_APPEARANCE_APPLIED, "ssd titlebar geometry"},
+    /* corner_radius 是条件性消费方：只有 -Deffects=enabled 且运行期
+     * [effects] enabled 时才真的画。没渲染后端时值照记、广播报 0、outcome
+     * 报 recorded（见 manager_set_corner_radius），不假装已经上屏。 */
     {"set_corner_radius", WOODLAND_APPEARANCE_APPLIED, "scenefx corner radius"},
 };
 
@@ -282,10 +286,25 @@ static uint32_t appearance_titlebar_height(struct woodland_proto_appearance *sta
     return woodland_appearance_clamp_titlebar_height((uint32_t)cfg->ssd.titlebar_height);
 }
 
+/*
+ * 圆角有没有真的渲染后端：编译期 -Deffects 决定 scenefx 是否参与链接，
+ * 运行期 [effects] enabled 决定画不画，两层都开才会真的画。与 decoration
+ * 族的 rendered 列表同一口径——disabled 构建下如实当"只记录"处理。
+ */
+static bool appearance_corner_rendered(struct woodland_proto_appearance *state)
+{
+#if WOODLAND_HAVE_EFFECTS
+    return woodland_effect_server_enabled(state->server);
+#else
+    (void)state;
+    return false;
+#endif
+}
+
 static uint32_t appearance_corner_radius(struct woodland_proto_appearance *state)
 {
     struct woodland_config *cfg = appearance_config(state);
-    if (!cfg || !woodland_effect_server_enabled(state->server)) {
+    if (!cfg || !appearance_corner_rendered(state)) {
         return 0;
     }
     if (cfg->effects.corner_radius < 0) {
@@ -563,7 +582,7 @@ static void manager_set_cursor_size(struct wl_client *client, struct wl_resource
         return;
     }
     state->cursor_width = (int32_t)cw;
-    state->cursor_height = (int32_t)ch;
+    state->cursor_height = (int32_t)cw;
     struct woodland_config *cfg = appearance_config(state);
     if (cfg) {
         cfg->cursor.size = (int32_t)cw;
@@ -577,7 +596,9 @@ static void manager_set_cursor_size(struct wl_client *client, struct wl_resource
                         clamped ? APPEARANCE_OUTCOME_CLAMPED : APPEARANCE_OUTCOME_APPLIED,
                         clamped ? "clamped to supported range" : NULL);
     }
-    broadcast_cursor_size(state, cw, ch);
+    /* 广播实际生效值（square）：观测端拿到的不是它请求的那个，不能把被
+     * 降级的 height 原样报回去。 */
+    broadcast_cursor_size(state, cw, cw);
 }
 
 static void manager_set_font(struct wl_client *client, struct wl_resource *resource,
@@ -823,9 +844,17 @@ static void manager_set_corner_radius(struct wl_client *client, struct wl_resour
     {
         woodland_effect_update(view);
     }
-    appearance_note(state, "set_corner_radius",
-                    value != radius ? APPEARANCE_OUTCOME_CLAMPED : APPEARANCE_OUTCOME_APPLIED,
-                    value != radius ? "clamped to [0,1000]" : NULL);
+    /* 值照记、广播照发（没渲染后端时广播 0）；但 outcome 要如实：没有
+     * scenefx 的构建下圆角上不了屏，报 applied 会让控制中心以为已生效。 */
+    bool rendered = appearance_corner_rendered(state);
+    enum appearance_outcome outcome = rendered
+                                         ? (value != radius ? APPEARANCE_OUTCOME_CLAMPED
+                                                            : APPEARANCE_OUTCOME_APPLIED)
+                                         : APPEARANCE_OUTCOME_RECORDED;
+    const char *detail = !rendered
+                             ? "no render backend for corners"
+                             : (value != radius ? "clamped to [0,1000]" : NULL);
+    appearance_note(state, "set_corner_radius", outcome, detail);
     broadcast_corner_radius(state, appearance_corner_radius(state));
 }
 

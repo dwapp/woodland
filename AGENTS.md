@@ -224,6 +224,14 @@ libwayland 的 errno，协议错误恒为 EPROTO=71）。见 `tests/smoke/deco_p
   ⑤ 图标主题要真的影响渲染：`icon_find_path()` 在 pixmaps 之前查
   `/usr/share/icons/<theme>` 等目录，缓存键含 theme，切换时清缓存并
   `woodland_ssd_refresh_all()` 抹掉 `ssd->icon_key`。
+  ⑥ **`set_corner_radius` 是条件性生效**：只有 `-Deffects=enabled` 且运行期
+  `[effects] enabled` 时才真的画（scenefx 参与链接 + 运行期开关都开）。没渲染
+  后端时值照记、广播报 0、`last_outcome` 如实报 `recorded`（与 decoration 族的
+  `rendered` 列表同一口径），不假装已上屏。`smoke-appearance` 用 `get_tree` 的
+  顶层 `effects` 字段分叉断言两种构建。
+  ⑦ **非方形光标请求降级到 square**：`wlr_xcursor_manager` 尺寸是单值，
+  请求 `width != height` 时按宽度取、广播 `width,width`——观测端拿到的是实际
+  生效值，不是它请求的那个（见 `manager_set_cursor_size`）。
   回归：`tests/unit/test_appearance.c`（档位表自洽、clamp 边界、字体描述串），
   `smoke-appearance`（11 条初始推送 / 广播 / clamp / 枚举外静默忽略 / 只记录 /
   已映射窗口的 SSD 边距真跟着变）。状态在 `wctl get_tree` 的 `appearance` 里，
