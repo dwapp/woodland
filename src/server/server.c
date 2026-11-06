@@ -23,6 +23,7 @@
 #include <scenefx/render/fx_renderer/fx_renderer.h>
 #endif
 #include "cursor.h"
+#include "effect.h"
 #include "ime.h"
 #include "ipc.h"
 #include "layer.h"
@@ -191,17 +192,15 @@ bool woodland_server_init(struct woodland_server *server)
         wlr_log(WLR_ERROR, "failed to create scene");
         return false;
     }
-#if WOODLAND_HAVE_EFFECTS
-    /* 模糊参数是 scene 全局的：3 遍 downsample 够糊，半径再大只会糊成一片。
-     * 运行期关掉模糊（[effects] blur=false）只是不再建 blur 节点，参数留着。 */
-    wlr_scene_set_blur_data(server->scene, 3, 5, 0.0f, 1.0f, 1.0f, 1.0f);
-#endif
-
     if (!woodland_output_init(server)) {
         wlr_log(WLR_ERROR, "failed to init output");
         return false;
     }
 
+#if WOODLAND_HAVE_EFFECTS
+    /* 模糊参数由 [effects] 配置驱动，按需创建预模糊缓存（需在 output_init 之后） */
+    woodland_effect_apply_scene_config(server);
+#endif
     if (!woodland_cursor_init(server)) {
         wlr_log(WLR_ERROR, "failed to init cursor");
         return false;

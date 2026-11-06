@@ -53,7 +53,7 @@ struct woodland_ssd {
 #if WOODLAND_HAVE_EFFECTS
     /* 整框圆角描边：一个 rect + clipped_region 挖空内框，见 set_corner_radius */
     struct wlr_scene_rect *frame;
-    int corner_radius;                   /* 当前外框内半径，重排后要重算挖空区 */
+    int corners[4];                      /* 当前外框内半径（顺时针 TL/TR/BR/BL） */
 #else
     struct wlr_scene_rect *border[BORDER_COUNT];
 #endif
@@ -299,14 +299,19 @@ static void ssd_apply_frame_corners(struct woodland_ssd *ssd)
     }
     int b = ssd_border_width(ssd->view);
     int th = ssd_titlebar_height(ssd->view);
-    int r = ssd->corner_radius;
+    int tl = ssd->corners[0];
+    int tr = ssd->corners[1];
+    int br = ssd->corners[2];
+    int bl = ssd->corners[3];
 
-    wlr_scene_rect_set_corner_radii(ssd->frame, corner_radii_all(r + b));
-    wlr_scene_rect_set_corner_radii(ssd->titlebar, corner_radii_top(r));
+    wlr_scene_rect_set_corner_radii(
+        ssd->frame, corner_radii_new(tl > 0 ? tl + b : 0, tr > 0 ? tr + b : 0,
+                                     br > 0 ? br + b : 0, bl > 0 ? bl + b : 0));
+    wlr_scene_rect_set_corner_radii(ssd->titlebar, corner_radii_new(tl, tr, 0, 0));
 
     struct clipped_region clip = clipped_region_get_default();
     clip.area = (struct wlr_box){b, b, ssd->width, th + ssd->height};
-    clip.corners = corner_radii_all(r);
+    clip.corners = corner_radii_new(tl, tr, br, bl);
     wlr_scene_rect_set_clipped_region(ssd->frame, clip);
 }
 #else
@@ -760,8 +765,9 @@ void woodland_ssd_deco_changed(struct woodland_view *view)
 
 void woodland_ssd_set_active(struct woodland_view *view, bool active)
 {
-    struct woodland_ssd *ssd = view->ssd;
+    struct woodland_ssd *ssd = view ? view->ssd : NULL;
     if (!ssd) {
+        woodland_effect_update(view);
         return;
     }
     bool changed = (ssd->active != active);
@@ -781,6 +787,7 @@ void woodland_ssd_set_active(struct woodland_view *view, bool active)
     /* 激活态改变时，刷新标题栏排版及文本前景色 */
     if (changed) {
         ssd_layout(ssd);
+        woodland_effect_update(view);
     }
 }
 
@@ -910,19 +917,31 @@ bool woodland_ssd_titlebar_visible(const struct woodland_view *view)
     return ssd_titlebar_height(view) > 0;
 }
 
-void woodland_ssd_set_corner_radius(struct woodland_view *view, int radius)
+void woodland_ssd_set_corners(struct woodland_view *view, int top_left, int top_right,
+                              int bottom_right, int bottom_left)
 {
 #if WOODLAND_HAVE_EFFECTS
     struct woodland_ssd *ssd = view ? view->ssd : NULL;
     if (!ssd) {
         return;
     }
-    ssd->corner_radius = radius < 0 ? 0 : radius;
+    ssd->corners[0] = top_left < 0 ? 0 : top_left;
+    ssd->corners[1] = top_right < 0 ? 0 : top_right;
+    ssd->corners[2] = bottom_right < 0 ? 0 : bottom_right;
+    ssd->corners[3] = bottom_left < 0 ? 0 : bottom_left;
     ssd_apply_frame_corners(ssd);
 #else
     (void)view;
-    (void)radius;
+    (void)top_left;
+    (void)top_right;
+    (void)bottom_right;
+    (void)bottom_left;
 #endif
+}
+
+void woodland_ssd_set_corner_radius(struct woodland_view *view, int radius)
+{
+    woodland_ssd_set_corners(view, radius, radius, radius, radius);
 }
 
 /*

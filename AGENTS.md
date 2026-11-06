@@ -46,6 +46,8 @@ meson test -C build --print-errorlogs  # 跑全部测试
 3. **场景节点坐标是"相对父节点"的，算位置时只累计子节点的偏移。** `view->scene_tree` 的原点就是内容原点（SSD 的标题栏/边框在负坐标上），把 tree 自己的 `x/y` 也加进去等于把标题栏高度算两遍——blur 节点会整体下沉一个标题栏（27px）。
 4. **启用 effects 时 `server->renderer` 必须是 `fx_renderer_create()`。** scenefx 的 `wlr_scene_output_commit()` 把 render pass 强转成自己的 `fx_render_pass`，塞 wlroots 的 pixman/gles2 renderer 进去会在 `fx_get_render_pass` 里断言死。未启用 effects 构建时则走 `wlr_renderer_autocreate()` 直出 pixman/gles2。
 5. **别在 1px 细条上设圆角。** `corner_radii` 按 rect 自身尺寸裁剪，1px 宽/高的边框条会把半径 clamp 掉，角上不是没线就是留直角尖角。圆角描边在 effects 构建下用覆盖整个外框的 rect + `clipped_region` 挖空内框：外半径 `R+b`、内半径 `R`，见 `src/ssd/ssd.c:ssd_apply_frame_corners()`。
+6. **scenefx 0.5 的 blur 节点渲染不使用 clipped_region。** 局部模糊（ext-background-effect 非全屏区域）要把 blur 节点自身摆在 region 矩形上，且此时不能挂内容 buffer 作为 transparency mask（mask 会被拉伸挤压）；只有盖满全 surface 时才按全窗口尺寸摆节点并挂 mask。
+7. **预模糊缓存节点（optimized blur）置于 background 层与 bottom 层之间。** 每个输出一个 `wlr_scene_optimized_blur`，缓存壁纸/桌面底图的模糊；贴在壁纸上的 bottom 层（Dock）以及开启 `[effects] blur_optimized` 时的普通窗口只采样此缓存，大幅降低多窗口重采样开销。底层壁纸 commit 或可见性切换时需调用 `woodland_effect_mark_blur_dirty()`。
 
 ## 调试接口（wctl）
 

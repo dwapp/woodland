@@ -46,9 +46,13 @@ static void test_default_config(void)
     /* 特效是运行期开关：默认开着，用户想关才关 */
     assert(cfg->effects.enabled);
     assert(cfg->effects.blur);
+    assert(!cfg->effects.blur_optimized);
+    assert(cfg->effects.blur_passes == 3);
+    assert(cfg->effects.blur_radius == 5);
     assert(cfg->effects.corner_radius == 0);
     assert(!cfg->effects.shadow);
-
+    assert(cfg->effects.shadow_radius == 20);
+    assert(cfg->effects.shadow_offset_y == 4);
     assert(wl_list_empty(&cfg->output_rules));
 
     woodland_config_destroy(cfg);
@@ -96,6 +100,11 @@ static void test_parse_valid_toml(void)
                        "blur = true\n"
                        "corner_radius = 10\n"
                        "shadow = true\n"
+                       "blur_optimized = true\n"
+                       "blur_passes = 4\n"
+                       "blur_radius = 8\n"
+                       "shadow_radius = 25\n"
+                       "shadow_offset_y = 6\n"
                        "\n"
                        "[[output]]\n"
                        "name = \"eDP-1\"\n"
@@ -148,6 +157,11 @@ static void test_parse_valid_toml(void)
     assert(cfg->effects.blur);
     assert(cfg->effects.corner_radius == 10);
     assert(cfg->effects.shadow);
+    assert(cfg->effects.blur_optimized);
+    assert(cfg->effects.blur_passes == 4);
+    assert(cfg->effects.blur_radius == 8);
+    assert(cfg->effects.shadow_radius == 25);
+    assert(cfg->effects.shadow_offset_y == 6);
 
     /* 验证输出规则 */
     assert(wl_list_length(&cfg->output_rules) == 2);

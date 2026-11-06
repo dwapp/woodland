@@ -163,14 +163,13 @@ scenario bare border 0 0 0 0 0 titlebar 1
 expect '.views[0].ssd.margins == [0, 0, 0, 0]' "zero border + hidden titlebar means no decoration"
 stop_probe
 
-echo "== 圆角/阴影：圆角真的画，阴影只记录 =="
+echo "== 圆角/阴影：圆角与阴影均有渲染后端 =="
 scenario effect radius 12 shadow 40 0 10 0 0 0 102
 expect '.views[0].deco.corner_radius == 12' "corner radius must be recorded"
 expect '.views[0].deco.shadow_radius == 40' "shadow radius must be recorded"
 expect '.views[0].deco.shadow_offset == [0, 10]' "shadow offset must be recorded"
 if [ "$EFFECTS" = "true" ]; then
-    expect '.views[0].deco.rendered == ["corner_radius"]' "corner radius has a render backend"
-
+    expect '.views[0].deco.rendered == ["corner_radius", "shadow"]' "corner radius and shadow have render backends"
     # 圆角必须落在一整圈描边上：frame 外圆角 R+b，clipped_region 挖空内框且内圆角
     # R。旧实现是四条 1px 细条，半径会被细条尺寸 clamp 掉、角上只剩直角——钉住
     # 不会再退回去。R=12，b=1，内容 400x300，标题栏 26。
@@ -186,6 +185,9 @@ if [ "$EFFECTS" = "true" ]; then
     echo "$ROUND_SCENE" | jq -e '
         [.. | objects | select(.type == "rect" and (.w == 1 or .h == 1))] | length == 0
     ' >/dev/null || smoke_fail "no 1px border strips may remain outside the rounded frame"
+    echo "$ROUND_SCENE" | jq -e '
+        [.. | objects | select(.type == "shadow" and .blur_sigma == 40)] | length == 1
+    ' >/dev/null || smoke_fail "shadow node must be created with blur_sigma 40"
 else
     expect '.views[0].deco.rendered == []' "radius/shadow have no render backend"
 fi
@@ -231,12 +233,35 @@ if [ "$EFFECTS" = "true" ]; then
         [.entries[] | select(.what == "deco" and (.detail | contains("corner_radius"))
                              and (.detail | contains("effects disabled")))] | length == 0' >/dev/null \
         || smoke_fail "corner radius must not claim to be disabled"
+    "$WCTL" -s "$SOCK" get_trace | jq -e '
+        [.entries[] | select(.what == "deco" and (.detail | contains("shadow"))
+                             and (.detail | contains("no render backend")))] | length == 0' >/dev/null \
+        || smoke_fail "shadow must not claim no render backend when effects are enabled"
+else
+    "$WCTL" -s "$SOCK" get_trace | jq -e '
+        [.entries[] | select(.what == "deco" and (.detail | contains("shadow"))
+                             and (.detail | contains("no render backend")))] | length >= 1' >/dev/null \
+        || smoke_fail "trace must spell out that the shadow is not rendered"
 fi
-"$WCTL" -s "$SOCK" get_trace | jq -e '
-    [.entries[] | select(.what == "deco" and (.detail | contains("shadow"))
-                         and (.detail | contains("no render backend")))] | length >= 1' >/dev/null \
-    || smoke_fail "trace must spell out that the shadow is not rendered"
 "$WCTL" -s "$SOCK" self_check | jq -e '.ok == true' >/dev/null \
     || smoke_fail "self_check failed after decoration changes"
+echo "== 窗口阴影：热重载启用 shadow =="
+if [ "$EFFECTS" = "true" ]; then
+    mkdir -p "$XDG_CONFIG_HOME/woodland"
+    cat >"$XDG_CONFIG_HOME/woodland/config.toml" <<'EOF'
+[effects]
+enabled = true
+shadow = true
+shadow_radius = 20
+shadow_offset_y = 6
+EOF
+    "$WCTL" -s "$SOCK" reload_config >/dev/null || smoke_fail "reload_config failed"
+    scenario shadow_on radius 8
+    SHADOW_SCENE="$("$WCTL" -s "$SOCK" dump_scene)" || smoke_fail "dump_scene failed (shadow)"
+    echo "$SHADOW_SCENE" | jq -e '
+        [.. | objects | select(.type == "shadow" and .blur_sigma == 20)] | length == 1
+    ' >/dev/null || smoke_fail "shadow node must exist with blur_sigma 20 when shadow=true"
+    stop_probe
+fi
 
 echo "decoration smoke passed"

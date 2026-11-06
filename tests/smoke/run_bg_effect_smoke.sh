@@ -197,6 +197,14 @@ echo "== 局部区域：只糊指定的一块 =="
 scenario partial blur 50 40 200 100
 expect '.views[0].bg_effect.blur == true' "partial blur must be on"
 expect '.views[0].bg_effect.region == [50, 40, 200, 100]' "region must be recorded as-is"
+if [ "$EFFECTS" = "true" ]; then
+    PART_SCENE="$("$WCTL" -s "$SOCK" dump_scene)" || smoke_fail "dump_scene failed"
+    echo "$PART_SCENE" | jq -e '[.. | objects | select(.type == "blur")
+        | select(.w == 200 and .h == 100 and .x == 50 and .y == 40)] | length == 1' >/dev/null \
+        || smoke_fail "partial blur node must be positioned at 50,40 with size 200x100"
+    echo "$PART_SCENE" | jq -e '[.. | objects | select(.type == "optimized_blur")] | length >= 1' >/dev/null \
+        || smoke_fail "optimized blur node must exist"
+fi
 stop_probe
 
 echo "== 越界区域：裁到 surface 尺寸 =="

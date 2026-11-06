@@ -10,6 +10,7 @@
 #include <wlr/types/wlr_xdg_output_v1.h>
 #include <wlr/util/log.h>
 
+#include "effect.h"
 #include "layer.h"
 #include "output.h"
 #include "session_lock.h"
@@ -89,6 +90,7 @@ static void handle_request_state(struct wl_listener *listener, void *data)
     struct woodland_output *output = wl_container_of(listener, output, request_state);
     const struct wlr_output_event_request_state *event = data;
     wlr_output_commit_state(output->wlr_output, event->state);
+    woodland_effect_output_update(output);
     woodland_session_lock_update_layout(output->server);
     if (output->server->views.next) {
         struct woodland_view *view;
@@ -103,7 +105,8 @@ static void handle_destroy(struct wl_listener *listener, void *data)
 {
     struct woodland_output *output = wl_container_of(listener, output, destroy);
     struct woodland_server *server = output->server;
-    /* 先销毁各 layer surface（触发 node_destroy 链清理），再销毁 layer tree */
+    /* 先清理预模糊节点、各 layer surface 与 layer tree */
+    woodland_effect_output_destroy(output);
     for (int i = 0; i < 4; i++) {
         if (output->layer_tree[i]) {
             struct wlr_scene_node *node, *tmp;
@@ -256,6 +259,7 @@ static void handle_new_output(struct wl_listener *listener, void *data)
     woodland_trace_add("output_add", 0, "%s %dx%d heads=%d", wlr_output->name, wlr_output->width,
                        wlr_output->height, wl_list_length(&server->outputs));
     woodland_session_lock_add_output(server, output);
+    woodland_effect_output_update(output);
     if (server->views.next) {
         struct woodland_view *view;
         wl_list_for_each(view, &server->views, link)
@@ -266,6 +270,7 @@ static void handle_new_output(struct wl_listener *listener, void *data)
     return;
 
 err_trees:
+    woodland_effect_output_destroy(output);
     for (int i = 0; i < 4; i++) {
         if (output->layer_tree[i]) {
             wlr_scene_node_destroy(&output->layer_tree[i]->node);

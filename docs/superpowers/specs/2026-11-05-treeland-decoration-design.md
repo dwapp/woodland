@@ -61,7 +61,8 @@ struct woodland_ssd_overrides {
 | `titlebar_hidden` | `ssd_titlebar_height()` | 边距 top 归零、标题栏/按钮/图标/文字全隐、命中区域消失 |
 | `border_width` | `ssd_border_width()` | 边距、整框描边（外圆角 / 挖空区）、抓取宽度一起变 |
 | `border_rgba` | `ssd_get_border_color()` | 激活/非激活同色（协议只给一个颜色） |
-| `corner_radius` / `shadow_*` | 无（只经 wctl 暴露） | 不改画面 |
+| `corner_radius` | `src/effect/effect.c` | buffer 与 SSD frame 的圆角（`[effects] enabled` 时生效） |
+| `shadow_*` | `src/effect/effect.c` | 窗口底层 `wlr_scene_shadow` 节点（`[effects] enabled` 时生效） |
 
 ### 3.2 协议对象
 
@@ -89,7 +90,7 @@ woodland_proto_decoration
 
 | `[effects] enabled` | 场景库 | 圆角 | 阴影 |
 |---|---|---|---|
-| `true`（默认） | scenefx 0.5（自带 fx_renderer） | 真画 | 只记录 |
+| `true`（默认） | scenefx 0.5（自带 fx_renderer） | 真画 | 真画 |
 | `false` | 同一套 scenefx，只是不建节点 | 只记录 | 只记录 |
 
 - **圆角**由 `src/effect/effect.c` 落到 scenefx：
@@ -109,13 +110,14 @@ woodland_proto_decoration
   一个半径，用整框挖空就不需要单独处理。
   `wctl dump_scene` 的 rect 现在带 `corners` 与 `clip`，`smoke-decoration`
   断言 `corners == [R+b]*4`、`clip.corners == [R]*4`、且没有残留的 1px 细条。
-- **阴影**仍不画：它不只影响像素，还得算进摆放几何（否则相邻窗口互相压边），
-  会牵动 placement/snap/maximize 全链路。
-
+- **阴影**由 `src/effect/effect.c` 落到 scenefx 的 `wlr_scene_shadow`：
+  带窗口外框挖空区（`clipped_region`），半透明窗口底下不画阴影。纯视觉层，
+  不计入边距与摆放几何；全屏、最大化、贴边或自带 CSD 边距时禁用。
 "没画"这件事必须能看出来，所以开关两侧都不说谎：
 
-- `wctl get_tree` 的 `deco.rendered` 只列真正改变画面的属性。特效开着时是
-  `["border","titlebar","corner_radius"]`，关掉后没有 `corner_radius`；
+- `wctl get_tree` 的 `deco.rendered` 只列真正改变画面的属性。特效开着且客户端
+  设置了对应覆盖时列出 `["border","titlebar","corner_radius","shadow"]`，
+  关掉后或未启用特效构建时只剩 `["border","titlebar"]`；
 - `--trace` 的 `deco` 条目在总开关关掉时写 `recorded (effects disabled)`，
   开着不写这句（否则脚本会以为没生效）；
 - 协议里的 `set_*` 完整校验（上界 1000、颜色 [0,255]），与开关无关。

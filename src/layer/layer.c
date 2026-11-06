@@ -7,7 +7,7 @@
 #include "scene.h"
 #include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/util/log.h>
-
+#include "effect.h"
 #include "layer.h"
 #include "output.h"
 #include "session_lock.h"
@@ -155,6 +155,9 @@ static void handle_map(struct wl_listener *listener, void *data)
             woodland_layer_try_focus(layer->server, layer_surface);
         }
     }
+    if (layer_surface->current.layer == ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND) {
+        woodland_effect_mark_blur_dirty(layer->server);
+    }
     (void)data;
 }
 
@@ -166,6 +169,9 @@ static void handle_unmap(struct wl_listener *listener, void *data)
     if (layer_surface->output) {
         struct woodland_output *output = layer_surface->output->data;
         woodland_layer_arrange(layer->server, output);
+    }
+    if (layer_surface->current.layer == ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND) {
+        woodland_effect_mark_blur_dirty(layer->server);
     }
     (void)data;
 }
@@ -194,6 +200,12 @@ static void handle_surface_commit(struct wl_listener *listener, void *data)
     if (committed || layer->mapped != layer_surface->surface->mapped) {
         layer->mapped = layer_surface->surface->mapped;
         woodland_layer_arrange(output->server, output);
+    }
+    if (layer_surface->current.layer == ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND) {
+        woodland_effect_mark_blur_dirty(output->server);
+    }
+    if (layer->effect.blur) {
+        woodland_effect_layer_blur(layer, &layer->effect.blur_region);
     }
     (void)data;
 }

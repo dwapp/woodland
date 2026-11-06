@@ -170,5 +170,7 @@ bool woodland_ssd_titlebar_visible(const struct woodland_view *view);
  * 1px 细条拼方框时，半径会被细条尺寸 clamp 掉，角上只能留下直角。
  */
 void woodland_ssd_set_corner_radius(struct woodland_view *view, int radius);
+void woodland_ssd_set_corners(struct woodland_view *view, int top_left, int top_right,
+                              int bottom_right, int bottom_left);
 
 #endif /* WOODLAND_SSD_H */

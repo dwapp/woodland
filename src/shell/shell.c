@@ -384,10 +384,11 @@ static void xdg_toplevel_commit(struct wl_listener *listener, void *data)
             wlr_xdg_toplevel_decoration_v1_set_mode(view->deco, view_decoration_mode(view));
         }
     }
-    /* 内容尺寸/状态变化后同步 SSD 几何（标题栏/边框/按钮） */
+    /* 内容尺寸/状态变化后同步 SSD 几何；SSD 内部已更新特效，CSD 视图无 SSD 才在此补一次 */
     woodland_ssd_update(view);
-    /* CSD 视图没有 SSD，圆角/模糊只能在这里跟一次（SSD 视图是重复调用，幂等） */
-    woodland_effect_update(view);
+    if (!view->ssd) {
+        woodland_effect_update(view);
+    }
     (void)data;
 }
 

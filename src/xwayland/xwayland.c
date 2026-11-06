@@ -192,7 +192,9 @@ static void xwl_unmap(struct wl_listener *listener, void *data) {
 static void xwl_commit(struct wl_listener *listener, void *data) {
     struct woodland_view *view = wl_container_of(listener, view, commit);
     woodland_ssd_update(view);
-    woodland_effect_update(view);
+    if (!view->ssd) {
+        woodland_effect_update(view);
+    }
     (void)data;
 }
 

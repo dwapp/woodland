@@ -80,23 +80,41 @@ struct woodland_config_cursor {
 };
 
 /*
- * [effects]：圆角与模糊。
+ * [effects]：圆角、模糊与窗口阴影。
  *
- * 编译期由 -Deffects 决定 scenefx 是否参与链接，启用时这三个字段是运行期开关：
+ * 编译期由 -Deffects 决定 scenefx 是否参与链接，启用时以下字段是运行期配置：
  *
- *   enabled        总开关。false 时圆角按 0 算、不建 blur 节点、capability 报 0，
- *                  等价于"这台机器不画任何特效"，但协议状态照常记录。
- *   blur           模糊开关（默认 true）。只有在客户端经 ext-background-effect-v1
- *                  主动声明区域时才真糊——开关是"允许不允许"，不是"无条件糊"。
- *   corner_radius  唯一的圆角半径来源；窗口经 treeland-decoration 覆盖时以窗口为准。
- *
- * shadow 仍是预留（没有阴影渲染），别当生效开关。
+ *   enabled         总开关。false 时圆角按 0 算、不建 blur/shadow 节点、capability 报 0，
+ *                   等价于"这台机器不画任何特效"，但协议状态照常记录。
+ *   blur            模糊开关（默认 true）。只有在客户端经 ext-background-effect-v1
+ *                   主动声明区域时才真糊——开关是"允许不允许"，不是"无条件糊"。
+ *   blur_optimized  优化模糊开关（默认 false）。开启后顶层窗口与上层 layer 的模糊只采样
+ *                   每输出预渲染好的壁纸/背景层缓存，不再每帧重糊底下移动的窗口；
+ *                   bottom 层（如贴在壁纸上的 Dock）无论此开关如何都使用预渲染缓存。
+ *   blur_passes / blur_radius / blur_noise / blur_brightness / blur_contrast / blur_saturation
+ *                   scenefx 全局模糊参数（默认 3 / 5 / 0.0 / 1.0 / 1.0 / 1.0）。
+ *   corner_radius   唯一的圆角半径来源；窗口经 treeland-decoration 覆盖时以窗口为准。
+ *   shadow          全局默认窗口阴影开关（默认 false）；窗口经 treeland-decoration
+ *                   覆盖时以窗口为准。
+ *   shadow_radius / shadow_offset_x / shadow_offset_y / shadow_color
+ *                   默认阴影参数（0xAARRGGBB，与 ssd.*_color 同格式）。
  */
 struct woodland_config_effects {
     bool enabled;
     bool blur;
+    bool blur_optimized;
+    int32_t blur_passes;
+    int32_t blur_radius;
+    double blur_noise;
+    double blur_brightness;
+    double blur_contrast;
+    double blur_saturation;
     int32_t corner_radius;
     bool shadow;
+    int32_t shadow_radius;
+    int32_t shadow_offset_x;
+    int32_t shadow_offset_y;
+    uint32_t shadow_color;
 };
 
 /*
@@ -148,6 +166,11 @@ struct woodland_config *woodland_config_create_default(void);
  * 无论配置文件是否存在或损坏，恒返回有效的配置对象（绝不返回 NULL）。
  */
 struct woodland_config *woodland_config_load(const char *path_override);
+
+/**
+ * 按 XDG 规范查找配置文件实际路径（由调用方 free，找不到返回 NULL）。
+ */
+char *woodland_config_resolve_path(const char *path_override);
 
 /**
  * 解析内存中的 TOML 字符串内容（单测与外部注入用）。
