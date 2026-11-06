@@ -96,6 +96,7 @@ struct woodland_view {
     struct wlr_xdg_toplevel_decoration_v1 *deco; // zxdg decoration 对象
     struct wl_listener deco_destroy;             // zxdg_decoration 销毁监听器
     struct wl_listener deco_request_mode;        // zxdg_decoration 模式请求监听器
+    uint32_t tearing_hint;                       // wp_tearing_control_v1: 0 = vsync, 1 = async
     struct wlr_box saved_geometry;               // 退出 max/fullscreen 时恢复
     /*
      * 贴边铺满（snap to edge）：

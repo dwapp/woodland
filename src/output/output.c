@@ -16,11 +16,66 @@
 #include "trace.h"
 #include "view.h"
 #include "woodland.h"
+#include "woodland_config.h"
+
+bool woodland_output_get_tearing_allowance(struct woodland_output *output)
+{
+    if (!output || !output->server) {
+        return false;
+    }
+    if (woodland_session_lock_is_locked(output->server)) {
+        return false;
+    }
+    struct woodland_config *config = output->server->config;
+    if (config && !config->general.allow_tearing) {
+        return false;
+    }
+    struct woodland_view *view = output->server->focused_view;
+    if (!view) {
+        return false;
+    }
+    if (view->tearing_hint != 1) {
+        return false;
+    }
+    if (!woodland_view_on_output(view, output->wlr_output)) {
+        return false;
+    }
+    return true;
+}
+
+bool woodland_output_commit(struct woodland_output *output)
+{
+    if (!wlr_scene_output_needs_frame(output->scene_output)) {
+        return true;
+    }
+
+    struct wlr_output_state state;
+    wlr_output_state_init(&state);
+    if (!wlr_scene_output_build_state(output->scene_output, &state, NULL)) {
+        wlr_output_state_finish(&state);
+        return false;
+    }
+
+    if (woodland_output_get_tearing_allowance(output)) {
+        state.tearing_page_flip = true;
+        if (!wlr_output_test_state(output->wlr_output, &state)) {
+            state.tearing_page_flip = false;
+        }
+    }
+
+    bool ok = wlr_output_commit_state(output->wlr_output, &state);
+    if (!ok && state.tearing_page_flip) {
+        state.tearing_page_flip = false;
+        ok = wlr_output_commit_state(output->wlr_output, &state);
+    }
+    wlr_output_state_finish(&state);
+    return ok;
+}
 
 static void handle_frame(struct wl_listener *listener, void *data)
 {
     struct woodland_output *output = wl_container_of(listener, output, frame);
-    if (!wlr_scene_output_commit(output->scene_output, NULL)) {
+    if (!woodland_output_commit(output)) {
         return;
     }
     struct timespec now;

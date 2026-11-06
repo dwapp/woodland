@@ -107,6 +107,10 @@ bool woodland_protocol_init(struct woodland_server *server) {
     if (!woodland_proto_window_init(proto)) {
         return false;
     }
+    /* 撕裂控制族：wp_tearing_control_manager_v1 */
+    if (!woodland_proto_tearing_init(proto)) {
+        return false;
+    }
     /* 窗口列表：只依赖视图链表与 seat/output，不依赖别的族 */
     if (!woodland_proto_toplevel_init(proto)) {
         return false;
@@ -176,6 +180,7 @@ void woodland_protocol_finish(struct woodland_server *server)
     woodland_proto_shortcut_finish(proto);
     woodland_proto_compositor_action_finish(proto);
     woodland_proto_toplevel_finish(proto);
+    woodland_proto_tearing_finish(proto);
     woodland_proto_window_finish(proto);
     woodland_proto_input_finish(proto);
     woodland_proto_output_finish(proto);

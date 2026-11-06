@@ -25,4 +25,10 @@ struct woodland_output {
 bool woodland_output_init(struct woodland_server *server);
 void woodland_output_finish(struct woodland_server *server);
 
+/** 判定给定输出当前是否允许异步页面翻转（撕裂） */
+bool woodland_output_get_tearing_allowance(struct woodland_output *output);
+
+/** 渲染并提交输出（包含撕裂判定与回退） */
+bool woodland_output_commit(struct woodland_output *output);
+
 #endif

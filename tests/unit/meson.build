@@ -234,4 +234,23 @@ if wayland_client_dep.found() and wayland_scanner.found()
       link_with: [protocol_lib, output_lib, cursor_lib, shell_lib, seat_lib, ime_lib, session_lock_lib, workspace_lib, layer_lib, ssd_lib, effect_lib, capture_lib, util_lib])
     test('gamma_control', test_gamma_control)
   endif
+
+if wayland_client_dep.found() and wayland_scanner.found() and wp_datadir != ''
+  tearing_xml = wp_datadir / 'staging' / 'tearing-control' / 'tearing-control-v1.xml'
+  if fs.exists(tearing_xml)
+    test_tearing_srcs = ['test_tearing.c']
+    test_tearing_srcs += custom_target('tearing-control-v1-client-header',
+      output: 'tearing-control-v1-client-protocol.h',
+      command: [wayland_scanner, 'client-header', tearing_xml, '@OUTPUT@'])
+    test_tearing_srcs += custom_target('tearing-control-v1-client-code',
+      output: 'tearing-control-v1-protocol.c',
+      command: [wayland_scanner, 'private-code', tearing_xml, '@OUTPUT@'])
+
+    test_tearing = executable('test_tearing', test_tearing_srcs,
+      dependencies: [scene_deps, wayland_server, wayland_client_dep],
+      include_directories: [woodland_inc, include_directories('../../src/protocol')],
+      link_with: [protocol_lib, output_lib, cursor_lib, shell_lib, seat_lib, ime_lib, session_lock_lib, workspace_lib, layer_lib, ssd_lib, effect_lib, capture_lib, util_lib, config_lib, trace_lib])
+    test('tearing', test_tearing)
+  endif
+endif
 endif

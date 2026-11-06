@@ -67,6 +67,7 @@ void woodland_config_default_init(struct woodland_config *config)
     config->general.workspace_count = 10;
     config->general.focus_follows_mouse = false;
     config->general.snap_distance = WOODLAND_SNAP_DISTANCE;
+    config->general.allow_tearing = true;
 
     /* [decorations] */
     config->ssd.enabled = true;
@@ -241,6 +242,8 @@ struct woodland_config *woodland_config_parse_string(const char *content, size_t
         if (snap >= 0) {
             cfg->general.snap_distance = (int32_t)snap;
         }
+        cfg->general.allow_tearing =
+            toml_get_bool(gen, "allow_tearing", cfg->general.allow_tearing);
     }
 
     /* 2. [decorations] */
@@ -501,6 +504,7 @@ void woodland_config_dump_json(const struct woodland_config *config, struct wood
     woodland_json_obj_int(&gen, "workspace_count", config->general.workspace_count);
     woodland_json_obj_bool(&gen, "focus_follows_mouse", config->general.focus_follows_mouse);
     woodland_json_obj_int(&gen, "snap_distance", config->general.snap_distance);
+    woodland_json_obj_bool(&gen, "allow_tearing", config->general.allow_tearing);
     woodland_json_obj_close(&gen);
 
     /* decorations */

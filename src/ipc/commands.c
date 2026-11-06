@@ -77,7 +77,7 @@ static const struct ipc_field_doc get_tree_fields[] = {
     {"effects_blur", "bool", "[effects] enabled && blur: runtime blur capability"},
     {"outputs", "obj[]",
      "name, enabled, box[x,y,w,h], workarea, width, "
-     "height, scale (per-mille)"},
+     "height, scale (per-mille), tearing_allowed"},
     {"workspace", "obj", "current: str, all: str[]"},
     {"compositor_action", "obj",
      "treeland-compositor-action: available (bool), trigger_count (int), "
@@ -112,7 +112,7 @@ static const struct ipc_field_doc get_tree_fields[] = {
      "per view: id, kind, z, title, app_id, tag, workspace, "
      "output, mapped, placed, minimized, maximized, "
      "fullscreen, override_redirect, csd, focused, "
-     "activated, focusable, scene_visible, parent, "
+     "activated, focusable, scene_visible, tearing, parent, "
      "foreign_toplevel{tracked,identifier,handles,icon_geometry}, "
      "outer[x,y,w,h], content[x,y,w,h], "
      "ssd{present,active,margins}, "
@@ -321,6 +321,8 @@ static void append_outputs(struct woodland_server *server, struct woodland_json 
         woodland_json_obj_int(&obj, "width", wo->wlr_output->width);
         woodland_json_obj_int(&obj, "height", wo->wlr_output->height);
         woodland_json_obj_int(&obj, "scale", (int)(wo->wlr_output->scale * 1000.0f));
+        woodland_json_obj_bool(&obj, "tearing_allowed",
+                               woodland_output_get_tearing_allowance(wo));
         woodland_json_obj_close(&obj);
     }
     woodland_json_arr_close(&arr);
@@ -376,6 +378,7 @@ static void append_view_details(struct woodland_server *server, struct woodland_
     woodland_json_obj_bool(&obj, "focusable", woodland_view_focusable(view));
     woodland_json_obj_bool(&obj, "scene_visible",
                            view->scene_tree && view->scene_tree->node.enabled);
+    woodland_json_obj_bool(&obj, "tearing", view->tearing_hint == 1);
     obj_view_id(&obj, "parent", view->parent);
 
     /*

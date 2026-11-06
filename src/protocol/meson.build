@@ -55,6 +55,7 @@ protocol_lib = static_library('woodland-protocol',
   'appearance.c',
   'shortcut.c',
   'foreign_toplevel.c',
+  'tearing.c',
   proto_srcs,
   # '.'：生成的头文件落在 build/src/protocol/，就近取
   include_directories: [woodland_inc, include_directories('.')],
