@@ -439,10 +439,13 @@ static void server_new_xdg_toplevel(struct wl_listener *listener, void *data)
     view->id = ++server->next_view_id;
     view->type = WOODLAND_VIEW_XDG;
     view->xdg_toplevel = xdg_toplevel;
+    /* 默认 CSD：未协商 zxdg-decoration 的客户端（如大多数 GTK 应用）默认自己画标题栏，
+     * 避免合成器默认叠加 SSD 导致双标题栏；若客户端通过 zxdg_decoration 请求了
+     * SERVER_SIDE，会在 deco_apply_mode 中转为 SSD */
+    view->deco_csd = true;
     view->scene_tree = wlr_scene_xdg_surface_create(&server->scene->tree, xdg_toplevel->base);
     view->scene_tree->node.data = view;
     xdg_toplevel->base->data = view->scene_tree;
-
     /* 生命周期：出现/消失由本文件管 */
     woodland_listener_connect(&view->map, &xdg_toplevel->base->surface->events.map,
                               xdg_toplevel_map, "shell.map");
