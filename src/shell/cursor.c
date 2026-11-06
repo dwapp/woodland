@@ -234,6 +234,10 @@ static void server_cursor_button(struct wl_listener *listener, void *data)
 {
     struct woodland_server *server = wl_container_of(listener, server, cursor_button);
     struct wlr_pointer_button_event *event = data;
+    /* 一次性快捷键捕获：pointer button 以 interrupted 终止它，事件被消费 */
+    if (server->shortcut_pointer_hook && server->shortcut_pointer_hook(server)) {
+        return;
+    }
     if (woodland_session_lock_is_locked(server)) {
         double sx = 0, sy = 0;
         struct wlr_surface *surface = NULL;
@@ -341,6 +345,10 @@ static void server_cursor_axis(struct wl_listener *listener, void *data)
 {
     struct woodland_server *server = wl_container_of(listener, server, cursor_axis);
     struct wlr_pointer_axis_event *event = data;
+    /* 与 button 一样：wheel 也终止一次性捕获，且不转发给客户端 */
+    if (server->shortcut_pointer_hook && server->shortcut_pointer_hook(server)) {
+        return;
+    }
     if (woodland_session_lock_is_locked(server)) {
         double sx = 0, sy = 0;
         struct wlr_surface *surface = NULL;

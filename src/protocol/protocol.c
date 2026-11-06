@@ -17,6 +17,7 @@
  *   background_effect.c 背景模糊（ext-background-effect-v1）
  *   wallpaper.c  壁纸（treeland-wallpaper-shell / -manager / -notifier）
  *   compositor_action.c shell 动作（treeland-compositor-action-v1）
+ *   shortcut.c    全局快捷键与一次性捕获（treeland-shortcut-manager-v3）
  * 分层的原因不是"文件太大了"：这几块的状态机各不相干，混在一个文件里时
  * init 的失败回滚和 finish 的逆序拆除要横跨十几组监听器，漏一行就是悬挂
  * 指针；拆开之后每族的建立与回收在同一个文件里，加协议只动一处。
@@ -108,6 +109,10 @@ bool woodland_protocol_init(struct woodland_server *server) {
     if (!woodland_proto_compositor_action_init(proto)) {
         return false;
     }
+    /* 快捷键族要复用动作族的相邻工作区推导，也挂 seat 的键盘焦点信号 */
+    if (!woodland_proto_shortcut_init(proto)) {
+        return false;
+    }
     if (!woodland_proto_drm_lease_init(proto)) {
         return false;
     }
@@ -147,6 +152,7 @@ void woodland_protocol_finish(struct woodland_server *server)
     woodland_proto_bg_effect_finish(proto);
     woodland_proto_decoration_finish(proto);
     woodland_proto_drm_lease_finish(proto);
+    woodland_proto_shortcut_finish(proto);
     woodland_proto_compositor_action_finish(proto);
     woodland_proto_window_finish(proto);
     woodland_proto_input_finish(proto);
@@ -169,6 +175,22 @@ void woodland_protocol_notify_activity(struct woodland_server *server) {
 
 bool woodland_protocol_shortcuts_inhibited(struct woodland_server *server) {
     return woodland_proto_idle_shortcuts_inhibited(server->proto);
+}
+
+bool woodland_protocol_shortcuts_key(struct woodland_server *server,
+                                     struct wlr_keyboard *keyboard,
+                                     const struct wlr_keyboard_key_event *event) {
+    if (!server || !server->proto) {
+        return false;
+    }
+    return woodland_proto_shortcut_key(server->proto, keyboard, event);
+}
+
+bool woodland_protocol_shortcuts_pointer(struct woodland_server *server) {
+    if (!server || !server->proto) {
+        return false;
+    }
+    return woodland_proto_shortcut_pointer(server->proto);
 }
 
 void woodland_protocol_output_changed(struct woodland_server *server) {

@@ -26,6 +26,7 @@ struct wlr_output;
  *   background_effect.c 背景模糊：ext-background-effect-v1
  *   wallpaper.c 壁纸：treeland-wallpaper-shell / -manager / -notifier
  *   compositor_action.c shell 动作：treeland-compositor-action（工作区切换）
+ *   shortcut.c 全局快捷键与一次性捕获：treeland-shortcut-manager-v3
  *   protocol.c 只管按序建立、逆序回收，以及下面这几个转发入口。
  *
  * 按语义完备程度分档，档位决定了它是否真的改变行为：
@@ -47,6 +48,14 @@ struct wlr_output;
  *             置空但可观测（trace / wctl / 日志），不假装生效。bind 的
  *             "非特权客户端"判定只做到同 uid，woodland 没有 DDE 的
  *             privileged 服务，取舍写在 compositor_action.c 文件头。
+ *   treeland-shortcut-manager-v3：acquire 独占、bind/unbind 的四种
+ *             bind_failure、capture 的 busy/not_active/aborted/interrupted
+ *             与 activated 事件语义完整；动作 0..20、22..23、32..39 真接
+ *             窗口/工作区/贴边逻辑，21 与 24..31、40..45 置空但可观测。
+ *             swipe/hold 绑定能注册、查重、unbind，但 woodland 没有触摸
+ *             手势识别状态机，只登记不触发（trace 明写 gesture_unwired）。
+ *             多用户 session 的延迟 bind 与真正的特权判定同样未做，
+ *             取舍写在 shortcut.c 文件头。
  *   仅记录：  xdg-toplevel-tag（存下来、经 wctl 可见，但暂不参与窗口规则）；
  *             treeland-decoration 的阴影（要一层模糊 buffer，还没做）。
  *   暂不接线：security-context（无沙箱校验时声明"我是沙箱"反而是假安全）、
@@ -148,4 +157,91 @@ void woodland_protocol_compositor_action_status(struct woodland_server *server,
                                                 uint32_t *trigger_count,
                                                 uint32_t *last_action,
                                                 const char **last_outcome);
+
+/* ==================== treeland-shortcut-manager-v3 ==================== */
+
+/*
+ * 下面这组是不依赖 display / wlroots 的纯函数：QKeySequence PortableText
+ * 的解析、匹配与动作分类都能在栈上验证，单元测试不必起合成器。协议实现
+ * 与测试共用同一份推导，避免各自抄一遍 0..45 的动作表。
+ */
+enum woodland_shortcut_mod {
+    WOODLAND_SC_MOD_CTRL  = 1u << 0,
+    WOODLAND_SC_MOD_ALT   = 1u << 1,
+    WOODLAND_SC_MOD_SHIFT = 1u << 2,
+    WOODLAND_SC_MOD_META  = 1u << 3,
+};
+
+struct woodland_shortcut_key {
+    uint32_t mods;     /* enum woodland_shortcut_mod 的位或 */
+    uint32_t sym;      /* xkb_keysym_t（uint32_t）；主键，不含修饰键 */
+    char text[64];     /* 规范化后的 PortableText，如 "Ctrl+Alt+Delete" */
+};
+
+enum woodland_shortcut_parse_result {
+    WOODLAND_SC_PARSE_OK = 0,
+    WOODLAND_SC_PARSE_EMPTY,
+    WOODLAND_SC_PARSE_SEQUENCE,      /* 多段序列 "A, B"，协议只收单个组合 */
+    WOODLAND_SC_PARSE_DUPLICATE_MOD,
+    WOODLAND_SC_PARSE_BAD_TOKEN,
+    WOODLAND_SC_PARSE_NO_KEY,
+    WOODLAND_SC_PARSE_TOO_LONG,
+};
+
+enum woodland_shortcut_parse_result
+woodland_shortcut_key_parse(const char *text, struct woodland_shortcut_key *out);
+
+/** 稳定字符串（冒烟脚本按名字断言）；未知结果返回 "unknown"。 */
+const char *woodland_shortcut_parse_name(enum woodland_shortcut_parse_result result);
+
+/** 把 (mods, sym) 格式化成 PortableText；缓冲不足返回 false。 */
+bool woodland_shortcut_key_format(uint32_t mods, uint32_t sym, char *buf, size_t len);
+
+/** capture_next_shortcut 协议里定义的「有效快捷键」判定。 */
+bool woodland_shortcut_key_is_valid(uint32_t mods, uint32_t sym);
+
+/** 绑定与按键事件是否同一个组合（sym 按大小写不敏感比较）。 */
+bool woodland_shortcut_key_matches(const struct woodland_shortcut_key *key,
+                                    uint32_t mods, uint32_t sym);
+
+enum woodland_shortcut_action_class {
+    WOODLAND_SC_ACTION_INVALID,
+    WOODLAND_SC_ACTION_NOTIFY,
+    WOODLAND_SC_ACTION_WORKSPACE,
+    WOODLAND_SC_ACTION_WORKSPACE_PREV,
+    WOODLAND_SC_ACTION_WORKSPACE_NEXT,
+    WOODLAND_SC_ACTION_VIEW,          /* 最大化/最小化/关闭/移动/缩放 */
+    WOODLAND_SC_ACTION_MOVE_WORKSPACE,
+    WOODLAND_SC_ACTION_TILE,
+    WOODLAND_SC_ACTION_UNSUPPORTED,    /* woodland 暂无对应 shell 状态机 */
+};
+
+enum woodland_shortcut_action_class
+woodland_shortcut_action_classify(uint32_t action);
+
+struct wlr_keyboard;
+struct wlr_keyboard_key_event;
+struct woodland_json;
+
+/**
+ * 键盘事件先过 shortcut 族：返回 true 表示已被 capture 或某个绑定消费，
+ * seat 不再把按键发给焦点 surface，也不再走内置 Alt+ 键位。
+ *
+ * 由 seat 的 keyboard_handle_key 在处理内置键位**之前**调用；capture 的
+ * 优先级高于注册绑定，符合协议「capture intercepts input with priority
+ * over registered shortcut bindings」。
+ */
+bool woodland_protocol_shortcuts_key(struct woodland_server *server,
+                                     struct wlr_keyboard *keyboard,
+                                     const struct wlr_keyboard_key_event *event);
+
+/**
+ * 指针 button / wheel 事件入口：有 pending capture 时按协议发
+ * failed(interrupted) 并吞掉事件；否则返回 false，光标逻辑照常走。
+ */
+bool woodland_protocol_shortcuts_pointer(struct woodland_server *server);
+
+/** 把 shortcut 族的只读状态写成一个完整 JSON 对象，给 wctl get_tree 用。 */
+void woodland_protocol_shortcut_status(struct woodland_server *server,
+                                       struct woodland_json *out);
 #endif

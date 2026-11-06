@@ -166,6 +166,14 @@ struct woodland_server {
      */
     struct woodland_proto *proto;
 
+    /*
+     * 快捷键族的输入钩子：指针 button / wheel 要能中断一次性捕获，但
+     * shell/cursor.c 不该为了这一下反向链接 protocol_lib（那会让只链
+     * shell_lib 的单元测试缺符号）。由协议层在 init / finish 挂上、摘掉，
+     * NULL 表示协议层没建起来或已经回收。
+     */
+    bool (*shortcut_pointer_hook)(struct woodland_server *server);
+
     /* 截图/录屏（src/capture） */
     struct wlr_screencopy_manager_v1 *screencopy_manager;
     struct wlr_ext_image_copy_capture_manager_v1 *image_copy_capture_manager;
