@@ -30,13 +30,7 @@ if get_option('test').enabled()
               woodland_bin.full_path()],
        is_parallel: false)
   # 调试接口（wctl）：只断言状态，不数像素
-  test('smoke-ipc',
-       find_program('sh'),
-       args: [meson.current_source_dir() / 'smoke' / 'run_ipc_smoke.sh',
-              woodland_bin.full_path(),
-              wctl_bin.full_path()],
-       is_parallel: false,
-       timeout: 60)
+  # 依赖 simple_ssd 客户端（显式请求 SERVER_SIDE SSD）
 
   test('smoke-capture',
        find_program('sh'),
@@ -298,6 +292,29 @@ if get_option('test').enabled()
       endforeach
       deco_probe = executable('deco_probe', deco_probe_srcs,
                               dependencies: [wayland_client_dep])
+
+      simple_ssd_srcs = [
+        'smoke/simple_ssd.c',
+        custom_target('simple-ssd-xdg-shell-header',
+          input: wp_datadir / 'stable' / 'xdg-shell' / 'xdg-shell.xml',
+          output: 'simple-ssd-xdg-shell-client-protocol.h',
+          command: [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@']),
+        custom_target('simple-ssd-xdg-shell-code',
+          input: wp_datadir / 'stable' / 'xdg-shell' / 'xdg-shell.xml',
+          output: 'simple-ssd-xdg-shell-protocol.c',
+          command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@']),
+        custom_target('simple-ssd-deco-header',
+          input: wp_datadir / 'unstable' / 'xdg-decoration' / 'xdg-decoration-unstable-v1.xml',
+          output: 'simple-ssd-xdg-decoration-unstable-v1-client-protocol.h',
+          command: [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@']),
+        custom_target('simple-ssd-deco-code',
+          input: wp_datadir / 'unstable' / 'xdg-decoration' / 'xdg-decoration-unstable-v1.xml',
+          output: 'simple-ssd-xdg-decoration-unstable-v1-protocol.c',
+          command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@']),
+      ]
+      simple_ssd_bin = executable('simple_ssd', simple_ssd_srcs,
+                                  dependencies: [wayland_client_dep])
+
       test('smoke-decoration',
            find_program('sh'),
            args: [meson.current_source_dir() / 'smoke' / 'run_deco_smoke.sh',
@@ -307,6 +324,17 @@ if get_option('test').enabled()
            is_parallel: false,
            timeout: 90)
       # ext-background-effect：blur region 的双缓冲/裁剪/撤除。同一个探针，
+      # 调试接口（wctl）：只断言状态，不数像素
+      # 使用 simple_ssd 客户端验证 SSD 状态
+      test('smoke-ipc',
+           find_program('sh'),
+           args: [meson.current_source_dir() / 'smoke' / 'run_ipc_smoke.sh',
+                  woodland_bin.full_path(),
+                  wctl_bin.full_path(),
+                  simple_ssd_bin.full_path()],
+           is_parallel: false,
+           timeout: 60)
+
       # 多走一遍 blur 参数；脚本按 [effects] 配置跑"开"和"关"两遍。
       test('smoke-bg-effect',
            find_program('sh'),
