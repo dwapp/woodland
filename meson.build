@@ -65,3 +65,14 @@ endif
 subdir('include')
 subdir('src')
 subdir('tests')
+
+install_data(
+  'resources/woodland.desktop',
+  install_dir: get_option('datadir') / 'wayland-sessions',
+)
+
+install_data(
+  'resources/woodland-session',
+  install_dir: get_option('bindir'),
+  install_mode: 'rwxr-xr-x',
+)

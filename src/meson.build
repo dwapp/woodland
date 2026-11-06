@@ -30,4 +30,6 @@ woodland_bin = executable('woodland',
   'main.c',
   include_directories: woodland_inc,
   dependencies: [scene_deps, wayland_server],
+  install: true,
+  install_rpath: get_option('prefix') / get_option('libdir'),
   link_with: [server_lib, config_lib, ime_lib, session_lock_lib, util_lib, trace_lib, output_lib, cursor_lib, shell_lib, seat_lib, workspace_lib, layer_lib, ssd_lib, effect_lib, capture_lib, ipc_lib, protocol_lib] + xwayland_libs)
