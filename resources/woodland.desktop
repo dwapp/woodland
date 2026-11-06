@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=Woodland
+Comment=Lightweight Wayland compositor
+Exec=woodland-session
+TryExec=woodland
+Type=Application
+DesktopNames=woodland

@@ -1,0 +1,12 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+
+export XDG_CURRENT_DESKTOP=woodland:wlroots
+export XDG_SESSION_TYPE=wayland
+export XDG_SESSION_DESKTOP=woodland
+export QT_QPA_PLATFORM=wayland
+export GDK_BACKEND=wayland,x11
+export SDL_VIDEODRIVER=wayland
+export CLUTTER_BACKEND=wayland
+
+exec woodland -s "dms run"
