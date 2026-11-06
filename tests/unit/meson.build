@@ -129,6 +129,17 @@ test_config = executable('test_config', 'test_config.c',
   link_with: [config_lib, util_lib, trace_lib, output_lib, cursor_lib, shell_lib, seat_lib, session_lock_lib, ime_lib, workspace_lib, layer_lib, ssd_lib, effect_lib, capture_lib, ipc_lib, protocol_lib])
 test('config', test_config)
 
+# treeland-compositor-action 的动作表 / 工作区映射：纯逻辑，不建 display。
+# protocol_lib 里的 compositor_action.c.o 会拉入 workspace 切换、trace 和
+# wlroots 日志符号，所以链接列表跟 test_workspace 一样长。
+test_compositor_action = executable('test_compositor_action', 'test_compositor_action.c',
+  dependencies: [scene_deps, wayland_server],
+  include_directories: woodland_inc,
+  link_with: [protocol_lib, workspace_lib, trace_lib, util_lib, shell_lib,
+              output_lib, cursor_lib, layer_lib, ssd_lib, effect_lib, seat_lib,
+              session_lock_lib, ime_lib, capture_lib])
+test('compositor_action', test_compositor_action)
+
 vk_xml = meson.project_source_root() + '/subprojects/wlroots/protocol/virtual-keyboard-unstable-v1.xml'
 im_xml = meson.project_source_root() + '/subprojects/wlroots/protocol/input-method-unstable-v2.xml'
 

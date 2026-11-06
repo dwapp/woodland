@@ -3,8 +3,11 @@
 #define WOODLAND_PROTOCOL_H
 
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 struct woodland_server;
+struct woodland_workspace;
 struct wlr_input_device;
 struct wlr_output;
 
@@ -22,9 +25,10 @@ struct wlr_output;
  *   decoration.c 窗口装饰：treeland-decoration（按窗口的 SSD 定制）
  *   background_effect.c 背景模糊：ext-background-effect-v1
  *   wallpaper.c 壁纸：treeland-wallpaper-shell / -manager / -notifier
+ *   compositor_action.c shell 动作：treeland-compositor-action（工作区切换）
  *   protocol.c 只管按序建立、逆序回收，以及下面这几个转发入口。
  *
- * 按语义完备程度分三档，档位决定了它是否真的改变行为：
+ * 按语义完备程度分档，档位决定了它是否真的改变行为：
  *
  *   语义完整：viewporter、presentation-time、primary-selection、
  *             idle-notify、idle-inhibit、keyboard-shortcuts-inhibit、
@@ -37,6 +41,12 @@ struct wlr_output;
  *   委派实现：treeland-wallpaper-shell / -manager / -notifier
  *             —— 配置、场景托管、播放控制都在合成器里，但**解码不在**：
  *             图片/视频由外部 treeland-wallpaper-factory 渲染（见设计规格）。
+ *   部分实现：treeland-compositor-action 的 workspace_1..12 / prev / next
+ *             —— 真接 woodland_workspace_switch()；其余 15..30 号动作
+ *             （show-desktop、多任务、缩放、FPS、锁屏、关机菜单、用户切换）
+ *             置空但可观测（trace / wctl / 日志），不假装生效。bind 的
+ *             "非特权客户端"判定只做到同 uid，woodland 没有 DDE 的
+ *             privileged 服务，取舍写在 compositor_action.c 文件头。
  *   仅记录：  xdg-toplevel-tag（存下来、经 wctl 可见，但暂不参与窗口规则）；
  *             treeland-decoration 的阴影（要一层模糊 buffer，还没做）。
  *   暂不接线：security-context（无沙箱校验时声明"我是沙箱"反而是假安全）、
@@ -98,4 +108,44 @@ void woodland_protocol_withdraw_drm_lease(struct woodland_server *server,
  */
 void woodland_protocol_output_added(struct woodland_server *server,
                                     struct wlr_output *output);
+
+/* ==================== treeland-compositor-action ==================== */
+
+/*
+ * 前三个是纯函数（不碰 display、不连客户端）：动作表、工作区名、相邻
+ * 工作区都能在栈上验证，不必为了测它们起一个合成器；最后一个是只读
+ * getter。协议实现与单元测试共用同一份推导，免得测试自己抄一遍 1..12
+ * 的映射。
+ */
+enum woodland_protocol_action_class {
+    WOODLAND_PROTO_ACTION_INVALID,       /* 枚举之外的值（0、>30） */
+    WOODLAND_PROTO_ACTION_WORKSPACE,    /* workspace_1..12 */
+    WOODLAND_PROTO_ACTION_WORKSPACE_PREV,
+    WOODLAND_PROTO_ACTION_WORKSPACE_NEXT,
+    WOODLAND_PROTO_ACTION_UNSUPPORTED,  /* 15..30：woodland 暂无对应状态机 */
+};
+
+enum woodland_protocol_action_class
+woodland_protocol_action_classify(uint32_t action);
+
+/** workspace_N -> 名字 "1".."12"；其它动作或缓冲不足返回 false。 */
+bool woodland_protocol_action_workspace_name(uint32_t action, char *buf, size_t len);
+
+/**
+ * 当前工作区在 server->workspaces 上的前/后一个；边界不绕回（没有上一个
+ * 就属于"不能执行"，协议要求忽略）。server 可以是栈上只填了 workspaces
+ * 链表的假结构。
+ */
+struct woodland_workspace *woodland_protocol_action_adjacent_workspace(
+    struct woodland_server *server, bool next);
+
+/**
+ * 最近一次 trigger 的处置结果，给 wctl get_tree 用。出参都可为 NULL；
+ * 协议层没建起来时 available=false、计数为 0、last_outcome=NULL。
+ */
+void woodland_protocol_compositor_action_status(struct woodland_server *server,
+                                                bool *available,
+                                                uint32_t *trigger_count,
+                                                uint32_t *last_action,
+                                                const char **last_outcome);
 #endif

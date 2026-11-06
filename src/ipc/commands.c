@@ -26,6 +26,7 @@
 #include "ipc.h"
 #include "output.h"
 #include "placement.h"
+#include "protocol.h"
 #include "selfcheck.h"
 #include "ssd.h"
 #include "trace.h"
@@ -78,6 +79,10 @@ static const struct ipc_field_doc get_tree_fields[] = {
      "name, enabled, box[x,y,w,h], workarea, width, "
      "height, scale (per-mille)"},
     {"workspace", "obj", "current: str, all: str[]"},
+    {"compositor_action", "obj",
+     "treeland-compositor-action: available (bool), trigger_count (int), "
+     "last_action (int, 0 before any trigger), "
+     "last_outcome (str|null: none|switched|no_workspace|unsupported|invalid)"},
     {"focus", "obj", "same fields as get_focus"},
     {"views", "obj[]",
      "per view: id, kind, z, title, app_id, tag, workspace, "
@@ -479,6 +484,22 @@ static void ipc_get_tree(struct woodland_server *server, struct woodland_json *o
     append_outputs(server, out);
     woodland_json_obj_key(&obj, "workspace");
     append_workspace(server, out);
+
+    /* 协议本身无状态，这四项只是"最近一次 trigger 被怎么处置"的诊断记录 */
+    bool action_available = false;
+    uint32_t action_count = 0;
+    uint32_t action_last = 0;
+    const char *action_outcome = NULL;
+    woodland_protocol_compositor_action_status(server, &action_available, &action_count,
+                                                &action_last, &action_outcome);
+    woodland_json_obj_key(&obj, "compositor_action");
+    struct woodland_json_obj action_obj;
+    woodland_json_obj_open(&action_obj, out);
+    woodland_json_obj_bool(&action_obj, "available", action_available);
+    woodland_json_obj_int(&action_obj, "trigger_count", action_count);
+    woodland_json_obj_int(&action_obj, "last_action", action_last);
+    woodland_json_obj_str(&action_obj, "last_outcome", action_outcome);
+    woodland_json_obj_close(&action_obj);
 
     woodland_json_obj_key(&obj, "focus");
     struct woodland_json_obj focus_obj;
