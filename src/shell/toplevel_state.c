@@ -195,6 +195,9 @@ void woodland_view_set_minimized(struct woodland_view *view, bool minimized)
 static void xdg_toplevel_request_maximize(struct wl_listener *listener, void *data)
 {
     struct woodland_view *view = wl_container_of(listener, view, request_maximize);
+    if (!view->xdg_toplevel->base->initialized) {
+        return;
+    }
     woodland_view_set_maximized(view, view->xdg_toplevel->requested.maximized);
     (void)data;
 }
@@ -202,11 +205,13 @@ static void xdg_toplevel_request_maximize(struct wl_listener *listener, void *da
 static void xdg_toplevel_request_fullscreen(struct wl_listener *listener, void *data)
 {
     struct woodland_view *view = wl_container_of(listener, view, request_fullscreen);
+    if (!view->xdg_toplevel->base->initialized) {
+        return;
+    }
     woodland_view_set_fullscreen(view, view->xdg_toplevel->requested.fullscreen,
                                  view->xdg_toplevel->requested.fullscreen_output);
     (void)data;
 }
-
 static void xdg_toplevel_request_minimize(struct wl_listener *listener, void *data)
 {
     struct woodland_view *view = wl_container_of(listener, view, request_minimize);

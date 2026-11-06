@@ -383,6 +383,12 @@ static void xdg_toplevel_commit(struct wl_listener *listener, void *data)
         if (view->deco) {
             wlr_xdg_toplevel_decoration_v1_set_mode(view->deco, view_decoration_mode(view));
         }
+        if (view->xdg_toplevel->requested.fullscreen) {
+            woodland_view_set_fullscreen(view, true,
+                                         view->xdg_toplevel->requested.fullscreen_output);
+        } else if (view->xdg_toplevel->requested.maximized) {
+            woodland_view_set_maximized(view, true);
+        }
     }
     /* 内容尺寸/状态变化后同步 SSD 几何；SSD 内部已更新特效，CSD 视图无 SSD 才在此补一次 */
     woodland_ssd_update(view);
