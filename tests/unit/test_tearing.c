@@ -219,14 +219,18 @@ int main(void)
     assert(view.scene_tree != NULL);
     view.scene_tree->node.x = 100;
     view.scene_tree->node.y = 100;
-    view.tearing_hint = controller->tearing_control->current;
+    view.tearing_hint = WOODLAND_TEARING_ASYNC;
     wl_list_insert(&server.views, &view.link);
 
     /* 无焦点时不允许撕裂 */
     assert(!woodland_output_get_tearing_allowance(output));
 
-    /* 拥有焦点且 hint 为 ASYNC 时允许撕裂 */
+    /* 默认配置 allow_tearing = false，即使 hint 为 ASYNC 也不允许撕裂 */
     server.focused_view = &view;
+    assert(!woodland_output_get_tearing_allowance(output));
+
+    /* 开启 allow_tearing 后允许撕裂 */
+    server.config->general.allow_tearing = true;
     assert(woodland_output_get_tearing_allowance(output));
 
     /* 配置关掉 allow_tearing 时不允许撕裂 */
@@ -234,7 +238,6 @@ int main(void)
     assert(!woodland_output_get_tearing_allowance(output));
     server.config->general.allow_tearing = true;
     assert(woodland_output_get_tearing_allowance(output));
-
     /* 会话锁上锁时不允许撕裂 */
     server.session_lock->locked = true;
     assert(!woodland_output_get_tearing_allowance(output));
@@ -249,7 +252,7 @@ int main(void)
 
     assert(controller->tearing_control->current ==
            WP_TEARING_CONTROL_V1_PRESENTATION_HINT_VSYNC);
-    view.tearing_hint = controller->tearing_control->current;
+    view.tearing_hint = WOODLAND_TEARING_VSYNC;
     assert(!woodland_output_get_tearing_allowance(output));
 
     /* 清理 client 1 代理对象与 view */

@@ -20,7 +20,7 @@ static void test_default_config(void)
     assert(cfg->general.workspace_count == 10);
     assert(!cfg->general.focus_follows_mouse);
     assert(cfg->general.snap_distance == 20);
-    assert(cfg->general.allow_tearing);
+    assert(!cfg->general.allow_tearing);
 
     assert(cfg->ssd.enabled);
     assert(cfg->ssd.titlebar_height == 26);
@@ -62,7 +62,7 @@ static void test_parse_valid_toml(void)
                        "workspace_count = 8\n"
                        "focus_policy = \"sloppy\"\n"
                        "snap_distance = 35\n"
-                       "allow_tearing = false\n"
+                       "allow_tearing = true\n"
                        "\n"
                        "[decorations]\n"
                        "enabled = false\n"
@@ -119,7 +119,7 @@ static void test_parse_valid_toml(void)
     assert(cfg->general.workspace_count == 8);
     assert(cfg->general.focus_follows_mouse);
     assert(cfg->general.snap_distance == 35);
-    assert(!cfg->general.allow_tearing);
+    assert(cfg->general.allow_tearing);
 
     assert(!cfg->ssd.enabled);
     assert(cfg->ssd.titlebar_height == 30);

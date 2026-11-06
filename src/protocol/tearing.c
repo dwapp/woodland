@@ -27,11 +27,12 @@ static void handle_controller_set_hint(struct wl_listener *listener, void *data)
     struct woodland_view *view =
         woodland_view_from_surface(controller->tearing_control->surface);
     if (view) {
-        view->tearing_hint = controller->tearing_control->current;
+        view->tearing_hint = (controller->tearing_control->current ==
+                              WP_TEARING_CONTROL_V1_PRESENTATION_HINT_ASYNC)
+                                 ? WOODLAND_TEARING_ASYNC
+                                 : WOODLAND_TEARING_VSYNC;
         woodland_trace_add("tearing", view->id, "hint=%s",
-                           view->tearing_hint == WP_TEARING_CONTROL_V1_PRESENTATION_HINT_ASYNC
-                               ? "async"
-                               : "vsync");
+                           view->tearing_hint == WOODLAND_TEARING_ASYNC ? "async" : "vsync");
     }
 }
 
@@ -44,7 +45,7 @@ static void handle_controller_destroy(struct wl_listener *listener, void *data)
     struct woodland_view *view =
         woodland_view_from_surface(controller->tearing_control->surface);
     if (view) {
-        view->tearing_hint = WP_TEARING_CONTROL_V1_PRESENTATION_HINT_VSYNC;
+        view->tearing_hint = WOODLAND_TEARING_VSYNC;
     }
 
     wl_list_remove(&controller->link);
@@ -77,7 +78,10 @@ static void handle_new_object(struct wl_listener *listener, void *data)
     struct woodland_view *view =
         woodland_view_from_surface(tearing_control->surface);
     if (view) {
-        view->tearing_hint = tearing_control->current;
+        view->tearing_hint = (tearing_control->current ==
+                              WP_TEARING_CONTROL_V1_PRESENTATION_HINT_ASYNC)
+                                 ? WOODLAND_TEARING_ASYNC
+                                 : WOODLAND_TEARING_VSYNC;
     }
 }
 
@@ -92,8 +96,11 @@ static void handle_view_mapped(struct wl_listener *listener, void *data)
 
     struct wlr_surface *surface = woodland_view_surface(view);
     if (surface && tearing->manager) {
-        view->tearing_hint = wlr_tearing_control_manager_v1_surface_hint_from_surface(
-            tearing->manager, surface);
+        enum wp_tearing_control_v1_presentation_hint hint =
+            wlr_tearing_control_manager_v1_surface_hint_from_surface(tearing->manager, surface);
+        view->tearing_hint = (hint == WP_TEARING_CONTROL_V1_PRESENTATION_HINT_ASYNC)
+                                 ? WOODLAND_TEARING_ASYNC
+                                 : WOODLAND_TEARING_VSYNC;
     }
 }
 
@@ -122,8 +129,9 @@ bool woodland_proto_tearing_init(struct woodland_proto *proto)
         woodland_listener_connect(&tearing->view_mapped, &proto->server->view_mapped,
                                   handle_view_mapped, "tearing.view_mapped");
         tearing->watching_views = true;
+    } else {
+        wlr_log(WLR_DEBUG, "tearing: view_mapped signal not initialised, skip view watching");
     }
-
     proto->tearing = tearing;
     return true;
 }
