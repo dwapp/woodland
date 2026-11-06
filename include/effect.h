@@ -7,6 +7,7 @@
 #include <wlr/util/box.h>
 
 struct woodland_layer_surface;
+struct woodland_output;
 struct woodland_server;
 struct woodland_view;
 struct wlr_scene_tree;
@@ -29,6 +30,16 @@ struct woodland_effect_corners {
     int top_right;
     int bottom_right;
     int bottom_left;
+};
+
+/*
+ * 窗口阴影参数（纯函数换算结果，color 为非预乘 RGBA float [0..1]）。
+ */
+struct woodland_effect_shadow {
+    int radius;
+    int offset_x;
+    int offset_y;
+    float color[4];
 };
 
 /*
@@ -73,8 +84,8 @@ void woodland_effect_buffer_corners(const struct woodland_effect_corners *window
  * 坐标的裁剪区（NULL = 关掉模糊），corners 为 NULL 表示直角。返回是否真的
  * 画了（配置关掉模糊时恒为 false）。
  */
-bool woodland_effect_blur_apply(struct wlr_scene_tree *tree, struct wlr_surface *surface, int x,
-                                int y, int width, int height, const struct wlr_box *region,
+bool woodland_effect_blur_apply(struct wlr_scene_tree *tree, int x, int y, int width,
+                                int height, const struct wlr_box *region,
                                 const struct woodland_effect_corners *corners);
 
 /** 关掉 tree 上那块模糊（节点留着，下次不用重建）。 */
@@ -89,13 +100,31 @@ void woodland_effect_blur_clear(struct wlr_scene_tree *tree);
 void woodland_effect_layer_blur(struct woodland_layer_surface *layer, const struct wlr_box *region);
 
 /**
- * 把半径摊到四个角上（纯函数，单测直接喂参数）。
+ * 窗口外框四角の内圆角半径（纯函数）。
  *
- * 有标题栏时上沿被标题栏盖住，内容只露下沿，所以上角交给 SSD、内容只圆下角；
- * 最大化/全屏铺满时一律直角——圆角会在屏幕边缘露出后面的画面。
+ * 最大化/全屏全部归 0；半屏/四分之一屏贴边（snapped_edges）时，贴住屏幕边那一侧
+ * 的角归 0，避免在屏幕边缘露出壁纸缺口。
+ */
+void woodland_effect_frame_corners(const struct woodland_view *view,
+                                   struct woodland_effect_corners *out);
+
+/**
+ * 把半径摊到内容四个角上（纯函数，单测直接喂参数）。
+ *
+ * 在 woodland_effect_frame_corners 基础上：有标题栏时上沿被标题栏盖住，内容只露下沿，
+ * 所以上角交给 SSD、内容只圆下角。
  */
 void woodland_effect_corners(const struct woodland_view *view,
                              struct woodland_effect_corners *out);
+
+/**
+ * 计算一个视图当前应渲染的窗口阴影参数（纯函数）。
+ *
+ * 优先级：客户端 treeland-decoration 覆盖 > [effects] shadow*；
+ * 最大化/全屏/贴边铺满、自带 CSD 阴影边距、或 [effects] enabled=false 时返回 false。
+ */
+bool woodland_effect_shadow_params(const struct woodland_view *view,
+                                   struct woodland_effect_shadow *out);
 
 /**
  * blur region → 可画的包围盒（纯函数）。
@@ -126,5 +155,19 @@ void woodland_effect_set_blur_region(struct woodland_view *view, const pixman_re
  * 值照样记录在 view 上，由 get_tree 如实暴露。
  */
 void woodland_effect_update(struct woodland_view *view);
+
+/** 将配置中的模糊参数同步到 server->scene，并更新所有输出的预模糊缓存节点。 */
+void woodland_effect_apply_scene_config(struct woodland_server *server);
+
+/** 创建/更新单个输出的 optimized_blur 节点（置于 background 层之上、bottom 层之下）。 */
+void woodland_effect_output_update(struct woodland_output *output);
+
+/** 销毁单个输出上的 optimized_blur 节点。 */
+void woodland_effect_output_destroy(struct woodland_output *output);
+/** 对所有输出执行 woodland_effect_output_update。 */
+void woodland_effect_outputs_update(struct woodland_server *server);
+
+/** 壁纸或 background 层内容变化时，标记所有输出的预模糊缓存失效。 */
+void woodland_effect_mark_blur_dirty(struct woodland_server *server);
 
 #endif /* WOODLAND_EFFECT_H */

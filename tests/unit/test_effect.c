@@ -102,6 +102,26 @@ int main(void)
     assert(c.top_left == 0 && c.bottom_left == 0);
     view.fullscreen = false;
 
+    /* ---- 5.1) 贴边半屏/四分之一屏：贴住屏幕边缘的角清零 ---- */
+    view.snapped_edges = WLR_EDGE_LEFT;
+    clear_corners(&c);
+    woodland_effect_frame_corners(&view, &c);
+    assert(c.top_left == 0 && c.bottom_left == 0);
+    assert(c.top_right == 10 && c.bottom_right == 10);
+
+    /* 左上四分之一屏：左和上都贴边，只有右下保留圆角 */
+    view.snapped_edges = WLR_EDGE_LEFT | WLR_EDGE_TOP;
+    clear_corners(&c);
+    woodland_effect_frame_corners(&view, &c);
+    assert(c.top_left == 0 && c.top_right == 0 && c.bottom_left == 0);
+    assert(c.bottom_right == 10);
+
+    /* 带标题栏时：上角由标题栏归零，内容下角左贴边只留右下 */
+    clear_corners(&c);
+    woodland_effect_corners(&view, &c);
+    assert(c.top_left == 0 && c.top_right == 0 && c.bottom_left == 0);
+    assert(c.bottom_right == 10);
+    view.snapped_edges = 0;
     /* ---- 6) blur region：空区域 / 非法尺寸不成立 ---- */
     struct wlr_box box = {0};
     pixman_region32_t region;
@@ -239,6 +259,48 @@ int main(void)
     assert(!woodland_effect_server_enabled(&bare));
     assert(!woodland_effect_server_blur_enabled(&bare));
 
+    /* ---- 12) 窗口阴影参数换算 ---- */
+    struct woodland_effect_shadow sp;
+    /* 默认配置未开启阴影 */
+    assert(!woodland_effect_shadow_params(&view, &sp));
+    assert(!woodland_effect_shadow_params(NULL, &sp));
+
+    /* 客户端覆盖：配置没开也按客户端参数生成 */
+    view.ssd_overrides.shadow_set = true;
+    view.ssd_overrides.shadow_radius = 20;
+    view.ssd_overrides.shadow_dx = 0;
+    view.ssd_overrides.shadow_dy = 6;
+    view.ssd_overrides.shadow_rgba = 0x11223380;
+    assert(woodland_effect_shadow_params(&view, &sp));
+    assert(sp.radius == 20);
+    assert(sp.offset_x == 0 && sp.offset_y == 6);
+    assert((int)(sp.color[3] * 255.0f + 0.5f) == 0x80);
+
+    /* 最大化/全屏/贴边不应有阴影 */
+    view.maximized = true;
+    assert(!woodland_effect_shadow_params(&view, &sp));
+    view.maximized = false;
+    view.fullscreen = true;
+    assert(!woodland_effect_shadow_params(&view, &sp));
+    view.fullscreen = false;
+    view.snapped_edges = WLR_EDGE_LEFT;
+    assert(!woodland_effect_shadow_params(&view, &sp));
+    view.snapped_edges = 0;
+
+    /* 配置启用全局阴影：激活态正常透明度，非激活态淡化 */
+    view.ssd_overrides.shadow_set = false;
+    config->effects.shadow = true;
+    config->effects.shadow_radius = 15;
+    config->effects.shadow_offset_x = 2;
+    config->effects.shadow_offset_y = 5;
+    config->effects.shadow_color = 0xAA102030;
+    view.activated = true;
+    assert(woodland_effect_shadow_params(&view, &sp));
+    assert(sp.radius == 15 && sp.offset_x == 2 && sp.offset_y == 5);
+    float active_alpha = sp.color[3];
+    view.activated = false;
+    assert(woodland_effect_shadow_params(&view, &sp));
+    assert(sp.color[3] < active_alpha);
     pixman_region32_fini(&region);
     woodland_config_destroy(config);
 

@@ -104,8 +104,19 @@ void woodland_config_default_init(struct woodland_config *config)
      * 默认按"特效开"给，想回到朴素外观就用 enabled=false（模糊与圆角一起停）。 */
     config->effects.enabled = true;
     config->effects.blur = true;
+    config->effects.blur_optimized = false;
+    config->effects.blur_passes = 3;
+    config->effects.blur_radius = 5;
+    config->effects.blur_noise = 0.0;
+    config->effects.blur_brightness = 1.0;
+    config->effects.blur_contrast = 1.0;
+    config->effects.blur_saturation = 1.0;
     config->effects.corner_radius = 0;
     config->effects.shadow = false;
+    config->effects.shadow_radius = 20;
+    config->effects.shadow_offset_x = 0;
+    config->effects.shadow_offset_y = 4;
+    config->effects.shadow_color = 0x4D000000; /* #0000004d */
 
     /* [[output]] */
     wl_list_init(&config->output_rules);
@@ -362,11 +373,51 @@ struct woodland_config *woodland_config_parse_string(const char *content, size_t
     if (fx) {
         cfg->effects.enabled = toml_get_bool(fx, "enabled", cfg->effects.enabled);
         cfg->effects.blur = toml_get_bool(fx, "blur", cfg->effects.blur);
+        cfg->effects.blur_optimized =
+            toml_get_bool(fx, "blur_optimized", cfg->effects.blur_optimized);
+        int64_t bp = toml_get_int(fx, "blur_passes", cfg->effects.blur_passes);
+        if (bp >= 1 && bp <= 8) {
+            cfg->effects.blur_passes = (int32_t)bp;
+        }
+        int64_t br = toml_get_int(fx, "blur_radius", cfg->effects.blur_radius);
+        if (br >= 1 && br <= 32) {
+            cfg->effects.blur_radius = (int32_t)br;
+        }
+        double bnoise = toml_get_float(fx, "blur_noise", cfg->effects.blur_noise);
+        if (bnoise >= 0.0 && bnoise <= 1.0) {
+            cfg->effects.blur_noise = bnoise;
+        }
+        double bbright = toml_get_float(fx, "blur_brightness", cfg->effects.blur_brightness);
+        if (bbright >= 0.0 && bbright <= 2.0) {
+            cfg->effects.blur_brightness = bbright;
+        }
+        double bcont = toml_get_float(fx, "blur_contrast", cfg->effects.blur_contrast);
+        if (bcont >= 0.0 && bcont <= 2.0) {
+            cfg->effects.blur_contrast = bcont;
+        }
+        double bsat = toml_get_float(fx, "blur_saturation", cfg->effects.blur_saturation);
+        if (bsat >= 0.0 && bsat <= 2.0) {
+            cfg->effects.blur_saturation = bsat;
+        }
         int64_t cr = toml_get_int(fx, "corner_radius", cfg->effects.corner_radius);
         if (cr >= 0 && cr <= WOODLAND_SSD_MAX_SIZE) {
             cfg->effects.corner_radius = (int32_t)cr;
         }
         cfg->effects.shadow = toml_get_bool(fx, "shadow", cfg->effects.shadow);
+        int64_t sr = toml_get_int(fx, "shadow_radius", cfg->effects.shadow_radius);
+        if (sr >= 0 && sr <= WOODLAND_SSD_MAX_SIZE) {
+            cfg->effects.shadow_radius = (int32_t)sr;
+        }
+        int64_t sdx = toml_get_int(fx, "shadow_offset_x", cfg->effects.shadow_offset_x);
+        if (sdx >= -WOODLAND_SSD_MAX_SIZE && sdx <= WOODLAND_SSD_MAX_SIZE) {
+            cfg->effects.shadow_offset_x = (int32_t)sdx;
+        }
+        int64_t sdy = toml_get_int(fx, "shadow_offset_y", cfg->effects.shadow_offset_y);
+        if (sdy >= -WOODLAND_SSD_MAX_SIZE && sdy <= WOODLAND_SSD_MAX_SIZE) {
+            cfg->effects.shadow_offset_y = (int32_t)sdy;
+        }
+        cfg->effects.shadow_color =
+            parse_color(toml_get_string(fx, "shadow_color", NULL), cfg->effects.shadow_color);
     }
 
     /* 7. [[output]] 数组表 */
@@ -379,7 +430,7 @@ struct woodland_config *woodland_config_parse_string(const char *content, size_t
     return cfg;
 }
 
-static char *resolve_config_path(const char *path_override)
+char *woodland_config_resolve_path(const char *path_override)
 {
     if (path_override) {
         if (access(path_override, R_OK) == 0) {
@@ -437,7 +488,7 @@ static char *resolve_config_path(const char *path_override)
 
 struct woodland_config *woodland_config_load(const char *path_override)
 {
-    char *path = resolve_config_path(path_override);
+    char *path = woodland_config_resolve_path(path_override);
     if (!path) {
         wlr_log(WLR_INFO, "config: no config file found, using defaults");
         return woodland_config_create_default();
@@ -560,8 +611,23 @@ void woodland_config_dump_json(const struct woodland_config *config, struct wood
     woodland_json_obj_open(&fx, out);
     woodland_json_obj_bool(&fx, "enabled", config->effects.enabled);
     woodland_json_obj_bool(&fx, "blur", config->effects.blur);
+    woodland_json_obj_bool(&fx, "blur_optimized", config->effects.blur_optimized);
+    woodland_json_obj_int(&fx, "blur_passes", config->effects.blur_passes);
+    woodland_json_obj_int(&fx, "blur_radius", config->effects.blur_radius);
+    woodland_json_obj_int(&fx, "blur_noise_milli",
+                          (long long)(config->effects.blur_noise * 1000.0 + 0.5));
+    woodland_json_obj_int(&fx, "blur_brightness_milli",
+                          (long long)(config->effects.blur_brightness * 1000.0 + 0.5));
+    woodland_json_obj_int(&fx, "blur_contrast_milli",
+                          (long long)(config->effects.blur_contrast * 1000.0 + 0.5));
+    woodland_json_obj_int(&fx, "blur_saturation_milli",
+                          (long long)(config->effects.blur_saturation * 1000.0 + 0.5));
     woodland_json_obj_int(&fx, "corner_radius", config->effects.corner_radius);
     woodland_json_obj_bool(&fx, "shadow", config->effects.shadow);
+    woodland_json_obj_int(&fx, "shadow_radius", config->effects.shadow_radius);
+    woodland_json_obj_int(&fx, "shadow_offset_x", config->effects.shadow_offset_x);
+    woodland_json_obj_int(&fx, "shadow_offset_y", config->effects.shadow_offset_y);
+    woodland_json_obj_int(&fx, "shadow_color", (long long)config->effects.shadow_color);
     woodland_json_obj_close(&fx);
 
     /*

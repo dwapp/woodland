@@ -4,6 +4,7 @@
 
 #include <stdbool.h>
 #include <wayland-server-core.h>
+#include "effect.h"
 #include "scene.h"
 
 struct woodland_server;
@@ -16,6 +17,7 @@ struct woodland_layer_surface {
     struct wlr_layer_surface_v1 *layer_surface;
     struct wlr_scene_layer_surface_v1 *scene_layer_surface;
     bool mapped;
+    struct woodland_effect_state effect;
     struct wl_listener map;
     struct wl_listener unmap;
     struct wl_listener surface_commit;

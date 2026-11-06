@@ -1,35 +1,28 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * 窗口效果：圆角与背景模糊。
+ * 窗口效果：圆角、背景模糊与窗口阴影。
  *
- * 这两件事在 wlr_scene 里都做不了（它只会画直角、不采样背景），所以真正的
- * 像素工作交给 scenefx：圆角是 buffer/rect 节点的 corner radius，模糊是一个
- * 画在内容之前的 blur 节点。本文件只负责"什么时候用多大半径、糊哪一块"，
- * 也就是把协议/配置里的意图翻译成 scenefx 的节点参数。
+ * 像素级渲染交给 scenefx：
+ *   - 圆角：buffer / rect / shadow 的 corner radius；
+ *   - 模糊：内容下层的 blur 节点，按配置可走每输出预渲染的 optimized blur；
+ *   - 阴影：最底层的 wlr_scene_shadow 节点，带外框挖空。
  *
- * 渲染能力由编译期开关（-Deffects → WOODLAND_HAVE_EFFECTS）决定，画不画再由
- * 运行期配置决定：[effects] enabled 是总开关，blur 单独管模糊，corner_radius
- * 是默认半径。关掉的时候状态照样记录（get_tree 如实暴露客户端要了什么），
- * 只是不建节点——"记不记"和"画不画"仍然分开，排查时不用猜是协议没到还是没画。
- *
- * 圆角叠加规则（见 woodland_effect_corners）：
- *   有标题栏 → 上沿被标题栏盖住，内容只圆下角，上角由 SSD 的矩形自己圆；
- *   无标题栏 / CSD → 四角都圆；
- *   最大化 / 全屏 → 直角（否则屏幕边缘会透出后面的画面）。
- *
- * 模糊单独由客户端经 ext-background-effect 声明（view 与 layer surface 都有，
- * 见 woodland_effect_blur_apply）；"用哪个 surface 做遮罩"这类判断也在这里，
- * 协议层只管交一个 surface 局部坐标的 region。
+ * 本文件负责意图翻译与几何计算，纯函数与渲染节点分离，易于单元测试。
  */
 #include <string.h>
 
 #include <wlr/types/wlr_compositor.h>
+#include <wlr/types/wlr_layer_shell_v1.h>
+#include <wlr/types/wlr_output.h>
+#include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_subcompositor.h>
 #include <wlr/util/box.h>
+#include <wlr/util/edges.h>
 #include <wlr/util/log.h>
 
 #include "effect.h"
 #include "layer.h"
+#include "output.h"
 #include "scene.h"
 #include "ssd.h"
 #include "view.h"
@@ -45,11 +38,26 @@ bool woodland_effect_server_enabled(const struct woodland_server *server)
 
 bool woodland_effect_server_blur_enabled(const struct woodland_server *server)
 {
-    /* 模糊挂在总开关下面：enabled=false 时 blur=true 也不该生效 */
     return woodland_effect_server_enabled(server) && server->config->effects.blur;
 }
 
 /* ==================== 状态与换算（纯函数 / 不碰节点） ==================== */
+
+static bool view_has_csd_margins(const struct woodland_view *view)
+{
+    if (!view || view->ssd) {
+        return false;
+    }
+    struct wlr_surface *surf = woodland_view_surface(view);
+    if (!surf) {
+        return false;
+    }
+    struct wlr_box content;
+    woodland_view_content_box(view, &content);
+    return content.width > 0 && content.height > 0 &&
+           (content.width < surf->current.width || content.height < surf->current.height ||
+            content.x > 0 || content.y > 0);
+}
 
 int woodland_effect_corner_radius(const struct woodland_view *view)
 {
@@ -58,10 +66,8 @@ int woodland_effect_corner_radius(const struct woodland_view *view)
     }
     int radius = 0;
     if (view->ssd_overrides.corner_radius_set) {
-        /* 客户端接管：协议允许合成器 clamp，这里按 SSD 的几何上界收一下 */
         radius = view->ssd_overrides.corner_radius;
     } else if (view->server && view->server->config) {
-        /* 半径只有这一个来源；[decorations] 里不再有同名开关，免得两处打架 */
         radius = view->server->config->effects.corner_radius;
     }
     if (radius < 0) {
@@ -73,28 +79,54 @@ int woodland_effect_corner_radius(const struct woodland_view *view)
     return radius;
 }
 
-void woodland_effect_corners(const struct woodland_view *view, struct woodland_effect_corners *out)
+void woodland_effect_frame_corners(const struct woodland_view *view,
+                                   struct woodland_effect_corners *out)
 {
     if (!out) {
         return;
     }
     int radius = woodland_effect_corner_radius(view);
-    /* 铺满屏幕时不圆角：圆角会在屏幕边缘露出后面的内容 */
     if (!view || view->maximized || view->fullscreen) {
         radius = 0;
     }
 
-    if (woodland_ssd_titlebar_visible(view)) {
-        /* 标题栏盖住内容上沿：上角归 SSD，内容只露下角 */
+    out->top_left = radius;
+    out->top_right = radius;
+    out->bottom_right = radius;
+    out->bottom_left = radius;
+
+    if (!view || view->snapped_edges == 0) {
+        return;
+    }
+
+    uint32_t edges = view->snapped_edges;
+    if (edges & WLR_EDGE_LEFT) {
+        out->top_left = 0;
+        out->bottom_left = 0;
+    }
+    if (edges & WLR_EDGE_RIGHT) {
+        out->top_right = 0;
+        out->bottom_right = 0;
+    }
+    if (edges & WLR_EDGE_TOP) {
         out->top_left = 0;
         out->top_right = 0;
-        out->bottom_right = radius;
-        out->bottom_left = radius;
-    } else {
-        out->top_left = radius;
-        out->top_right = radius;
-        out->bottom_right = radius;
-        out->bottom_left = radius;
+    }
+    if (edges & WLR_EDGE_BOTTOM) {
+        out->bottom_left = 0;
+        out->bottom_right = 0;
+    }
+}
+
+void woodland_effect_corners(const struct woodland_view *view, struct woodland_effect_corners *out)
+{
+    if (!out) {
+        return;
+    }
+    woodland_effect_frame_corners(view, out);
+    if (woodland_ssd_titlebar_visible(view)) {
+        out->top_left = 0;
+        out->top_right = 0;
     }
 }
 
@@ -110,7 +142,6 @@ void woodland_effect_buffer_corners(const struct woodland_effect_corners *window
         *out = none;
         return;
     }
-    /* 贴边算"<=/>="，subsurface 可以比父 surface 稍微越界 */
     bool at_left = x <= 0;
     bool at_top = y <= 0;
     bool at_right = x + width >= window_width;
@@ -168,16 +199,70 @@ void woodland_effect_set_blur_region(struct woodland_view *view, const pixman_re
     woodland_effect_update(view);
 }
 
+bool woodland_effect_shadow_params(const struct woodland_view *view,
+                                   struct woodland_effect_shadow *out)
+{
+    if (!out || !view || !woodland_effect_server_enabled(view->server)) {
+        return false;
+    }
+    if (view->maximized || view->fullscreen || view->snapped_edges != 0) {
+        return false;
+    }
+
+    /*
+     * 颜色编码注意（提醒后来人）：
+     * 1. 协议覆盖路径（view->ssd_overrides.shadow_rgba）为 0xRRGGBBAA（Wayland wire 格式）；
+     * 2. 配置文件路径（cfg->effects.shadow_color）为 0xAARRGGBB（与 ssd.*_color 同格式）。
+     * 两处分别按自身定义拆包并转为非预乘 RGBA float [0..1]。
+     */
+    if (view->ssd_overrides.shadow_set) {
+        int r = view->ssd_overrides.shadow_radius;
+        uint32_t rgba = view->ssd_overrides.shadow_rgba;
+        uint8_t a = (uint8_t)(rgba & 0xFF);
+        if (r <= 0 || a == 0) {
+            return false;
+        }
+        out->radius = r > WOODLAND_SSD_MAX_SIZE ? WOODLAND_SSD_MAX_SIZE : r;
+        out->offset_x = view->ssd_overrides.shadow_dx;
+        out->offset_y = view->ssd_overrides.shadow_dy;
+        out->color[0] = ((rgba >> 24) & 0xFF) / 255.0f;
+        out->color[1] = ((rgba >> 16) & 0xFF) / 255.0f;
+        out->color[2] = ((rgba >> 8) & 0xFF) / 255.0f;
+        out->color[3] = a / 255.0f;
+        return true;
+    }
+
+    const struct woodland_config *cfg = view->server ? view->server->config : NULL;
+    if (!cfg || !cfg->effects.shadow) {
+        return false;
+    }
+    if (view_has_csd_margins(view)) {
+        return false;
+    }
+    int r = cfg->effects.shadow_radius;
+    uint32_t c = cfg->effects.shadow_color;
+    uint8_t a = (uint8_t)((c >> 24) & 0xFF);
+    if (r <= 0 || a == 0) {
+        return false;
+    }
+    out->radius = r > WOODLAND_SSD_MAX_SIZE ? WOODLAND_SSD_MAX_SIZE : r;
+    out->offset_x = cfg->effects.shadow_offset_x;
+    out->offset_y = cfg->effects.shadow_offset_y;
+
+    float alpha = a / 255.0f;
+    if (!view->activated) {
+        alpha *= 0.6f;
+    }
+    out->color[0] = ((c >> 16) & 0xFF) / 255.0f;
+    out->color[1] = ((c >> 8) & 0xFF) / 255.0f;
+    out->color[2] = (c & 0xFF) / 255.0f;
+    out->color[3] = alpha;
+    return true;
+}
 
 /* ==================== scenefx 落地 ==================== */
 #if WOODLAND_HAVE_EFFECTS
 
-
-/*
- * 这个 surface 是不是 root 自己，或者它的（可多层嵌套的）subsurface。
- * 圆角要按 buffer 算，就得先确认哪些 buffer 属于这个窗口——同一棵树里
- * 还可能有 popup 之类的别人的东西。
- */
 static bool surface_belongs_to(struct wlr_surface *surface, struct wlr_surface *root)
 {
     for (int depth = 0; surface && depth < 4; depth++) {
@@ -193,11 +278,6 @@ static bool surface_belongs_to(struct wlr_surface *surface, struct wlr_surface *
     return false;
 }
 
-/*
- * 内容 surface 在 scene 树里的那个 buffer 节点（xdg 与 x11 布局不同，按 surface 认）。
- * 顺带把它的绝对坐标带出去：blur 节点要贴在 buffer 上，而 buffer->node.x 只是
- * 相对父节点的偏移，CSD 客户端（geometry 与 surface 原点不同）照着摆会偏。
- */
 static struct wlr_scene_buffer *find_surface_buffer_at(struct wlr_scene_node *node,
                                                        struct wlr_surface *surface, int base_x,
                                                        int base_y, int *out_x, int *out_y)
@@ -232,12 +312,6 @@ static struct wlr_scene_buffer *find_surface_buffer_at(struct wlr_scene_node *no
     return NULL;
 }
 
-/*
- * 在 tree 里找内容 buffer，坐标相对于 tree 自身（不是相对场景根）。
- *
- * 从"tree 的子节点"开始走而不是从 tree 本身：tree 自己的 x/y 就是这个坐标系
- * 的原点，把它加进去会让 blur 节点整体偏移一个标题栏（曾经真的这么偏过）。
- */
 static struct wlr_scene_buffer *find_surface_buffer(struct wlr_scene_tree *tree,
                                                     struct wlr_surface *surface, int *out_x,
                                                     int *out_y)
@@ -248,7 +322,8 @@ static struct wlr_scene_buffer *find_surface_buffer(struct wlr_scene_tree *tree,
     struct wlr_scene_node *child;
     wl_list_for_each(child, &tree->children, link)
     {
-        struct wlr_scene_buffer *found = find_surface_buffer_at(child, surface, 0, 0, out_x, out_y);
+        struct wlr_scene_buffer *found =
+            find_surface_buffer_at(child, surface, 0, 0, out_x, out_y);
         if (found) {
             return found;
         }
@@ -271,17 +346,27 @@ static struct wlr_scene_blur *find_blur_node(struct wlr_scene_tree *tree)
     return NULL;
 }
 
+static struct wlr_scene_shadow *find_shadow_node(struct wlr_scene_tree *tree)
+{
+    if (!tree) {
+        return NULL;
+    }
+    struct wlr_scene_node *node;
+    wl_list_for_each(node, &tree->children, link)
+    {
+        if (node->type == WLR_SCENE_NODE_SHADOW) {
+            return wlr_scene_shadow_from_node(node);
+        }
+    }
+    return NULL;
+}
+
 static struct fx_corner_radii to_fx(const struct woodland_effect_corners *corners)
 {
     return corner_radii_new(corners->top_left, corners->top_right, corners->bottom_right,
                             corners->bottom_left);
 }
 
-/*
- * 逐 buffer 下发圆角。父 surface 的 buffer 通常占满窗口，四个角都对得上；
- * subsurface（视频、输入法、自带子窗口的客户端）画在它上面，如果原样留直角，
- * 窗口边缘就会露出一块尖角——所以每个 buffer 只圆自己贴边的那几个角。
- */
 static void apply_corners_at(struct wlr_scene_node *node, struct wlr_surface *root, int base_x,
                              int base_y, int width, int height,
                              const struct woodland_effect_corners *corners)
@@ -311,7 +396,6 @@ static void apply_corners_at(struct wlr_scene_node *node, struct wlr_surface *ro
     }
 }
 
-/* 同样以 tree 自身的原点为基准：半径判定要用"相对窗口"的坐标 */
 static void apply_corners_in_tree(struct wlr_scene_tree *tree, struct wlr_surface *root, int width,
                                   int height, const struct woodland_effect_corners *corners)
 {
@@ -335,20 +419,75 @@ static void update_corners(struct woodland_view *view)
 
     struct wlr_surface *surface = woodland_view_surface(view);
     if (surface) {
-        apply_corners_in_tree(view->scene_tree, surface, surface->current.width,
-                              surface->current.height, &corners);
+        if (view_has_csd_margins(view) && !view->ssd_overrides.corner_radius_set) {
+            struct woodland_effect_corners none = {0};
+            apply_corners_in_tree(view->scene_tree, surface, surface->current.width,
+                                  surface->current.height, &none);
+        } else {
+            apply_corners_in_tree(view->scene_tree, surface, surface->current.width,
+                                  surface->current.height, &corners);
+        }
     }
 
-    /*
-     * SSD 描边用同一个内半径：内容 buffer 与标题栏按它裁角，外框描边自动
-     * 再加一个边框厚度。有标题栏时内容上角被盖住取 0，描边外轮廓仍四角圆。
-     * 铺满屏幕时一律直角。
-     */
-    int frame_radius = woodland_effect_corner_radius(view);
-    if (view->maximized || view->fullscreen) {
-        frame_radius = 0;
+    struct woodland_effect_corners frame_corners;
+    woodland_effect_frame_corners(view, &frame_corners);
+    woodland_ssd_set_corners(view, frame_corners.top_left, frame_corners.top_right,
+                             frame_corners.bottom_right, frame_corners.bottom_left);
+}
+
+static bool blur_apply_internal(struct wlr_scene_tree *tree,
+                                struct wlr_scene_buffer *buf, int buf_x, int buf_y,
+                                int surf_w, int surf_h, const struct wlr_box *region,
+                                const struct woodland_effect_corners *corners,
+                                bool should_only_blur_bottom)
+{
+    if (!tree) {
+        return false;
     }
-    woodland_ssd_set_corner_radius(view, frame_radius);
+    struct wlr_scene_blur *blur = find_blur_node(tree);
+    if (!region || surf_w <= 0 || surf_h <= 0) {
+        if (blur) {
+            wlr_scene_node_set_enabled(&blur->node, false);
+        }
+        return false;
+    }
+
+    struct wlr_box full = {.x = 0, .y = 0, .width = surf_w, .height = surf_h};
+    struct wlr_box clamped = *region;
+    if (!wlr_box_intersection(&clamped, &clamped, &full)) {
+        if (blur) {
+            wlr_scene_node_set_enabled(&blur->node, false);
+        }
+        return false;
+    }
+
+    bool is_full = wlr_box_equal(&clamped, &full);
+    int node_x = is_full ? buf_x : (buf_x + clamped.x);
+    int node_y = is_full ? buf_y : (buf_y + clamped.y);
+    int node_w = is_full ? surf_w : clamped.width;
+    int node_h = is_full ? surf_h : clamped.height;
+
+    if (!blur) {
+        blur = wlr_scene_blur_create(tree, node_w, node_h);
+        if (!blur) {
+            wlr_log(WLR_ERROR, "failed to create blur node");
+            return false;
+        }
+        wlr_scene_node_lower_to_bottom(&blur->node);
+    }
+    wlr_scene_node_set_position(&blur->node, node_x, node_y);
+    wlr_scene_blur_set_size(blur, node_w, node_h);
+
+    if (is_full && corners) {
+        wlr_scene_blur_set_corner_radii(blur, to_fx(corners));
+    } else {
+        wlr_scene_blur_set_corner_radii(blur, corner_radii_none());
+    }
+
+    wlr_scene_blur_set_transparency_mask_source(blur, is_full ? buf : NULL);
+    wlr_scene_blur_set_should_only_blur_bottom_layer(blur, should_only_blur_bottom);
+    wlr_scene_node_set_enabled(&blur->node, true);
+    return true;
 }
 
 static void update_blur(struct woodland_view *view)
@@ -361,25 +500,116 @@ static void update_blur(struct woodland_view *view)
         return;
     }
 
-    struct wlr_box content;
-    woodland_view_content_box(view, &content);
-    if (content.width <= 0 || content.height <= 0) {
+    struct wlr_surface *surface = woodland_view_surface(view);
+    if (!surface || surface->current.width <= 0 || surface->current.height <= 0) {
+        woodland_effect_blur_clear(view->scene_tree);
         return;
     }
 
-    struct wlr_surface *surface = woodland_view_surface(view);
     int origin_x = 0;
     int origin_y = 0;
-    if (surface) {
-        /* 只为了把 node 的绝对坐标带出来；找不到 buffer 就退回 (0,0) */
+    struct wlr_scene_buffer *buf =
         find_surface_buffer(view->scene_tree, surface, &origin_x, &origin_y);
-    }
 
     struct woodland_effect_corners corners;
     woodland_effect_corners(view, &corners);
 
-    woodland_effect_blur_apply(view->scene_tree, surface, origin_x, origin_y, content.width,
-                               content.height, &view->effect.blur_region, &corners);
+    if (view_has_csd_margins(view) && !view->ssd_overrides.corner_radius_set) {
+        corners = (struct woodland_effect_corners){0};
+    }
+
+    bool opt = view->server && view->server->config &&
+               view->server->config->effects.blur_optimized;
+
+    blur_apply_internal(view->scene_tree, buf, origin_x, origin_y,
+                        surface->current.width, surface->current.height,
+                        &view->effect.blur_region, &corners, opt);
+}
+
+static void update_shadow(struct woodland_view *view)
+{
+    if (!view->scene_tree) {
+        return;
+    }
+    struct wlr_scene_shadow *shadow = find_shadow_node(view->scene_tree);
+    struct woodland_effect_shadow params;
+    if (!woodland_effect_shadow_params(view, &params)) {
+        if (shadow) {
+            wlr_scene_node_set_enabled(&shadow->node, false);
+        }
+        return;
+    }
+
+    struct woodland_ssd_margins m;
+    woodland_ssd_get_margins(view, &m);
+    struct wlr_box content;
+    woodland_view_content_box(view, &content);
+    if (content.width <= 0 || content.height <= 0) {
+        if (shadow) {
+            wlr_scene_node_set_enabled(&shadow->node, false);
+        }
+        return;
+    }
+
+    struct wlr_box frame_box = {
+        .x = -m.left,
+        .y = -m.top,
+        .width = content.width + m.left + m.right,
+        .height = content.height + m.top + m.bottom,
+    };
+
+    struct woodland_effect_corners frame_corners;
+    woodland_effect_frame_corners(view, &frame_corners);
+    int b = view->ssd ? (m.left > 0 ? m.left : 1) : 0;
+    int outer_radius = frame_corners.top_left > 0 ? frame_corners.top_left + b : 0;
+    if (frame_corners.top_right > 0 && frame_corners.top_right + b > outer_radius) {
+        outer_radius = frame_corners.top_right + b;
+    }
+    if (frame_corners.bottom_right > 0 && frame_corners.bottom_right + b > outer_radius) {
+        outer_radius = frame_corners.bottom_right + b;
+    }
+    if (frame_corners.bottom_left > 0 && frame_corners.bottom_left + b > outer_radius) {
+        outer_radius = frame_corners.bottom_left + b;
+    }
+
+    int r = params.radius;
+    int sx = frame_box.x + params.offset_x - r;
+    int sy = frame_box.y + params.offset_y - r;
+    int sw = frame_box.width + 2 * r;
+    int sh = frame_box.height + 2 * r;
+
+    if (!shadow) {
+        shadow = wlr_scene_shadow_create(view->scene_tree, sw, sh, outer_radius, (float)r,
+                                         params.color);
+        if (!shadow) {
+            wlr_log(WLR_ERROR, "failed to create shadow scene node");
+            return;
+        }
+        wlr_scene_node_lower_to_bottom(&shadow->node);
+    } else {
+        wlr_scene_shadow_set_size(shadow, sw, sh);
+        wlr_scene_shadow_set_corner_radius(shadow, outer_radius);
+        wlr_scene_shadow_set_blur_sigma(shadow, (float)r);
+        wlr_scene_shadow_set_color(shadow, params.color);
+    }
+
+    wlr_scene_node_set_position(&shadow->node, sx, sy);
+
+    struct clipped_region clip = clipped_region_get_default();
+    clip.area = (struct wlr_box){
+        .x = frame_box.x - sx,
+        .y = frame_box.y - sy,
+        .width = frame_box.width,
+        .height = frame_box.height,
+    };
+    clip.corners = corner_radii_new(
+        frame_corners.top_left > 0 ? frame_corners.top_left + b : 0,
+        frame_corners.top_right > 0 ? frame_corners.top_right + b : 0,
+        frame_corners.bottom_right > 0 ? frame_corners.bottom_right + b : 0,
+        frame_corners.bottom_left > 0 ? frame_corners.bottom_left + b : 0);
+    wlr_scene_shadow_set_clipped_region(shadow, clip);
+
+    wlr_scene_node_set_enabled(&shadow->node, true);
 }
 
 void woodland_effect_blur_clear(struct wlr_scene_tree *tree)
@@ -390,67 +620,11 @@ void woodland_effect_blur_clear(struct wlr_scene_tree *tree)
     }
 }
 
-bool woodland_effect_blur_apply(struct wlr_scene_tree *tree, struct wlr_surface *surface, int x,
-                                int y, int width, int height, const struct wlr_box *region,
+bool woodland_effect_blur_apply(struct wlr_scene_tree *tree, int x, int y, int width,
+                                int height, const struct wlr_box *region,
                                 const struct woodland_effect_corners *corners)
 {
-    if (!tree) {
-        return false;
-    }
-    struct wlr_scene_blur *blur = find_blur_node(tree);
-    if (!region || width <= 0 || height <= 0) {
-        if (blur) {
-            wlr_scene_node_set_enabled(&blur->node, false);
-        }
-        return false;
-    }
-
-    if (!blur) {
-        blur = wlr_scene_blur_create(tree, width, height);
-        if (!blur) {
-            wlr_log(WLR_ERROR, "failed to create blur node");
-            return false;
-        }
-        /* 必须画在内容之前：blur 采样的是"已经画上去的东西" */
-        wlr_scene_node_lower_to_bottom(&blur->node);
-    }
-    wlr_scene_node_set_position(&blur->node, x, y);
-    wlr_scene_blur_set_size(blur, width, height);
-
-    if (corners) {
-        wlr_scene_blur_set_corner_radii(blur, to_fx(corners));
-    } else {
-        wlr_scene_blur_set_corner_radii(blur, corner_radii_none());
-    }
-
-    /*
-     * region 是 surface 局部坐标，blur 节点也贴在 surface 原点上，两者同一个
-     * 坐标系，所以直接照搬——别再减 content 的原点，那会把区域整体推偏。
-     * 盖满整个内容时给空裁剪区（scenefx 的语义：空 = 不裁剪）。
-     */
-    struct clipped_region clip = clipped_region_get_default();
-    struct wlr_box full = {.x = 0, .y = 0, .width = width, .height = height};
-    if (!wlr_box_equal(region, &full)) {
-        clip.area = *region;
-    }
-    wlr_scene_blur_set_clipped_region(blur, clip);
-
-    /*
-     * 只在客户端真的画了东西的地方糊：遮罩用内容 buffer 的 alpha，scenefx 据此
-     * 打一张 stencil（完全透明的像素不画模糊）。
-     *
-     * 区域是客户端自己声明的，但声明得比画得大很常见——CSD 窗口的可视范围里
-     * 有一圈是"阴影预留"的全透明边，整个 surface 声明成 blur 区域时，那一圈
-     * 会在窗口外面糊出一圈毛边。没有遮罩就只能靠客户端自己算准。
-     */
-    struct wlr_scene_buffer *mask = NULL;
-    if (surface) {
-        mask = find_surface_buffer(tree, surface, NULL, NULL);
-    }
-    wlr_scene_blur_set_transparency_mask_source(blur, mask);
-
-    wlr_scene_node_set_enabled(&blur->node, true);
-    return true;
+    return blur_apply_internal(tree, NULL, x, y, width, height, region, corners, false);
 }
 
 void woodland_effect_layer_blur(struct woodland_layer_surface *layer, const struct wlr_box *region)
@@ -461,22 +635,135 @@ void woodland_effect_layer_blur(struct woodland_layer_surface *layer, const stru
     struct wlr_scene_tree *tree = layer->scene_layer_surface->tree;
     struct wlr_surface *surface = layer->layer_surface->surface;
     if (!region || !woodland_effect_server_blur_enabled(layer->server)) {
+        layer->effect.blur = false;
+        layer->effect.blur_region = (struct wlr_box){0};
         woodland_effect_blur_clear(tree);
         return;
     }
-    /* layer surface 没有装饰：从 (0,0) 起铺满自己，四角直角 */
-    woodland_effect_blur_apply(tree, surface, 0, 0, surface->current.width,
-                               surface->current.height, region, NULL);
+
+    int origin_x = 0;
+    int origin_y = 0;
+    struct wlr_scene_buffer *buf = find_surface_buffer(tree, surface, &origin_x, &origin_y);
+
+    enum zwlr_layer_shell_v1_layer zlayer = layer->layer_surface->current.layer;
+    bool opt = false;
+    if (layer->server && layer->server->config) {
+        if (zlayer == ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM) {
+            opt = true;
+        } else if (zlayer != ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND) {
+            opt = layer->server->config->effects.blur_optimized;
+        }
+    }
+
+    bool ok = blur_apply_internal(tree, buf, origin_x, origin_y, surface->current.width,
+                                  surface->current.height, region, NULL, opt);
+    layer->effect.blur = ok;
+    layer->effect.blur_region = ok ? *region : (struct wlr_box){0};
 }
 
 void woodland_effect_update(struct woodland_view *view)
 {
     if (!view || !view->mapped) {
-        /* map 之前没有内容可画；map 之后 ssd_update/commit 会补一次 */
         return;
     }
     update_corners(view);
     update_blur(view);
+    update_shadow(view);
+}
+
+void woodland_effect_apply_scene_config(struct woodland_server *server)
+{
+    if (!server || !server->scene) {
+        return;
+    }
+    const struct woodland_config *cfg = server->config;
+    if (cfg) {
+        wlr_scene_set_blur_data(server->scene, cfg->effects.blur_passes,
+                                cfg->effects.blur_radius, (float)cfg->effects.blur_noise,
+                                (float)cfg->effects.blur_brightness,
+                                (float)cfg->effects.blur_contrast,
+                                (float)cfg->effects.blur_saturation);
+    }
+    woodland_effect_outputs_update(server);
+}
+
+void woodland_effect_output_update(struct woodland_output *output)
+{
+    if (!output || !output->server || !output->wlr_output) {
+        return;
+    }
+    struct woodland_server *server = output->server;
+    bool enable = woodland_effect_server_blur_enabled(server);
+
+    struct wlr_box box = {0};
+    wlr_output_layout_get_box(server->output_layout, output->wlr_output, &box);
+    if (box.width <= 0 || box.height <= 0) {
+        enable = false;
+    }
+
+    if (!enable) {
+        if (output->optimized_blur) {
+            wlr_scene_node_destroy(&output->optimized_blur->node);
+            output->optimized_blur = NULL;
+        }
+        return;
+    }
+
+    if (!output->optimized_blur) {
+        output->optimized_blur =
+            wlr_scene_optimized_blur_create(&server->scene->tree, box.width, box.height);
+        if (!output->optimized_blur) {
+            wlr_log(WLR_ERROR, "failed to create optimized blur node for %s",
+                    output->wlr_output->name);
+            return;
+        }
+        if (output->layer_tree[0]) {
+            wlr_scene_node_place_above(&output->optimized_blur->node,
+                                       &output->layer_tree[0]->node);
+        }
+        wlr_scene_node_set_position(&output->optimized_blur->node, box.x, box.y);
+        wlr_scene_optimized_blur_mark_dirty(output->optimized_blur);
+    } else {
+        if (output->optimized_blur->node.x != box.x || output->optimized_blur->node.y != box.y) {
+            wlr_scene_node_set_position(&output->optimized_blur->node, box.x, box.y);
+            wlr_scene_optimized_blur_mark_dirty(output->optimized_blur);
+        }
+        wlr_scene_optimized_blur_set_size(output->optimized_blur, box.width, box.height);
+    }
+    wlr_scene_node_set_enabled(&output->optimized_blur->node, true);
+}
+
+void woodland_effect_output_destroy(struct woodland_output *output)
+{
+    if (output && output->optimized_blur) {
+        wlr_scene_node_destroy(&output->optimized_blur->node);
+        output->optimized_blur = NULL;
+    }
+}
+void woodland_effect_outputs_update(struct woodland_server *server)
+{
+    if (!server || !server->outputs.next) {
+        return;
+    }
+    struct woodland_output *output;
+    wl_list_for_each(output, &server->outputs, link)
+    {
+        woodland_effect_output_update(output);
+    }
+}
+
+void woodland_effect_mark_blur_dirty(struct woodland_server *server)
+{
+    if (!server || !server->outputs.next) {
+        return;
+    }
+    struct woodland_output *output;
+    wl_list_for_each(output, &server->outputs, link)
+    {
+        if (output->optimized_blur) {
+            wlr_scene_optimized_blur_mark_dirty(output->optimized_blur);
+        }
+    }
 }
 
 #else /* !WOODLAND_HAVE_EFFECTS */
@@ -491,12 +778,11 @@ void woodland_effect_blur_clear(struct wlr_scene_tree *tree)
     (void)tree;
 }
 
-bool woodland_effect_blur_apply(struct wlr_scene_tree *tree, struct wlr_surface *surface, int x,
-                                int y, int width, int height, const struct wlr_box *region,
+bool woodland_effect_blur_apply(struct wlr_scene_tree *tree, int x, int y, int width,
+                                int height, const struct wlr_box *region,
                                 const struct woodland_effect_corners *corners)
 {
     (void)tree;
-    (void)surface;
     (void)x;
     (void)y;
     (void)width;
@@ -510,6 +796,31 @@ void woodland_effect_layer_blur(struct woodland_layer_surface *layer, const stru
 {
     (void)layer;
     (void)region;
+}
+
+void woodland_effect_apply_scene_config(struct woodland_server *server)
+{
+    (void)server;
+}
+
+void woodland_effect_output_update(struct woodland_output *output)
+{
+    (void)output;
+}
+
+void woodland_effect_output_destroy(struct woodland_output *output)
+{
+    (void)output;
+}
+
+void woodland_effect_outputs_update(struct woodland_server *server)
+{
+    (void)server;
+}
+
+void woodland_effect_mark_blur_dirty(struct woodland_server *server)
+{
+    (void)server;
 }
 
 #endif

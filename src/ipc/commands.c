@@ -469,6 +469,11 @@ static void append_view_details(struct woodland_server *server, struct woodland_
         woodland_json_arr_sep(&rendered);
         woodland_json_string(out, "corner_radius");
     }
+    if (view->ssd_overrides.shadow_set &&
+        woodland_effect_server_enabled(view->server)) {
+        woodland_json_arr_sep(&rendered);
+        woodland_json_string(out, "shadow");
+    }
 #endif
     woodland_json_arr_close(&rendered);
     woodland_json_obj_close(&deco);
@@ -646,6 +651,9 @@ static void dump_node(struct scene_dump_ctx *ctx, struct wlr_scene_node *node, i
     case WLR_SCENE_NODE_OPTIMIZED_BLUR:
         woodland_json_obj_str(&obj, "type", "optimized_blur");
         break;
+    case WLR_SCENE_NODE_SHADOW:
+        woodland_json_obj_str(&obj, "type", "shadow");
+        break;
 #endif
     default:
         woodland_json_obj_str(&obj, "type", "unknown");
@@ -706,6 +714,24 @@ static void dump_node(struct scene_dump_ctx *ctx, struct wlr_scene_node *node, i
                           blur->corners.bottom_right, blur->corners.bottom_left};
         woodland_json_obj_key(&obj, "corners");
         woodland_json_int_array(out, corners, 4);
+    }
+    else if (node->type == WLR_SCENE_NODE_OPTIMIZED_BLUR) {
+        struct wlr_scene_optimized_blur *opt = wlr_scene_optimized_blur_from_node(node);
+        woodland_json_obj_int(&obj, "w", opt->width);
+        woodland_json_obj_int(&obj, "h", opt->height);
+    }
+    else if (node->type == WLR_SCENE_NODE_SHADOW) {
+        struct wlr_scene_shadow *shadow = wlr_scene_shadow_from_node(node);
+        woodland_json_obj_int(&obj, "w", shadow->width);
+        woodland_json_obj_int(&obj, "h", shadow->height);
+        woodland_json_obj_int(&obj, "corner_radius", shadow->corner_radius);
+        woodland_json_obj_int(&obj, "blur_sigma", (int)(shadow->blur_sigma + 0.5f));
+        int rgba[4];
+        for (int i = 0; i < 4; i++) {
+            rgba[i] = (int)(shadow->color[i] * 255.0f + 0.5f);
+        }
+        woodland_json_obj_key(&obj, "rgba");
+        woodland_json_int_array(out, rgba, 4);
     }
 #endif
 

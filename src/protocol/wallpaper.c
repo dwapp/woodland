@@ -29,7 +29,7 @@
 #include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_scene.h>
 #include <wlr/util/log.h>
-
+#include "effect.h"
 #include "output.h"
 #include "protocol_internal.h"
 #include "session_lock.h"
@@ -75,6 +75,7 @@ struct woodland_wallpaper_surface {
     int play_state;
     struct wl_list link; // woodland_proto_wallpaper.surfaces
     struct wl_listener surface_destroy;
+    struct wl_listener surface_commit;
 };
 
 /* 一个 manager 对象（treeland_wallpaper_v1）：绑定到某个输出 */
@@ -290,6 +291,7 @@ static void wallpaper_apply_visibility(struct woodland_proto_wallpaper *wp) {
             struct wlr_scene_node *node = &wallpaper->scene_surface->buffer->node;
             if (node->enabled != show) {
                 wlr_scene_node_set_enabled(node, show);
+                woodland_effect_mark_blur_dirty(wp->server);
             }
         }
         if (!wallpaper->ready || wallpaper->play_state == (visible ? 1 : 0)) {
@@ -399,12 +401,25 @@ static const struct wlr_surface_role wallpaper_role = {
 };
 
 static void wallpaper_surface_free(struct woodland_wallpaper_surface *wallpaper) {
+    if (wallpaper->surface_commit.link.prev) {
+        wl_list_remove(&wallpaper->surface_commit.link);
+    }
     if (wallpaper->surface_destroy.link.prev) {
         wl_list_remove(&wallpaper->surface_destroy.link);
     }
     wl_list_remove(&wallpaper->link);
     free(wallpaper->source);
     free(wallpaper);
+}
+
+static void wallpaper_handle_surface_commit(struct wl_listener *listener, void *data) {
+    struct woodland_wallpaper_surface *wallpaper =
+        wl_container_of(listener, wallpaper, surface_commit);
+    (void)data;
+    if (wallpaper->ready && wallpaper->scene_surface &&
+        wallpaper->scene_surface->buffer->node.enabled) {
+        woodland_effect_mark_blur_dirty(wallpaper->wp->server);
+    }
 }
 
 static void wallpaper_handle_surface_destroy(struct wl_listener *listener, void *data) {
@@ -414,7 +429,9 @@ static void wallpaper_handle_surface_destroy(struct wl_listener *listener, void 
     /* wlroots 的 scene_surface 会在其自己的 surface.events.destroy 监听器中释放节点 */
     wallpaper->wlr_surface = NULL;
     wallpaper->scene_surface = NULL;
+    wl_list_remove(&wallpaper->surface_commit.link);
     wl_list_remove(&wallpaper->surface_destroy.link);
+    wl_list_init(&wallpaper->surface_commit.link);
     wl_list_init(&wallpaper->surface_destroy.link);
 }
 
@@ -550,7 +567,8 @@ static void shell_get_wallpaper_surface(struct wl_client *client,
 
     woodland_listener_connect(&wallpaper->surface_destroy, &wlr_surface->events.destroy,
                               wallpaper_handle_surface_destroy, "wallpaper.surface_destroy");
-
+    woodland_listener_connect(&wallpaper->surface_commit, &wlr_surface->events.commit,
+                              wallpaper_handle_surface_commit, "wallpaper.surface_commit");
     wl_list_insert(&wp->surfaces, &wallpaper->link);
     /* 新 surface 可能不是当前该显示的那张：先让可见性裁决一次再报日志 */
     wallpaper_apply_visibility(wp);
@@ -904,6 +922,7 @@ static void wallpaper_handle_layout_change(struct wl_listener *listener, void *d
         wl_container_of(listener, wp, layout_change);
     (void)data;
     wallpaper_update_position(wp);
+    woodland_effect_outputs_update(wp->server);
 }
 
 

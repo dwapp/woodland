@@ -14,8 +14,8 @@
  *   标题栏  完整支持（hide 后边距只剩边框，命中区域同步收掉）；
  *   圆角    交给 scenefx 裁（buffer/rect 的 corner radius）；[effects] enabled
  *           关掉时半径直接折成 0，不是"记了不画"；
- *   阴影    只记录：scenefx 有 shadow 节点，但窗口阴影要先决定"阴影算不算
- *           外框几何"（边距/吸附/最大化都得跟着改），留到单独一版。
+ *   阴影    交给 scenefx 渲染（wlr_scene_shadow 带外框挖空）；[effects] enabled
+ *           关掉时只记录不建节点。
  *
  * 记了没画的属性不装作"生效了"：值存下来、wctl get_tree 里看得见（rendered
  * 列表只列真的会改画面的），trace 里写明没有渲染后端。客户端据此可以判断，
@@ -297,8 +297,20 @@ static void context_set_shadow(struct wl_client *client, struct wl_resource *res
     view->ssd_overrides.shadow_dx = offset_x;
     view->ssd_overrides.shadow_dy = offset_y;
     view->ssd_overrides.shadow_rgba = color_pack(r, g, b, a);
-    woodland_trace_add("deco", view->id, "shadow radius=%u offset=%d,%d recorded (no render backend)",
-                       radius, (int)offset_x, (int)offset_y);
+#if WOODLAND_HAVE_EFFECTS
+    if (woodland_effect_server_enabled(view->server)) {
+        woodland_trace_add("deco", view->id, "shadow radius=%u offset=%d,%d", radius,
+                           (int)offset_x, (int)offset_y);
+    } else {
+        woodland_trace_add("deco", view->id,
+                           "shadow radius=%u offset=%d,%d recorded (effects disabled)", radius,
+                           (int)offset_x, (int)offset_y);
+    }
+#else
+    woodland_trace_add("deco", view->id,
+                       "shadow radius=%u offset=%d,%d recorded (no render backend)", radius,
+                       (int)offset_x, (int)offset_y);
+#endif
     context_apply(ctx);
 }
 

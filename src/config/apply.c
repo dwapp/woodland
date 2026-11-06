@@ -157,12 +157,24 @@ void woodland_config_apply(struct woodland_server *server, struct woodland_confi
         apply_cursor_config(server, &new_config->cursor);
     }
 
-    /* 5. effects：圆角与模糊是运行期开关，改了要立刻重画 */
+    /* 5. effects：圆角、模糊、阴影是运行期开关，改了要立刻重算（逐字段比较避免 padding 误判） */
     bool fx_changed =
-        !old_config || (new_config->effects.enabled != old_config->effects.enabled) ||
+        !old_config ||
+        (new_config->effects.enabled != old_config->effects.enabled) ||
         (new_config->effects.blur != old_config->effects.blur) ||
-        (new_config->effects.corner_radius != old_config->effects.corner_radius);
-
+        (new_config->effects.blur_optimized != old_config->effects.blur_optimized) ||
+        (new_config->effects.blur_passes != old_config->effects.blur_passes) ||
+        (new_config->effects.blur_radius != old_config->effects.blur_radius) ||
+        (new_config->effects.blur_noise != old_config->effects.blur_noise) ||
+        (new_config->effects.blur_brightness != old_config->effects.blur_brightness) ||
+        (new_config->effects.blur_contrast != old_config->effects.blur_contrast) ||
+        (new_config->effects.blur_saturation != old_config->effects.blur_saturation) ||
+        (new_config->effects.corner_radius != old_config->effects.corner_radius) ||
+        (new_config->effects.shadow != old_config->effects.shadow) ||
+        (new_config->effects.shadow_radius != old_config->effects.shadow_radius) ||
+        (new_config->effects.shadow_offset_x != old_config->effects.shadow_offset_x) ||
+        (new_config->effects.shadow_offset_y != old_config->effects.shadow_offset_y) ||
+        (new_config->effects.shadow_color != old_config->effects.shadow_color);
     /* 6. 记入决策轨迹 */
     woodland_trace_add("cfg_apply", 0,
                        "path=%s placement=%s kb_changed=%d ssd_changed=%d fx_changed=%d",
@@ -182,6 +194,7 @@ void woodland_config_apply(struct woodland_server *server, struct woodland_confi
      *    bind 时问过一次"你会不会模糊"。
      */
     if (fx_changed) {
+        woodland_effect_apply_scene_config(server);
         struct woodland_view *view;
         wl_list_for_each(view, &server->views, link)
         {
@@ -206,26 +219,34 @@ bool woodland_config_reload(struct woodland_server *server)
     if (!server) {
         return false;
     }
-
+    char *allocated_path = NULL;
     const char *path = server->config ? server->config->loaded_path : NULL;
+    if (!path) {
+        allocated_path = woodland_config_resolve_path(server->config_path);
+        path = allocated_path;
+    }
     if (!path || access(path, R_OK) != 0) {
         wlr_log(WLR_INFO, "config: reload: no valid file path to reload");
+        free(allocated_path);
         return false;
     }
 
     FILE *f = fopen(path, "rb");
     if (!f) {
         wlr_log(WLR_ERROR, "config: reload failed: cannot open %s: %s", path, strerror(errno));
+        free(allocated_path);
         return false;
     }
 
     if (fseek(f, 0, SEEK_END) != 0) {
         fclose(f);
+        free(allocated_path);
         return false;
     }
     long size = ftell(f);
     if (size < 0) {
         fclose(f);
+        free(allocated_path);
         return false;
     }
     rewind(f);
@@ -233,6 +254,7 @@ bool woodland_config_reload(struct woodland_server *server)
     char *buf = malloc(size + 1);
     if (!buf) {
         fclose(f);
+        free(allocated_path);
         return false;
     }
 
@@ -247,6 +269,7 @@ bool woodland_config_reload(struct woodland_server *server)
         wlr_log(WLR_ERROR, "config: reload failed: syntax error in %s: %s (keeping current config)",
                 path, errbuf);
         free(buf);
+        free(allocated_path);
         return false;
     }
     toml_free(doc);
@@ -255,11 +278,13 @@ bool woodland_config_reload(struct woodland_server *server)
     struct woodland_config *new_cfg = woodland_config_parse_string(buf, read_bytes, path);
     free(buf);
     if (!new_cfg) {
+        free(allocated_path);
         return false;
     }
     new_cfg->loaded_path = strdup(path);
 
     woodland_config_apply(server, new_cfg);
     wlr_log(WLR_INFO, "config: reloaded successfully from %s", path);
+    free(allocated_path);
     return true;
 }
