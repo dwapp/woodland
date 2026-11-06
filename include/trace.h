@@ -44,7 +44,8 @@ bool woodland_trace_enabled(void);
  * 这是全仓库唯一的权威清单，加新标签先改这里、再发第一条轨迹；
  * AGENTS.md 里的清单只是转述：
  *   map / unmap / destroy / focus / focus_none / layer_focus / place /
- *   workspace / output_add / output_remove / cfg_apply / deco / bg_effect
+ *   workspace / output_add / output_remove / cfg_apply / deco / bg_effect /
+ *   action
  *
  * detail 只写**决策依据**（哪个分支、算了什么、为什么），不要重复
  * get_tree 已经能查到的状态——轨迹的价值在"为什么"，不在"是什么"。

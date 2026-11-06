@@ -116,6 +116,35 @@ if get_option('test').enabled()
          timeout: 60)
   endif
 
+  # treeland-compositor-action：bind / trigger / destroy + 工作区动作接线。
+  # 探针只需要仓库内 XML 和 wayland-client，不依赖系统 wayland-protocols；
+  # 缺依赖就不构建探针、不注册测试，免得把构建搞挂。
+  action_xml = meson.project_source_root() / 'protocols' / 'treeland' / 'treeland-compositor-action-unstable-v1.xml'
+  if wayland_client_dep.found() and wayland_scanner.found() and fs.exists(action_xml)
+    action_probe_srcs = [
+      'smoke/action_probe.c',
+      custom_target('treeland-compositor-action-client-header',
+        input: action_xml,
+        output: 'treeland-compositor-action-unstable-v1-client-protocol.h',
+        command: [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@']),
+      custom_target('treeland-compositor-action-client-code',
+        input: action_xml,
+        output: 'treeland-compositor-action-unstable-v1-protocol.c',
+        command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@']),
+    ]
+
+    action_probe = executable('action_probe', action_probe_srcs,
+                               dependencies: [wayland_client_dep])
+    test('smoke-compositor-action',
+         find_program('sh'),
+         args: [meson.current_source_dir() / 'smoke' / 'run_action_smoke.sh',
+                woodland_bin.full_path(),
+                action_probe.full_path(),
+                wctl_bin.full_path()],
+         is_parallel: false,
+         timeout: 90)
+  endif
+
   # output-management 的事件顺序回归（apply 的 succeeded 必须先于新一轮
   # configuration + done）。协议 xml 属于 wlr-protocols（不在
   # wayland-protocols 里），只认系统安装位置：wrap 内的 wlroots 属于嵌套

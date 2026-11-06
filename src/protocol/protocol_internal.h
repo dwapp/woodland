@@ -14,6 +14,7 @@ struct woodland_proto_drm_lease;
 struct woodland_proto_decoration;
 struct woodland_proto_bg_effect;
 struct woodland_proto_wallpaper;
+struct woodland_proto_compositor_action;
 struct wlr_output;
 struct wlr_viewporter;
 struct wlr_presentation;
@@ -39,7 +40,7 @@ struct woodland_proto {
     struct wlr_presentation *presentation;
     struct wlr_linux_drm_syncobj_manager_v1 *linux_drm_syncobj;
 
-    /* 有状态的五族，混在一起会互相拖累得看不出边界 */
+    /* 有状态的各族，混在一起会互相拖累得看不出边界 */
     struct woodland_proto_idle *idle;      /* idle.c   */
     struct woodland_proto_output *output;  /* output.c */
     struct woodland_proto_input *input;    /* input.c  */
@@ -48,6 +49,7 @@ struct woodland_proto {
     struct woodland_proto_decoration *decoration; /* decoration.c */
     struct woodland_proto_bg_effect *bg_effect;   /* background_effect.c */
     struct woodland_proto_wallpaper *wallpaper;   /* wallpaper.c */
+    struct woodland_proto_compositor_action *compositor_action; /* compositor_action.c */
 };
 
 /* 空闲与抑制族（idle.c）：idle-notify / idle-inhibit / keyboard-shortcuts-inhibit */
@@ -101,5 +103,9 @@ void woodland_proto_wallpaper_finish(struct woodland_proto *proto);
  */
 void woodland_proto_wallpaper_output_added(struct woodland_proto *proto,
                                            struct wlr_output *output);
+
+/* shell 动作族（compositor_action.c）：treeland-compositor-action-v1 */
+bool woodland_proto_compositor_action_init(struct woodland_proto *proto);
+void woodland_proto_compositor_action_finish(struct woodland_proto *proto);
 
 #endif
