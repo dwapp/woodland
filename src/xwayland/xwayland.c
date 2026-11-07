@@ -215,6 +215,16 @@ static void xwl_associate(struct wl_listener *listener, void *data) {
     woodland_listener_connect(&view->commit, &xsurface->surface->events.commit,
                           xwl_commit, "xwayland.commit");
 
+    /*
+     * EWMH: 窗口映射前可能已经设置了 _NET_WM_STATE（fullscreen/maximized）。
+     * 在 associate 阶段定下初始全屏/最大化状态（对齐 labwc）。
+     */
+    if (xsurface->fullscreen) {
+        woodland_view_set_fullscreen(view, true, NULL);
+    } else if (xsurface->maximized_horz || xsurface->maximized_vert) {
+        woodland_view_set_maximized(view, true);
+    }
+
     /* 属性在 map_request 之后才读完，这里定下装饰策略：
      * _MOTIF_WM_HINTS 请求无边框的窗口不画 SSD（同 labwc want_deco） */
     bool borderless =

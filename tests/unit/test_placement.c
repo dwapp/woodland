@@ -210,6 +210,28 @@ int main(void) {
     assert(strcmp(woodland_placement_policy_name(WOODLAND_PLACE_AUTOPLACE),
                   "autoplace") == 0);
 
+    /* ---------- 浮动状态判定与非浮动窗口不重放 ---------- */
+    struct woodland_view v = {0};
+    assert(woodland_view_is_floating(&v));
+    v.fullscreen = true;
+    assert(!woodland_view_is_floating(&v));
+    v.fullscreen = false;
+    v.maximized = true;
+    assert(!woodland_view_is_floating(&v));
+    v.maximized = false;
+    v.snapped_edges = 1;
+    assert(!woodland_view_is_floating(&v));
+
+    /* 全屏窗口调用 woodland_view_place_initial 绝不修改场景节点位置（避让 workarea 的 bug 修复） */
+    v.fullscreen = true;
+    v.server = &server;
+    v.scene_tree = wlr_scene_tree_create(&server.scene->tree);
+    wlr_scene_node_set_position(&v.scene_tree->node, 0, 0);
+    woodland_view_place_initial(&v);
+    assert(v.scene_tree->node.x == 0);
+    assert(v.scene_tree->node.y == 0);
+    wlr_scene_node_destroy(&v.scene_tree->node);
+
     woodland_output_finish(&server);
     wlr_scene_node_destroy(&server.scene->tree.node);
     server.scene = NULL;
