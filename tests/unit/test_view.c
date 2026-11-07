@@ -20,6 +20,10 @@
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_output_layout.h>
 #include "scene.h"
+#include "config.h"
+#if WOODLAND_HAVE_XWAYLAND
+#include <wlr/xwayland.h>
+#endif
 
 int main(void)
 {
@@ -531,6 +535,60 @@ int main(void)
     wl_list_remove(&pipe_view.link);
     wlr_scene_node_destroy(&pipe_view.scene_tree->node);
 
+#if WOODLAND_HAVE_XWAYLAND
+    /* ==================== Xwayland toplevel 过滤与任务栏测试 ==================== */
+    struct wlr_xwayland_surface xs_normal = {0};
+    struct woodland_view xv = {0};
+    xv.server = &server;
+    xv.type = WOODLAND_VIEW_XWAYLAND;
+    xv.xwayland_surface = &xs_normal;
+    xv.scene_tree = wlr_scene_tree_create(&server.scene->tree);
+
+    /* 1. 默认 X11 窗口（无特殊 window_type、无 skip_taskbar）应视为 toplevel */
+    assert(woodland_view_wants_foreign_toplevel(&xv));
+
+    /* 2. skip_taskbar 的 X11 窗口不应进任务栏 */
+    xs_normal.skip_taskbar = true;
+    assert(!woodland_view_wants_foreign_toplevel(&xv));
+    xs_normal.skip_taskbar = false;
+    assert(woodland_view_wants_foreign_toplevel(&xv));
+
+    /* 3. override_redirect 的 X11 窗口不应进任务栏 */
+    xs_normal.override_redirect = true;
+    assert(!woodland_view_wants_foreign_toplevel(&xv));
+    xs_normal.override_redirect = false;
+    xv.override_redirect = true;
+    assert(!woodland_view_wants_foreign_toplevel(&xv));
+    xv.override_redirect = false;
+    assert(woodland_view_wants_foreign_toplevel(&xv));
+
+    /* 6. 动态任务栏句柄同步：未 mapped 时调用 update_taskbar_presence 不产生 handle */
+    xv.mapped = false;
+    woodland_view_update_taskbar_presence(&xv);
+    assert(xv.toplevel_handle == NULL);
+
+    /* 7. mapped 且为 toplevel 时自动创建 handle */
+    xv.mapped = true;
+    woodland_view_update_taskbar_presence(&xv);
+    assert(xv.toplevel_handle != NULL);
+
+    /* 8. 动态设置 skip_taskbar 后，update_taskbar_presence 自动销毁 handle */
+    xs_normal.skip_taskbar = true;
+    woodland_view_update_taskbar_presence(&xv);
+    assert(xv.toplevel_handle == NULL);
+
+    /* 9. 取消 skip_taskbar 后重新创建 handle */
+    xs_normal.skip_taskbar = false;
+    woodland_view_update_taskbar_presence(&xv);
+    assert(xv.toplevel_handle != NULL);
+
+    /* 10. unmap 时自动销毁 handle */
+    xv.mapped = false;
+    woodland_view_update_taskbar_presence(&xv);
+    assert(xv.toplevel_handle == NULL);
+
+    wlr_scene_node_destroy(&xv.scene_tree->node);
+#endif
     woodland_snap_preview_finish(&server);
 
     wlr_cursor_destroy(server.cursor);

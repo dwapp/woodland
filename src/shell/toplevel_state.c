@@ -378,10 +378,81 @@ static void ft_request_close(struct wl_listener *listener, void *data)
     (void)data;
 }
 
+bool woodland_view_wants_foreign_toplevel(const struct woodland_view *view)
+{
+    if (!view) {
+        return false;
+    }
+    if (view->type == WOODLAND_VIEW_XDG) {
+        return true;
+    }
+#if WOODLAND_HAVE_XWAYLAND
+    if (view->type == WOODLAND_VIEW_XWAYLAND) {
+        struct wlr_xwayland_surface *xsurface = view->xwayland_surface;
+        if (!xsurface) {
+            return false;
+        }
+        if (xsurface->override_redirect || view->override_redirect) {
+            return false;
+        }
+        if (xsurface->skip_taskbar) {
+            return false;
+        }
+        if (xsurface->xwm) {
+            if (wlr_xwayland_surface_icccm_input_model(xsurface) == WLR_ICCCM_INPUT_MODEL_NONE) {
+                return false;
+            }
+            if (xsurface->window_type_len > 0) {
+                bool is_normal_or_dialog =
+                    wlr_xwayland_surface_has_window_type(xsurface,
+                                                         WLR_XWAYLAND_NET_WM_WINDOW_TYPE_NORMAL) ||
+                    wlr_xwayland_surface_has_window_type(xsurface,
+                                                         WLR_XWAYLAND_NET_WM_WINDOW_TYPE_DIALOG);
+                if (!is_normal_or_dialog) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+#endif
+    return true;
+}
+
+void woodland_view_finish_handles(struct woodland_view *view)
+{
+    if (!view) {
+        return;
+    }
+    if (view->toplevel_handle) {
+        wl_list_remove(&view->ft_request_activate.link);
+        wl_list_remove(&view->ft_request_maximize.link);
+        wl_list_remove(&view->ft_request_fullscreen.link);
+        wl_list_remove(&view->ft_request_minimize.link);
+        wl_list_remove(&view->ft_request_close.link);
+        wlr_foreign_toplevel_handle_v1_destroy(view->toplevel_handle);
+        view->toplevel_handle = NULL;
+    }
+    if (view->ext_toplevel_handle) {
+        wl_list_remove(&view->ext_handle_destroy.link);
+        wlr_ext_foreign_toplevel_handle_v1_destroy(view->ext_toplevel_handle);
+        view->ext_toplevel_handle = NULL;
+    }
+}
+
 /* foreign-toplevel 与 ext-foreign-toplevel-list 句柄：两个后端共用 */
 void woodland_view_init_handles(struct woodland_view *view)
 {
+    if (!view || view->toplevel_handle) {
+        return;
+    }
+    if (!woodland_view_wants_foreign_toplevel(view)) {
+        return;
+    }
     struct woodland_server *server = view->server;
+    if (!server) {
+        return;
+    }
 
     if (server->foreign_toplevel_manager) {
         view->toplevel_handle =
@@ -403,6 +474,28 @@ void woodland_view_init_handles(struct woodland_view *view)
             woodland_listener_connect(&view->ft_request_close,
                                       &view->toplevel_handle->events.request_close,
                                       ft_request_close, "toplevel_state.request_close");
+            if (view->title) {
+                wlr_foreign_toplevel_handle_v1_set_title(view->toplevel_handle, view->title);
+            }
+            if (view->app_id) {
+                wlr_foreign_toplevel_handle_v1_set_app_id(view->toplevel_handle, view->app_id);
+            }
+            if (view->maximized) {
+                wlr_foreign_toplevel_handle_v1_set_maximized(view->toplevel_handle, true);
+            }
+            if (view->fullscreen) {
+                wlr_foreign_toplevel_handle_v1_set_fullscreen(view->toplevel_handle, true);
+            }
+            if (view->minimized) {
+                wlr_foreign_toplevel_handle_v1_set_minimized(view->toplevel_handle, true);
+            }
+            if (view->activated) {
+                wlr_foreign_toplevel_handle_v1_set_activated(view->toplevel_handle, true);
+            }
+            if (view->parent && view->parent->toplevel_handle) {
+                wlr_foreign_toplevel_handle_v1_set_parent(view->toplevel_handle,
+                                                          view->parent->toplevel_handle);
+            }
         }
     }
 
@@ -423,6 +516,25 @@ void woodland_view_init_handles(struct woodland_view *view)
         }
     }
     woodland_view_update_outputs(view);
+}
+
+void woodland_view_update_taskbar_presence(struct woodland_view *view)
+{
+    if (!view || !view->server) {
+        return;
+    }
+    bool wants = view->mapped && woodland_view_wants_foreign_toplevel(view);
+    if (wants) {
+        if (!view->toplevel_handle) {
+            woodland_view_init_handles(view);
+            woodland_signal_emit(&view->server->view_mapped, view);
+        }
+    } else {
+        if (view->toplevel_handle) {
+            woodland_signal_emit(&view->server->view_unmapped, view);
+            woodland_view_finish_handles(view);
+        }
+    }
 }
 
 void woodland_view_update_outputs(struct woodland_view *view)

@@ -50,12 +50,17 @@ struct woodland_unmanaged {
     struct wl_listener unmap;
     struct wl_listener destroy;
     struct wl_listener set_geometry;
+    struct wl_listener set_override_redirect;
 };
 
 static void unmanaged_set_geometry(struct woodland_unmanaged *unmanaged);
 static void unmanaged_map(struct wl_listener *listener, void *data);
 static void unmanaged_unmap(struct wl_listener *listener, void *data);
 static void unmanaged_update_filter_mode(struct woodland_unmanaged *unmanaged);
+static void unmanaged_set_override_redirect(struct wl_listener *listener, void *data);
+static void xwl_new_view(struct woodland_server *server, struct wlr_xwayland_surface *xsurface);
+static void xwl_new_unmanaged(struct woodland_server *server, struct wlr_xwayland_surface *xsurface);
+static void xwl_destroy(struct wl_listener *listener, void *data);
 
 static void unmanaged_set_geometry(struct woodland_unmanaged *unmanaged) {
     struct wlr_xwayland_surface *xsurface = unmanaged->xsurface;
@@ -112,7 +117,9 @@ static void unmanaged_attach_surface(struct woodland_unmanaged *unmanaged,
                           unmanaged_unmap, "xwayland.unmap");
     /* set_geometry 里已经会刷一次滤波（buffer 这时通常还没有，是空操作），
      * 真正的第一次生效在 map 之后 */
-    unmanaged_set_geometry(unmanaged);
+    if (surface->mapped) {
+        unmanaged_map(&unmanaged->map, NULL);
+    }
 }
 
 static void unmanaged_associate(struct wl_listener *listener, void *data) {
@@ -196,10 +203,28 @@ static void unmanaged_destroy(struct wl_listener *listener, void *data) {
         wl_list_remove(&unmanaged->unmap.link);
     }
     wl_list_remove(&unmanaged->link);
+    wl_list_remove(&unmanaged->set_override_redirect.link);
     wlr_scene_node_destroy(&unmanaged->scene_tree->node);
     free(unmanaged);
     (void)data;
 }
+static void unmanaged_set_override_redirect(struct wl_listener *listener, void *data) {
+    struct woodland_unmanaged *unmanaged =
+        wl_container_of(listener, unmanaged, set_override_redirect);
+    struct wlr_xwayland_surface *xsurface = unmanaged->xsurface;
+    (void)data;
+    if (!xsurface || xsurface->override_redirect) {
+        return;
+    }
+    struct woodland_server *server = unmanaged->server;
+    bool mapped = xsurface->surface && xsurface->surface->mapped;
+    if (mapped) {
+        unmanaged_unmap(&unmanaged->unmap, NULL);
+    }
+    unmanaged_destroy(&unmanaged->destroy, NULL);
+    xwl_new_view(server, xsurface);
+}
+
 
 static void xwl_new_unmanaged(struct woodland_server *server,
                               struct wlr_xwayland_surface *xsurface) {
@@ -221,6 +246,8 @@ static void xwl_new_unmanaged(struct woodland_server *server,
                           unmanaged_destroy, "xwayland.destroy");
     woodland_listener_connect(&unmanaged->set_geometry, &xsurface->events.set_geometry,
                           unmanaged_set_geometry_event, "xwayland.set_geometry");
+    woodland_listener_connect(&unmanaged->set_override_redirect, &xsurface->events.set_override_redirect,
+                          unmanaged_set_override_redirect, "xwayland.set_override_redirect");
 
     wl_list_insert(&server->xwayland_unmanaged, &unmanaged->link);
 
@@ -304,7 +331,8 @@ static void xwl_associate(struct wl_listener *listener, void *data) {
     /* 属性在 map_request 之后才读完，这里定下装饰策略：
      * _MOTIF_WM_HINTS 请求无边框的窗口不画 SSD（同 labwc want_deco） */
     bool borderless =
-        xsurface->decorations == WLR_XWAYLAND_SURFACE_DECORATIONS_NO_BORDER;
+        (xsurface->decorations != WLR_XWAYLAND_SURFACE_DECORATIONS_ALL) ||
+        !woodland_view_wants_foreign_toplevel(view);
     if (borderless != view->deco_csd) {
         view->deco_csd = borderless;
         /* SSD 边距变了（27px 标题栏 vs 0）：按新边距重算内容原点并重新 configure */
@@ -347,6 +375,13 @@ static void xwl_destroy(struct wl_listener *listener, void *data) {
     wl_list_remove(&view->set_class.link);
     wl_list_remove(&view->set_parent.link);
     wl_list_remove(&view->set_geometry.link);
+    wl_list_remove(&view->set_override_redirect.link);
+    wl_list_remove(&view->set_window_type.link);
+    wl_list_remove(&view->request_skip_taskbar.link);
+    wl_list_remove(&view->set_decorations.link);
+    if (view->xwayland_surface) {
+        view->xwayland_surface->data = NULL;
+    }
     woodland_view_destroy(view);
     (void)data;
 }
@@ -444,17 +479,84 @@ static void xwl_set_geometry(struct wl_listener *listener, void *data) {
     }
     (void)data;
 }
-
-static void xwl_new_surface(struct wl_listener *listener, void *data) {
-    struct woodland_server *server =
-        wl_container_of(listener, server, new_xwayland_surface);
-    struct wlr_xwayland_surface *xsurface = data;
-
-    if (xsurface->override_redirect) {
-        xwl_new_unmanaged(server, xsurface);
+static void xwl_set_override_redirect(struct wl_listener *listener, void *data) {
+    struct woodland_view *view = wl_container_of(listener, view, set_override_redirect);
+    struct wlr_xwayland_surface *xsurface = view->xwayland_surface;
+    (void)data;
+    if (!xsurface || !xsurface->override_redirect) {
         return;
     }
+    struct woodland_server *server = view->server;
+    bool mapped = xsurface->surface && xsurface->surface->mapped;
+    if (mapped) {
+        woodland_view_unmap(view);
+    }
+    xwl_destroy(&view->destroy, xsurface);
+    xwl_new_unmanaged(server, xsurface);
+}
 
+static void xwl_set_window_type(struct wl_listener *listener, void *data) {
+    struct woodland_view *view = wl_container_of(listener, view, set_window_type);
+    struct wlr_xwayland_surface *xsurface = view->xwayland_surface;
+    (void)data;
+    if (!xsurface) {
+        return;
+    }
+    bool borderless = (xsurface->decorations != WLR_XWAYLAND_SURFACE_DECORATIONS_ALL) ||
+                      !woodland_view_wants_foreign_toplevel(view);
+    if (borderless != view->deco_csd) {
+        view->deco_csd = borderless;
+        if (view->mapped) {
+            if (borderless && view->ssd) {
+                woodland_ssd_destroy(view);
+                woodland_effect_update(view);
+            } else if (!borderless && !view->ssd) {
+                woodland_ssd_create(view);
+            }
+        }
+        view->placed = false;
+        xwl_place_and_configure(view);
+    }
+    woodland_view_update_taskbar_presence(view);
+}
+
+static void xwl_set_decorations(struct wl_listener *listener, void *data) {
+    struct woodland_view *view = wl_container_of(listener, view, set_decorations);
+    struct wlr_xwayland_surface *xsurface = view->xwayland_surface;
+    (void)data;
+    if (!xsurface) {
+        return;
+    }
+    bool borderless = (xsurface->decorations != WLR_XWAYLAND_SURFACE_DECORATIONS_ALL) ||
+                      !woodland_view_wants_foreign_toplevel(view);
+    if (borderless != view->deco_csd) {
+        view->deco_csd = borderless;
+        if (view->mapped) {
+            if (borderless && view->ssd) {
+                woodland_ssd_destroy(view);
+                woodland_effect_update(view);
+            } else if (!borderless && !view->ssd) {
+                woodland_ssd_create(view);
+            }
+        }
+        view->placed = false;
+        xwl_place_and_configure(view);
+    }
+}
+
+static void xwl_request_skip_taskbar(struct wl_listener *listener, void *data) {
+    struct woodland_view *view = wl_container_of(listener, view, request_skip_taskbar);
+    struct wlr_xwayland_surface *xsurface = view->xwayland_surface;
+    (void)data;
+    if (!xsurface) {
+        return;
+    }
+    wlr_xwayland_surface_set_skip_taskbar(xsurface, xsurface->skip_taskbar);
+    woodland_view_update_taskbar_presence(view);
+}
+
+static void xwl_new_view(struct woodland_server *server,
+                         struct wlr_xwayland_surface *xsurface) {
     struct woodland_view *view = calloc(1, sizeof(*view));
     if (!view) {
         wlr_log(WLR_ERROR, "failed to allocate woodland_view");
@@ -506,11 +608,39 @@ static void xwl_new_surface(struct wl_listener *listener, void *data) {
                           xwl_set_parent, "xwayland.set_parent");
     woodland_listener_connect(&view->set_geometry, &xsurface->events.set_geometry,
                           xwl_set_geometry, "xwayland.set_geometry");
+    woodland_listener_connect(&view->set_override_redirect, &xsurface->events.set_override_redirect,
+                          xwl_set_override_redirect, "xwayland.set_override_redirect");
+    woodland_listener_connect(&view->set_window_type, &xsurface->events.set_window_type,
+                          xwl_set_window_type, "xwayland.set_window_type");
+    woodland_listener_connect(&view->request_skip_taskbar, &xsurface->events.request_skip_taskbar,
+                          xwl_request_skip_taskbar, "xwayland.request_skip_taskbar");
+    woodland_listener_connect(&view->set_decorations, &xsurface->events.set_decorations,
+                          xwl_set_decorations, "xwayland.set_decorations");
 
-    woodland_view_init_handles(view);
     woodland_view_set_title(view, xsurface->title);
     woodland_view_set_app_id(view, xsurface->instance
                                       ? xsurface->instance : xsurface->class);
+
+    if (xsurface->surface) {
+        xwl_associate(&view->associate, NULL);
+        if (xsurface->surface->mapped) {
+            xwl_map(&view->map, NULL);
+        }
+    }
+}
+
+
+static void xwl_new_surface(struct wl_listener *listener, void *data) {
+    struct woodland_server *server =
+        wl_container_of(listener, server, new_xwayland_surface);
+    struct wlr_xwayland_surface *xsurface = data;
+
+    if (xsurface->override_redirect) {
+        xwl_new_unmanaged(server, xsurface);
+        return;
+    }
+
+    xwl_new_view(server, xsurface);
 }
 void woodland_xwayland_view_update_scale_filter(struct woodland_view *view) {
     if (!view || view->type != WOODLAND_VIEW_XWAYLAND || !view->scene_surface) {

@@ -146,6 +146,10 @@ struct woodland_view {
     struct wl_listener request_close;
     struct wl_listener set_class;
     struct wl_listener set_geometry;
+    struct wl_listener set_override_redirect;
+    struct wl_listener set_window_type;
+    struct wl_listener request_skip_taskbar;
+    struct wl_listener set_decorations;
 };
 
 /* ==================== 双后端访问器 ==================== */
@@ -186,6 +190,14 @@ void woodland_view_destroy(struct woodland_view *view);
 
 /** 创建 foreign-toplevel / ext-foreign-toplevel-list 句柄（两个后端共用）。 */
 void woodland_view_init_handles(struct woodland_view *view);
+/** 销毁 foreign-toplevel / ext-foreign-toplevel-list 句柄。 */
+void woodland_view_finish_handles(struct woodland_view *view);
+
+/** 判断视图是否应作为顶层窗口暴露给任务栏（foreign-toplevel）。 */
+bool woodland_view_wants_foreign_toplevel(const struct woodland_view *view);
+
+/** 根据视图当前映射状态与 toplevel 属性更新任务栏句柄的增删。 */
+void woodland_view_update_taskbar_presence(struct woodland_view *view);
 
 /** 开始交互式移动/缩放。 */
 void woodland_view_begin_interactive(struct woodland_view *view, enum woodland_cursor_mode mode,
