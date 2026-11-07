@@ -5,3 +5,5 @@
 /subprojects/wlroots/
 /subprojects/scenefx/
 /.cache/
+/.workbuddy/
+
