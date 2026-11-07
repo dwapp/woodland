@@ -118,12 +118,7 @@ static void unmanaged_unmap(struct wl_listener *listener, void *data) {
         }
         if (!focused_next) {
             if (server->focused_view && server->focused_view->mapped) {
-                struct wlr_surface *surf = woodland_view_surface(server->focused_view);
-                if (surf) {
-                    woodland_seat_focus_surface(server, surf);
-                } else {
-                    woodland_focus_fallback(server);
-                }
+                woodland_focus_view(server->focused_view, false);
             } else {
                 woodland_focus_fallback(server);
             }

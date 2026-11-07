@@ -325,9 +325,11 @@ static void handle_unmap(struct wl_listener *listener, void *data)
     (void)data;
 }
 
-static void handle_surface_commit(struct wl_listener *listener, void *data)
+void woodland_layer_handle_surface_commit(struct woodland_layer_surface *layer)
 {
-    struct woodland_layer_surface *layer = wl_container_of(listener, layer, surface_commit);
+    if (!layer || !layer->layer_surface) {
+        return;
+    }
     struct wlr_layer_surface_v1 *layer_surface = layer->layer_surface;
     struct wlr_output *wlr_output = layer_surface->output;
     if (!wlr_output) {
@@ -342,15 +344,16 @@ static void handle_surface_commit(struct wl_listener *listener, void *data)
                                 output->layer_tree[layer_surface->current.layer]);
     }
     /* 处理 keyboard interactivity 变化 */
+    if (committed & WLR_LAYER_SURFACE_V1_STATE_KEYBOARD_INTERACTIVITY) {
         if (layer_surface->current.keyboard_interactive ==
-            ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND) {
-            if (output->server->focused_layer == layer_surface) {
-                /* 从 EXCLUSIVE 降级到 ON_DEMAND 时释放独占焦点 */
-                try_to_focus_next_layer_or_toplevel(output->server);
-            }
+            ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND &&
+            output->server->focused_layer == layer_surface) {
+            /* 从 EXCLUSIVE 降级到 ON_DEMAND 时释放独占焦点 */
+            try_to_focus_next_layer_or_toplevel(output->server);
         } else {
             woodland_layer_try_focus(output->server, layer_surface);
         }
+    }
 
     if (committed || layer->mapped != layer_surface->surface->mapped) {
         layer->mapped = layer_surface->surface->mapped;
@@ -362,6 +365,12 @@ static void handle_surface_commit(struct wl_listener *listener, void *data)
     if (layer->effect.blur) {
         woodland_effect_layer_blur(layer, &layer->effect.blur_region);
     }
+}
+
+static void handle_surface_commit(struct wl_listener *listener, void *data)
+{
+    struct woodland_layer_surface *layer = wl_container_of(listener, layer, surface_commit);
+    woodland_layer_handle_surface_commit(layer);
     (void)data;
 }
 

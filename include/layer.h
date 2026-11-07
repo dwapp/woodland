@@ -43,6 +43,8 @@ void woodland_layer_arrange(struct woodland_server *server,
 
 void woodland_layer_try_focus(struct woodland_server *server,
                               struct wlr_layer_surface_v1 *layer_surface);
+void woodland_layer_handle_surface_commit(struct woodland_layer_surface *layer);
+
 
 struct wlr_layer_surface_v1 *woodland_layer_surface_at(
     struct woodland_server *server, double lx, double ly,
