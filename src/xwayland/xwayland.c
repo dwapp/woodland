@@ -24,6 +24,7 @@
 #include "view.h"
 #include "woodland.h"
 #include "xwayland.h"
+#include "focus.h"
 
 /* ==================== unmanaged（override-redirect） ==================== */
 
@@ -90,6 +91,10 @@ static void unmanaged_map(struct wl_listener *listener, void *data) {
         wl_container_of(listener, unmanaged, map);
     unmanaged_set_geometry(unmanaged);
     wlr_scene_node_set_enabled(&unmanaged->scene_tree->node, true);
+    if (unmanaged->xsurface &&
+        wlr_xwayland_surface_override_redirect_wants_focus(unmanaged->xsurface)) {
+        woodland_seat_focus_surface(unmanaged->server, unmanaged->xsurface->surface);
+    }
     (void)data;
 }
 
@@ -97,6 +102,33 @@ static void unmanaged_unmap(struct wl_listener *listener, void *data) {
     struct woodland_unmanaged *unmanaged =
         wl_container_of(listener, unmanaged, unmap);
     wlr_scene_node_set_enabled(&unmanaged->scene_tree->node, false);
+    struct woodland_server *server = unmanaged->server;
+    if (server && server->seat && unmanaged->xsurface &&
+        server->seat->keyboard_state.focused_surface == unmanaged->xsurface->surface) {
+        struct woodland_unmanaged *u;
+        bool focused_next = false;
+        wl_list_for_each_reverse(u, &server->xwayland_unmanaged, link) {
+            if (u != unmanaged && u->xsurface && u->xsurface->surface &&
+                u->xsurface->surface->mapped &&
+                wlr_xwayland_surface_override_redirect_wants_focus(u->xsurface)) {
+                woodland_seat_focus_surface(server, u->xsurface->surface);
+                focused_next = true;
+                break;
+            }
+        }
+        if (!focused_next) {
+            if (server->focused_view && server->focused_view->mapped) {
+                struct wlr_surface *surf = woodland_view_surface(server->focused_view);
+                if (surf) {
+                    woodland_seat_focus_surface(server, surf);
+                } else {
+                    woodland_focus_fallback(server);
+                }
+            } else {
+                woodland_focus_fallback(server);
+            }
+        }
+    }
     (void)data;
 }
 

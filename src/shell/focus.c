@@ -37,13 +37,61 @@
 
 /* ==================== 基础判断 ==================== */
 
+enum woodland_view_wants_focus woodland_view_wants_focus(const struct woodland_view *view)
+{
+    if (!view) {
+        return WOODLAND_VIEW_WANTS_FOCUS_NEVER;
+    }
+#if WOODLAND_HAVE_XWAYLAND
+    if (view->type == WOODLAND_VIEW_XWAYLAND && view->xwayland_surface) {
+        switch (wlr_xwayland_surface_icccm_input_model(view->xwayland_surface)) {
+        case WLR_ICCCM_INPUT_MODEL_PASSIVE:
+        case WLR_ICCCM_INPUT_MODEL_LOCAL:
+            return WOODLAND_VIEW_WANTS_FOCUS_ALWAYS;
+        case WLR_ICCCM_INPUT_MODEL_GLOBAL:
+            if (wlr_xwayland_surface_has_window_type(view->xwayland_surface,
+                                                     WLR_XWAYLAND_NET_WM_WINDOW_TYPE_NORMAL) ||
+                wlr_xwayland_surface_has_window_type(view->xwayland_surface,
+                                                     WLR_XWAYLAND_NET_WM_WINDOW_TYPE_DIALOG)) {
+                return WOODLAND_VIEW_WANTS_FOCUS_LIKELY;
+            }
+            return WOODLAND_VIEW_WANTS_FOCUS_UNLIKELY;
+        case WLR_ICCCM_INPUT_MODEL_NONE:
+            return WOODLAND_VIEW_WANTS_FOCUS_NEVER;
+        }
+    }
+#endif
+    return WOODLAND_VIEW_WANTS_FOCUS_ALWAYS;
+}
+
 bool woodland_view_focusable(const struct woodland_view *view)
 {
     if (!view || !view->server) {
         return false;
     }
-    return view->mapped && !view->minimized && !view->override_redirect &&
-           view->workspace == view->server->active_workspace;
+    if (!view->mapped || view->minimized || view->override_redirect ||
+        view->workspace != view->server->active_workspace) {
+        return false;
+    }
+    enum woodland_view_wants_focus wants = woodland_view_wants_focus(view);
+    return wants == WOODLAND_VIEW_WANTS_FOCUS_ALWAYS ||
+           wants == WOODLAND_VIEW_WANTS_FOCUS_LIKELY;
+}
+
+void woodland_seat_focus_surface(struct woodland_server *server, struct wlr_surface *surface)
+{
+    if (!server || !server->seat || woodland_session_lock_is_locked(server)) {
+        return;
+    }
+    if (!surface) {
+        wlr_seat_keyboard_notify_clear_focus(server->seat);
+        return;
+    }
+    struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(server->seat);
+    if (keyboard != NULL) {
+        wlr_seat_keyboard_notify_enter(server->seat, surface, keyboard->keycodes,
+                                       keyboard->num_keycodes, &keyboard->modifiers);
+    }
 }
 
 struct woodland_view *woodland_focus_current(struct woodland_server *server)
@@ -228,10 +276,20 @@ void woodland_focus_view(struct woodland_view *view, bool raise)
     server->focused_view = view;
     woodland_trace_add("focus", view->id, "prev=%u raise=%d", prev ? prev->id : 0, raise ? 1 : 0);
 
-    struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(seat);
-    if (keyboard != NULL) {
-        wlr_seat_keyboard_notify_enter(seat, surface, keyboard->keycodes, keyboard->num_keycodes,
-                                       &keyboard->modifiers);
+    enum woodland_view_wants_focus wants = woodland_view_wants_focus(view);
+    if (wants == WOODLAND_VIEW_WANTS_FOCUS_ALWAYS) {
+        woodland_seat_focus_surface(server, surface);
+    } else {
+        if (seat && seat->keyboard_state.focused_surface != NULL &&
+            seat->keyboard_state.focused_surface != surface) {
+            wlr_seat_keyboard_notify_clear_focus(seat);
+        }
+#if WOODLAND_HAVE_XWAYLAND
+        if (wants != WOODLAND_VIEW_WANTS_FOCUS_NEVER &&
+            view->type == WOODLAND_VIEW_XWAYLAND && view->xwayland_surface) {
+            wlr_xwayland_surface_offer_focus(view->xwayland_surface);
+        }
+#endif
     }
     woodland_selfcheck_schedule(server, "focus");
 }

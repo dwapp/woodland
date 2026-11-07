@@ -103,6 +103,95 @@ int main(void) {
     wl_list_remove(&fs_view.link);
     wlr_scene_node_destroy(&fs_view.scene_tree->node);
 
+    /* ---------- 测试 layer-shell 优先级与独占焦点回退 ---------- */
+    struct wlr_surface surf_top = { .mapped = true };
+    struct wlr_layer_surface_v1 ls_top = {
+        .surface = &surf_top,
+        .current = {
+            .layer = ZWLR_LAYER_SHELL_V1_LAYER_TOP,
+            .keyboard_interactive = ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE,
+        },
+    };
+    struct wlr_scene_layer_surface_v1 scene_top = { .layer_surface = &ls_top };
+    struct woodland_layer_surface layer_top = {
+        .server = &server,
+        .layer_surface = &ls_top,
+        .scene_layer_surface = &scene_top,
+        .mapped = true,
+    };
+    struct wlr_scene_tree tree_top = {0};
+    tree_top.node.data = &layer_top;
+    wl_list_init(&tree_top.children);
+    wl_list_insert(&wo->layer_tree[ZWLR_LAYER_SHELL_V1_LAYER_TOP]->children, &tree_top.node.link);
+
+    struct wlr_surface surf_overlay = { .mapped = true };
+    struct wlr_layer_surface_v1 ls_overlay = {
+        .surface = &surf_overlay,
+        .current = {
+            .layer = ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY,
+            .keyboard_interactive = ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE,
+        },
+    };
+    struct wlr_scene_layer_surface_v1 scene_overlay = { .layer_surface = &ls_overlay };
+    struct woodland_layer_surface layer_overlay = {
+        .server = &server,
+        .layer_surface = &ls_overlay,
+        .scene_layer_surface = &scene_overlay,
+        .mapped = true,
+    };
+    struct wlr_scene_tree tree_overlay = {0};
+    tree_overlay.node.data = &layer_overlay;
+    wl_list_init(&tree_overlay.children);
+    wl_list_insert(&wo->layer_tree[ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY]->children, &tree_overlay.node.link);
+
+    struct wlr_surface surf_bottom = { .mapped = true };
+    struct wlr_layer_surface_v1 ls_bottom = {
+        .surface = &surf_bottom,
+        .current = {
+            .layer = ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM,
+            .keyboard_interactive = ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE,
+        },
+    };
+
+    struct wlr_surface surf_demand = { .mapped = true };
+    struct wlr_layer_surface_v1 ls_demand = {
+        .surface = &surf_demand,
+        .current = {
+            .layer = ZWLR_LAYER_SHELL_V1_LAYER_TOP,
+            .keyboard_interactive = ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND,
+        },
+    };
+
+    /* 1. ls_top 独占获焦 */
+    woodland_layer_try_focus(&server, &ls_top);
+    assert(server.focused_layer == &ls_top);
+
+    /* 2. ls_bottom 层级低于 top，无法抢占 exclusive 焦点 */
+    woodland_layer_try_focus(&server, &ls_bottom);
+    assert(server.focused_layer == &ls_top);
+
+    /* 3. ls_demand 无法抢占 exclusive 焦点 */
+    woodland_layer_try_focus(&server, &ls_demand);
+    assert(server.focused_layer == &ls_top);
+
+    /* 4. ls_overlay 层级高于 top，成功抢占 exclusive 焦点 */
+    woodland_layer_try_focus(&server, &ls_overlay);
+    assert(server.focused_layer == &ls_overlay);
+
+    /* 5. ls_overlay 变为 NONE，焦点应自动回退到次高独占层 ls_top */
+    ls_overlay.current.keyboard_interactive = ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE;
+    woodland_layer_try_focus(&server, &ls_overlay);
+    assert(server.focused_layer == &ls_top);
+
+    /* 6. ls_top 也变为 NONE，没有其它独占层，focused_layer 清空 */
+    ls_top.current.keyboard_interactive = ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE;
+    woodland_layer_try_focus(&server, &ls_top);
+    assert(server.focused_layer == NULL);
+
+    /* 清除测试节点 */
+    wl_list_remove(&tree_top.node.link);
+    wl_list_remove(&tree_overlay.node.link);
+
     woodland_layer_finish(&server);
     woodland_output_finish(&server);
 
