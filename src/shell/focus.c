@@ -215,11 +215,42 @@ struct woodland_view *woodland_focus_modal_dialog(struct woodland_view *view)
 
 /* ==================== 聚焦入口 ==================== */
 
-static void view_raise(struct woodland_view *view)
+static void view_raise_node(struct woodland_view *view)
 {
     wlr_scene_node_raise_to_top(&view->scene_tree->node);
     wl_list_remove(&view->link);
     wl_list_insert(&view->server->views, &view->link);
+    if (view->server && view->server->xwayland_restack_hook) {
+        view->server->xwayland_restack_hook(view);
+    }
+}
+
+static void view_raise(struct woodland_view *view)
+{
+    if (!view || !view->server) {
+        return;
+    }
+
+    /* 寻找 transient/parent 祖先链的 root 窗口 */
+    struct woodland_view *root = view;
+    for (int i = 0; i < FOCUS_CHAIN_MAX && root->parent; i++) {
+        root = root->parent;
+    }
+
+    if (root != view) {
+        view_raise_node(root);
+    }
+
+    /* 将 root 的全部关联子窗口一并提升（保持在父窗口之上） */
+    struct woodland_view *it, *tmp;
+    wl_list_for_each_reverse_safe(it, tmp, &view->server->views, link) {
+        if (it != root && it != view && it->parent == root && it->mapped && !it->minimized) {
+            view_raise_node(it);
+        }
+    }
+
+    /* 最后将当前操作/聚焦的目标窗口提升至最顶层 */
+    view_raise_node(view);
     woodland_layer_update_top_layer_visibility(view->server);
 }
 

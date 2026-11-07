@@ -51,6 +51,7 @@ struct woodland_unmanaged {
     struct wl_listener destroy;
     struct wl_listener set_geometry;
     struct wl_listener set_override_redirect;
+    struct wl_listener request_configure;
 };
 
 static void unmanaged_set_geometry(struct woodland_unmanaged *unmanaged);
@@ -146,6 +147,7 @@ static void unmanaged_map(struct wl_listener *listener, void *data) {
         wl_container_of(listener, unmanaged, map);
     unmanaged_set_geometry(unmanaged);
     wlr_scene_node_set_enabled(&unmanaged->scene_tree->node, true);
+    wlr_scene_node_raise_to_top(&unmanaged->scene_tree->node);
     if (unmanaged->xsurface &&
         wlr_xwayland_surface_override_redirect_wants_focus(unmanaged->xsurface)) {
         woodland_seat_focus_surface(unmanaged->server, unmanaged->xsurface->surface);
@@ -198,6 +200,7 @@ static void unmanaged_destroy(struct wl_listener *listener, void *data) {
     wl_list_remove(&unmanaged->dissociate.link);
     wl_list_remove(&unmanaged->destroy.link);
     wl_list_remove(&unmanaged->set_geometry.link);
+    wl_list_remove(&unmanaged->request_configure.link);
     if (unmanaged->scene_surface) {
         wl_list_remove(&unmanaged->map.link);
         wl_list_remove(&unmanaged->unmap.link);
@@ -208,6 +211,16 @@ static void unmanaged_destroy(struct wl_listener *listener, void *data) {
     free(unmanaged);
     (void)data;
 }
+static void unmanaged_request_configure(struct wl_listener *listener, void *data) {
+    struct woodland_unmanaged *unmanaged =
+        wl_container_of(listener, unmanaged, request_configure);
+    struct wlr_xwayland_surface *xsurface = unmanaged->xsurface;
+    struct wlr_xwayland_surface_configure_event *ev = data;
+    wlr_xwayland_surface_configure(xsurface, ev->x, ev->y, ev->width, ev->height);
+    wlr_scene_node_set_position(&unmanaged->scene_tree->node, ev->x, ev->y);
+    unmanaged_update_filter_mode(unmanaged);
+}
+
 static void unmanaged_set_override_redirect(struct wl_listener *listener, void *data) {
     struct woodland_unmanaged *unmanaged =
         wl_container_of(listener, unmanaged, set_override_redirect);
@@ -249,6 +262,8 @@ static void xwl_new_unmanaged(struct woodland_server *server,
     woodland_listener_connect(&unmanaged->set_override_redirect, &xsurface->events.set_override_redirect,
                           unmanaged_set_override_redirect, "xwayland.set_override_redirect");
 
+    woodland_listener_connect(&unmanaged->request_configure, &xsurface->events.request_configure,
+                          unmanaged_request_configure, "xwayland.unmanaged_request_configure");
     wl_list_insert(&server->xwayland_unmanaged, &unmanaged->link);
 
     /* 多数情况下 surface 在 associate 里才出现；已存在时直接挂 */
@@ -265,8 +280,17 @@ static void xwl_new_unmanaged(struct woodland_server *server,
  */
 static void xwl_place_and_configure(struct woodland_view *view) {
     if (!view->placed) {
-        woodland_view_place_initial(view);
-        view->placed = true;
+        struct wlr_xwayland_surface *xsurface = view->xwayland_surface;
+        bool has_pos = xsurface && xsurface->size_hints &&
+            (xsurface->size_hints->flags & (XCB_ICCCM_SIZE_HINT_US_POSITION | XCB_ICCCM_SIZE_HINT_P_POSITION));
+        if (has_pos) {
+            wlr_scene_node_set_position(&view->scene_tree->node, xsurface->x, xsurface->y);
+            view->placed = true;
+            woodland_view_update_outputs(view);
+        } else {
+            woodland_view_place_initial(view);
+            view->placed = true;
+        }
     }
     struct wlr_box content;
     woodland_view_content_box(view, &content);
@@ -390,11 +414,38 @@ static void xwl_request_configure(struct wl_listener *listener, void *data) {
     struct woodland_view *view = wl_container_of(listener, view,
                                                  request_configure);
     struct wlr_xwayland_surface_configure_event *event = data;
-    /* 最大化/全屏下由 WM 决定几何，忽略客户端的尺寸请求 */
-    if (view->maximized || view->fullscreen) {
+    if (!view || !view->xwayland_surface) {
         return;
     }
-    woodland_view_request_size(view, event->width, event->height);
+
+    /* 最大化/全屏下由 WM 决定几何，ICCCM 规范要求回传带有当前锁定的几何通知 */
+    if (view->maximized || view->fullscreen) {
+        wlr_xwayland_surface_configure(view->xwayland_surface,
+                                       (int16_t)view->scene_tree->node.x,
+                                       (int16_t)view->scene_tree->node.y,
+                                       view->xwayland_surface->width,
+                                       view->xwayland_surface->height);
+        return;
+    }
+
+    /* 浮动状态：同步客户端的位置请求 */
+    if (event->mask & (XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y)) {
+        int16_t x = (event->mask & XCB_CONFIG_WINDOW_X) ? event->x : (int16_t)view->scene_tree->node.x;
+        int16_t y = (event->mask & XCB_CONFIG_WINDOW_Y) ? event->y : (int16_t)view->scene_tree->node.y;
+        wlr_scene_node_set_position(&view->scene_tree->node, x, y);
+        view->placed = true;
+        woodland_view_update_outputs(view);
+    }
+
+    /* 调整尺寸并 configure */
+    int width = (event->mask & XCB_CONFIG_WINDOW_WIDTH) ? event->width : view->xwayland_surface->width;
+    int height = (event->mask & XCB_CONFIG_WINDOW_HEIGHT) ? event->height : view->xwayland_surface->height;
+    woodland_view_request_size(view, width, height);
+
+    /* 处理 Z 轴堆叠模式（Stack Mode）请求 */
+    if (event->mask & XCB_CONFIG_WINDOW_STACK_MODE) {
+        woodland_focus_view(view, true);
+    }
 }
 
 static void xwl_request_move(struct wl_listener *listener, void *data) {
@@ -800,6 +851,7 @@ bool woodland_xwayland_init(struct woodland_server *server) {
     server->xwayland_cursor_hook = woodland_xwayland_update_cursor;
     server->xwayland_scale_filter_hook = woodland_xwayland_view_update_scale_filter;
     server->xwayland_refresh_hook = woodland_xwayland_refresh_unmanaged_filters;
+    server->xwayland_restack_hook = woodland_xwayland_restack_view;
 
     wlr_log(WLR_INFO, "xwayland initialised, DISPLAY=%s",
             server->xwayland->display_name);
@@ -815,6 +867,28 @@ void woodland_xwayland_finish(struct woodland_server *server) {
     server->xwayland_cursor_hook = NULL;
     server->xwayland_scale_filter_hook = NULL;
     server->xwayland_refresh_hook = NULL;
+    server->xwayland_restack_hook = NULL;
     wlr_xwayland_destroy(server->xwayland);
     server->xwayland = NULL;
+}
+void woodland_xwayland_flush(struct woodland_server *server) {
+    if (!server || !server->xwayland) {
+        return;
+    }
+    xcb_connection_t *conn = wlr_xwayland_get_xwm_connection(server->xwayland);
+    if (conn) {
+        xcb_flush(conn);
+    }
+}
+
+void woodland_xwayland_restack_view(struct woodland_view *view) {
+    if (!view || view->type != WOODLAND_VIEW_XWAYLAND || !view->xwayland_surface) {
+        return;
+    }
+    struct wlr_xwayland_surface *xsurface = view->xwayland_surface;
+    if (xsurface->override_redirect || !xsurface->xwm) {
+        return;
+    }
+    wlr_xwayland_surface_restack(xsurface, NULL, XCB_STACK_MODE_ABOVE);
+    woodland_xwayland_flush(view->server);
 }

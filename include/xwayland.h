@@ -31,4 +31,10 @@ void woodland_xwayland_refresh_unmanaged_filters(struct woodland_server *server)
 /** 设置/刷新 Xwayland 根光标（按当前主题与尺寸） */
 void woodland_xwayland_update_cursor(struct woodland_server *server);
 
+/** 刷新 Xwayland XWM 客户端连接的出站请求缓冲区。 */
+void woodland_xwayland_flush(struct woodland_server *server);
+
+/** 当 X11 视图被提升至最前时，向 X11 侧同步 Z 轴堆叠顺序并刷新。 */
+void woodland_xwayland_restack_view(struct woodland_view *view);
+
 #endif /* WOODLAND_XWAYLAND_H */
