@@ -14,10 +14,8 @@ add_project_arguments([
   '-D_POSIX_C_SOURCE=200809L',
 ], language: 'c')
 
-# scenefx（随 effects 选项，默认启用；关闭时走 wlroots 直出，wrap 文件保留作占位）
-scenefx = dependency('scenefx-0.5', fallback: 'scenefx',
-                     required: get_option('effects'))
-# wlroots（锁定 0.20.x）
+# wlroots（锁定 0.20.x，必须先于 scenefx 解析以确保 subproject override 正常生效；
+# 否则 scenefx 内部 dependency 会先命中系统 wlroots 导致后续 override 异常）
 wlroots_version = ['>=0.20.0', '<0.21.0']
 wlroots_sub = subproject('wlroots', default_options: ['examples=false'],
                          required: false, version: wlroots_version)
@@ -35,6 +33,10 @@ if wlroots_sub.found() and wlroots.type_name() == 'internal'
     include_directories: include_directories('subprojects/wlroots/protocol'),
   )
 endif
+
+# scenefx（随 effects 选项，默认启用；关闭时走 wlroots 直出，wrap 文件保留作占位）
+scenefx = dependency('scenefx-0.5', fallback: 'scenefx',
+                     required: get_option('effects'))
 
 wayland_server = dependency('wayland-server')
 xkbcommon = dependency('xkbcommon')
