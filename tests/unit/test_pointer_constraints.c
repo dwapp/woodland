@@ -71,12 +71,12 @@ int main(void)
     struct wlr_surface surface = {0};
     wl_signal_init(&surface.events.destroy);
     wl_signal_init(&surface.events.commit);
-    /* 设置指针焦点到测试 surface (表面坐标 10, 10，光标布局坐标 100, 100) */
+    /* 设置指针焦点与键盘焦点到测试 surface (表面坐标 10, 10，光标布局坐标 100, 100) */
     wlr_cursor_warp(server.cursor, NULL, 100, 100);
     server.seat->pointer_state.focused_surface = &surface;
     server.seat->pointer_state.sx = 10;
     server.seat->pointer_state.sy = 10;
-
+    server.seat->keyboard_state.focused_surface = &surface;
     /* 模拟 CONFINED 约束并测试区域限制计算 */
     struct wlr_pointer_constraint_v1 constraint = {0};
     constraint.type = WLR_POINTER_CONSTRAINT_V1_CONFINED;
@@ -120,6 +120,81 @@ int main(void)
     assert(server.current_constraint == &constraint);
     wl_signal_emit_mutable(&constraint.events.destroy, &constraint);
     assert(server.current_constraint == NULL);
+    /* 测试 5: 焦点不在申请限制的客户端上时，应该忽略限制 */
+    struct wlr_surface other_surface = {0};
+    wl_signal_init(&other_surface.events.destroy);
+    wl_signal_init(&other_surface.events.commit);
+
+    /* 重新激活 CONFINED 约束 */
+    constraint.type = WLR_POINTER_CONSTRAINT_V1_CONFINED;
+    woodland_pointer_constraint_set(&server, &constraint);
+    assert(server.current_constraint == &constraint);
+
+    /* 焦点切换到 other_surface */
+    server.seat->keyboard_state.focused_surface = &other_surface;
+
+    /* 约束应被忽略：调用 apply 时 dx, dy 不被裁剪 */
+    dx = 90;
+    dy = 90;
+    woodland_pointer_constraint_apply(&server, &dx, &dy);
+    assert(dx == 90 && dy == 90);
+
+    /* 焦点不在该客户端上时，recheck 应当忽略限制且不设为当前约束 */
+    woodland_pointer_constraint_recheck(&server, &surface);
+    assert(server.current_constraint == NULL);
+
+    /* 焦点不在该客户端上时，调用 set 应当忽略限制 */
+    woodland_pointer_constraint_set(&server, &constraint);
+    assert(server.current_constraint == NULL);
+
+    /* 当焦点重新回到 surface 时，限制恢复有效 */
+    server.seat->keyboard_state.focused_surface = &surface;
+    woodland_pointer_constraint_set(&server, &constraint);
+    assert(server.current_constraint == &constraint);
+    dx = 90;
+    dy = 90;
+    woodland_pointer_constraint_apply(&server, &dx, &dy);
+    assert(dx < 90 && dy < 90);
+    assert(10 + dx <= 50);
+    assert(10 + dy <= 50);
+
+    /* 焦点切换后调用 update，当前约束应被清除 */
+    server.seat->keyboard_state.focused_surface = &other_surface;
+    woodland_pointer_constraint_update(&server);
+    assert(server.current_constraint == NULL);
+
+    /* 测试基于客户端 (wl_client) 的焦点校验：同客户端的子表面持焦点时允许限制 */
+    int dummy_a = 0, dummy_b = 0;
+    struct wl_client *mock_client_a = (struct wl_client *)&dummy_a;
+    struct wl_client *mock_client_b = (struct wl_client *)&dummy_b;
+    struct wl_resource res_a = {0};
+    struct wl_resource res_b = {0};
+    res_a.client = mock_client_a;
+    res_b.client = mock_client_b;
+    surface.resource = &res_a;
+    other_surface.resource = &res_b;
+
+    /* 焦点在 client B，应当忽略限制 */
+    server.seat->keyboard_state.focused_surface = &other_surface;
+    assert(!woodland_pointer_constraint_is_focused(&server, &constraint));
+    woodland_pointer_constraint_set(&server, &constraint);
+    assert(server.current_constraint == NULL);
+
+    /* 焦点切换到 client A 的同客户端另一表面（例如 popup / subsurface），允许限制 */
+    struct wlr_surface popup_surface = {0};
+    wl_signal_init(&popup_surface.events.destroy);
+    wl_signal_init(&popup_surface.events.commit);
+    popup_surface.resource = &res_a;
+    server.seat->keyboard_state.focused_surface = &popup_surface;
+    assert(woodland_pointer_constraint_is_focused(&server, &constraint));
+    woodland_pointer_constraint_set(&server, &constraint);
+    assert(server.current_constraint == &constraint);
+
+    /* 清理测试资源引用与约束 */
+    surface.resource = NULL;
+    other_surface.resource = NULL;
+    popup_surface.resource = NULL;
+    woodland_pointer_constraint_set(&server, NULL);
 
     /* 清理测试约束 */
     pixman_region32_fini(&constraint.region);

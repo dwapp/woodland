@@ -142,6 +142,7 @@ struct woodland_server {
     struct wl_listener request_cursor;          // seat->events.request_set_cursor
     struct wl_listener request_set_selection;   // seat->events.request_set_selection
     struct wl_listener pointer_focus_change;    // seat->pointer_state.events.focus_change
+    struct wl_listener keyboard_focus_change;  // seat->keyboard_state.events.focus_change
     /*
      * VT 切换键的吞键表：evdev keycode 位图（32 字节 = 256 个键位，超过
      * 256 的 keycode 一律不记——F1..F12 远在界内）。VT 切换吃掉一个 press
@@ -240,6 +241,8 @@ struct woodland_server {
     void (*xwayland_cursor_hook)(struct woodland_server *server);
     void (*xwayland_scale_filter_hook)(struct woodland_view *view);
     void (*xwayland_refresh_hook)(struct woodland_server *server);
+    bool (*pointer_constraint_is_focused_hook)(struct woodland_server *server,
+                                               struct wlr_pointer_constraint_v1 *constraint);
 
     /* 截图/录屏（src/capture） */
     struct wlr_screencopy_manager_v1 *screencopy_manager;

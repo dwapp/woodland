@@ -19,6 +19,7 @@
 #include <stdlib.h>
 
 #include <wlr/types/wlr_ext_foreign_toplevel_list_v1.h>
+#include <wlr/types/wlr_pointer_constraints_v1.h>
 #include <wlr/types/wlr_pointer.h>
 #include "scene.h"
 #include <wlr/types/wlr_xdg_decoration_v1.h>
@@ -613,6 +614,71 @@ static void server_new_toplevel_decoration(struct wl_listener *listener, void *d
     }
 }
 
+static bool shell_pointer_constraint_is_focused(struct woodland_server *server,
+                                                struct wlr_pointer_constraint_v1 *constraint)
+{
+    if (!server || !constraint || !constraint->surface) {
+        return false;
+    }
+    if (woodland_session_lock_is_locked(server)) {
+        return false;
+    }
+
+    struct wl_client *client = NULL;
+    if (constraint->resource) {
+        client = wl_resource_get_client(constraint->resource);
+    } else if (constraint->surface->resource) {
+        client = wl_resource_get_client(constraint->surface->resource);
+    }
+
+    /* 1. 检查当前持有键盘焦点的 surface */
+    struct wlr_surface *kb_surface = server->seat ?
+        server->seat->keyboard_state.focused_surface : NULL;
+    if (kb_surface) {
+        if (kb_surface == constraint->surface) {
+            return true;
+        }
+        if (client && kb_surface->resource &&
+            wl_resource_get_client(kb_surface->resource) == client) {
+            return true;
+        }
+    }
+
+    /* 2. 检查当前聚焦视图（含 popups / subsurfaces） */
+    struct woodland_view *view = woodland_focus_current(server);
+    if (!view) {
+        view = server->focused_view;
+    }
+    if (view) {
+        if (woodland_view_from_surface(constraint->surface) == view) {
+            return true;
+        }
+        struct wlr_surface *view_surf = woodland_view_surface(view);
+        if (view_surf) {
+            if (view_surf == constraint->surface) {
+                return true;
+            }
+            if (client && view_surf->resource &&
+                wl_resource_get_client(view_surf->resource) == client) {
+                return true;
+            }
+        }
+    }
+
+    /* 3. 检查当前聚焦 layer surface */
+    if (server->focused_layer) {
+        if (server->focused_layer->surface == constraint->surface) {
+            return true;
+        }
+        if (client && server->focused_layer->surface && server->focused_layer->surface->resource &&
+            wl_resource_get_client(server->focused_layer->surface->resource) == client) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 /* ==================== init/finish ==================== */
 
 bool woodland_shell_init(struct woodland_server *server)
@@ -651,6 +717,7 @@ bool woodland_shell_init(struct woodland_server *server)
                                   server_new_toplevel_decoration, "shell.new_toplevel_decoration");
     }
     woodland_snap_preview_init(server);
+    server->pointer_constraint_is_focused_hook = shell_pointer_constraint_is_focused;
 
 
     return true;
@@ -666,4 +733,5 @@ void woodland_shell_finish(struct woodland_server *server)
         wl_list_remove(&server->new_toplevel_decoration.link);
     }
     woodland_snap_preview_finish(server);
+    server->pointer_constraint_is_focused_hook = NULL;
 }

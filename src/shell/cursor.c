@@ -212,7 +212,9 @@ static void server_cursor_motion(struct wl_listener *listener, void *data)
     if (server->current_constraint &&
         server->current_constraint->type == WLR_POINTER_CONSTRAINT_V1_LOCKED &&
         server->seat->pointer_state.focused_surface == server->current_constraint->surface) {
-        return;
+        if (woodland_pointer_constraint_is_focused(server, server->current_constraint)) {
+            return;
+        }
     }
 
     double dx = event->delta_x;
@@ -230,6 +232,13 @@ static void server_cursor_motion_absolute(struct wl_listener *listener, void *da
 {
     struct woodland_server *server = wl_container_of(listener, server, cursor_motion_absolute);
     struct wlr_pointer_motion_absolute_event *event = data;
+    if (server->current_constraint &&
+        server->current_constraint->type == WLR_POINTER_CONSTRAINT_V1_LOCKED &&
+        server->seat->pointer_state.focused_surface == server->current_constraint->surface) {
+        if (woodland_pointer_constraint_is_focused(server, server->current_constraint)) {
+            return;
+        }
+    }
     wlr_cursor_warp_absolute(server->cursor, &event->pointer->base, event->x, event->y);
     woodland_cursor_process_motion(server, event->time_msec);
 }

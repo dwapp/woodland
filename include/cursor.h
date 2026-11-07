@@ -49,4 +49,7 @@ void woodland_pointer_constraint_set(struct woodland_server *server,
                                      struct wlr_pointer_constraint_v1 *constraint);
 void woodland_pointer_constraint_apply(struct woodland_server *server,
                                        double *dx, double *dy);
+bool woodland_pointer_constraint_is_focused(struct woodland_server *server,
+                                            struct wlr_pointer_constraint_v1 *constraint);
+void woodland_pointer_constraint_update(struct woodland_server *server);
 #endif
