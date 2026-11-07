@@ -18,7 +18,8 @@ static void warp_cursor_to_constraint_hint(struct woodland_server *server,
     }
     struct wlr_surface *surface = constraint->surface;
     if (!surface || !server->seat ||
-        server->seat->pointer_state.focused_surface != surface) {
+        server->seat->pointer_state.focused_surface != surface ||
+        !woodland_pointer_constraint_is_focused(server, constraint)) {
         return;
     }
 
@@ -59,9 +60,38 @@ static void handle_constraint_destroy(struct wl_listener *listener, void *data)
     }
 }
 
+bool woodland_pointer_constraint_is_focused(struct woodland_server *server,
+                                            struct wlr_pointer_constraint_v1 *constraint)
+{
+    if (!server || !constraint || !constraint->surface) {
+        return false;
+    }
+    if (server->pointer_constraint_is_focused_hook) {
+        return server->pointer_constraint_is_focused_hook(server, constraint);
+    }
+
+    if (server->seat && server->seat->keyboard_state.focused_surface) {
+        if (server->seat->keyboard_state.focused_surface == constraint->surface) {
+            return true;
+        }
+        struct wl_client *client = constraint->resource ? wl_resource_get_client(constraint->resource) :
+            (constraint->surface->resource ? wl_resource_get_client(constraint->surface->resource) : NULL);
+        if (client && server->seat->keyboard_state.focused_surface->resource &&
+            wl_resource_get_client(server->seat->keyboard_state.focused_surface->resource) == client) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 void woodland_pointer_constraint_set(struct woodland_server *server,
                                      struct wlr_pointer_constraint_v1 *constraint)
 {
+    if (constraint && !woodland_pointer_constraint_is_focused(server, constraint)) {
+        constraint = NULL;
+    }
+
     if (server->current_constraint == constraint) {
         return;
     }
@@ -113,7 +143,8 @@ static void handle_new_pointer_constraint(struct wl_listener *listener, void *da
     struct wlr_pointer_constraint_v1 *constraint = data;
 
     if (server->seat &&
-        server->seat->pointer_state.focused_surface == constraint->surface) {
+        server->seat->pointer_state.focused_surface == constraint->surface &&
+        woodland_pointer_constraint_is_focused(server, constraint)) {
         woodland_pointer_constraint_set(server, constraint);
     }
 }
@@ -131,6 +162,19 @@ void woodland_pointer_constraint_recheck(struct woodland_server *server,
     }
     woodland_pointer_constraint_set(server, constraint);
 }
+void woodland_pointer_constraint_update(struct woodland_server *server)
+{
+    if (!server || !server->pointer_constraints || !server->seat) {
+        return;
+    }
+    struct wlr_surface *surface = server->seat->pointer_state.focused_surface;
+    struct wlr_pointer_constraint_v1 *constraint = NULL;
+    if (surface) {
+        constraint = wlr_pointer_constraints_v1_constraint_for_surface(
+            server->pointer_constraints, surface, server->seat);
+    }
+    woodland_pointer_constraint_set(server, constraint);
+}
 
 void woodland_pointer_constraint_apply(struct woodland_server *server,
                                        double *dx, double *dy)
@@ -141,7 +185,8 @@ void woodland_pointer_constraint_apply(struct woodland_server *server,
     }
     struct wlr_surface *surface = constraint->surface;
     if (!surface || !server->seat ||
-        server->seat->pointer_state.focused_surface != surface) {
+        server->seat->pointer_state.focused_surface != surface ||
+        !woodland_pointer_constraint_is_focused(server, constraint)) {
         return;
     }
 

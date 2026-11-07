@@ -20,6 +20,7 @@
 #include <wlr/xwayland.h>
 #endif
 
+#include "cursor.h"
 #include "focus.h"
 #include "layer.h"
 #include "selfcheck.h"
@@ -291,6 +292,7 @@ void woodland_focus_view(struct woodland_view *view, bool raise)
         }
 #endif
     }
+    woodland_pointer_constraint_update(server);
     woodland_selfcheck_schedule(server, "focus");
 }
 
@@ -308,6 +310,7 @@ void woodland_focus_none(struct woodland_server *server)
     /* prev 的 id 已经在 obj 里；没有额外的决策依据，别在 detail 里重复一遍 */
     woodland_trace_add("focus_none", prev ? prev->id : 0, NULL);
     wlr_seat_keyboard_notify_clear_focus(server->seat);
+    woodland_pointer_constraint_update(server);
     woodland_selfcheck_schedule(server, "focus_none");
 }
 
@@ -324,6 +327,7 @@ void woodland_focus_yield_to_layer(struct woodland_server *server)
     server->focused_view = NULL;
     /* obj 已经记了被让出焦点的视图，没有别的依据可写 */
     woodland_trace_add("layer_focus", prev ? prev->id : 0, NULL);
+    woodland_pointer_constraint_update(server);
 }
 
 struct woodland_view *woodland_focus_topmost(struct woodland_server *server)
