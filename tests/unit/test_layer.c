@@ -187,6 +187,19 @@ int main(void) {
     ls_top.current.keyboard_interactive = ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE;
     woodland_layer_try_focus(&server, &ls_top);
     assert(server.focused_layer == NULL);
+    /* 7. 测试 commit 路径：ON_DEMAND 层在普通重绘提交（committed 无 INTERACTIVITY）时绝不丢焦点 */
+    ls_top.output = wo->wlr_output;
+    ls_top.current.keyboard_interactive = ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND;
+    server.focused_layer = &ls_top;
+    ls_top.current.committed = 0;
+    woodland_layer_handle_surface_commit(&layer_top);
+    assert(server.focused_layer == &ls_top);
+
+    /* 8. 测试 commit 路径：从 EXCLUSIVE 降级到 ON_DEMAND（带 INTERACTIVITY 变更）时释放独占焦点 */
+    ls_top.current.committed = WLR_LAYER_SURFACE_V1_STATE_KEYBOARD_INTERACTIVITY;
+    woodland_layer_handle_surface_commit(&layer_top);
+    assert(server.focused_layer == NULL);
+
 
     /* 清除测试节点 */
     wl_list_remove(&tree_top.node.link);
