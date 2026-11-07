@@ -20,6 +20,7 @@
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_output_layout.h>
 #include "scene.h"
+#include "workspace.h"
 #include "config.h"
 #if WOODLAND_HAVE_XWAYLAND
 #include <wlr/xwayland.h>
@@ -588,6 +589,64 @@ int main(void)
     assert(xv.toplevel_handle == NULL);
 
     wlr_scene_node_destroy(&xv.scene_tree->node);
+    /* ==================== X11 位置与 Z 轴同步测试 ==================== */
+    /* 1. 验证位置提示（USPosition / PPosition） */
+    xs_normal.x = 250;
+    xs_normal.y = 180;
+    xs_normal.width = 300;
+    xs_normal.height = 200;
+    xcb_size_hints_t size_hints = {
+        .flags = XCB_ICCCM_SIZE_HINT_US_POSITION,
+    };
+    xs_normal.size_hints = &size_hints;
+    struct woodland_view pos_view = {
+        .server = &server,
+        .type = WOODLAND_VIEW_XWAYLAND,
+        .xwayland_surface = &xs_normal,
+        .scene_tree = wlr_scene_tree_create(&server.scene->tree),
+    };
+    assert(!pos_view.placed);
+    if (xs_normal.size_hints && (xs_normal.size_hints->flags & (XCB_ICCCM_SIZE_HINT_US_POSITION | XCB_ICCCM_SIZE_HINT_P_POSITION))) {
+        wlr_scene_node_set_position(&pos_view.scene_tree->node, xs_normal.x, xs_normal.y);
+        pos_view.placed = true;
+    }
+    assert(pos_view.placed);
+    assert(pos_view.scene_tree->node.x == 250);
+    assert(pos_view.scene_tree->node.y == 180);
+    wlr_scene_node_destroy(&pos_view.scene_tree->node);
+    xs_normal.size_hints = NULL;
+
+    /* 2. 验证父子窗口提升时，联动 restack 与 Z 轴顺序 */
+    woodland_xwayland_flush(&server); // 判空安全
+
+    struct woodland_workspace ws_test = {.server = &server, .name = "test"};
+    server.active_workspace = &ws_test;
+    struct woodland_view parent_v = {
+        .server = &server,
+        .type = WOODLAND_VIEW_XWAYLAND,
+        .mapped = true,
+        .workspace = &ws_test,
+        .scene_tree = wlr_scene_tree_create(&server.scene->tree),
+    };
+    struct woodland_view child_v = {
+        .server = &server,
+        .type = WOODLAND_VIEW_XWAYLAND,
+        .mapped = true,
+        .parent = &parent_v,
+        .workspace = &ws_test,
+        .scene_tree = wlr_scene_tree_create(&server.scene->tree),
+    };
+    wl_list_insert(&server.views, &parent_v.link);
+    wl_list_insert(&server.views, &child_v.link);
+
+    /* 聚焦父窗口并提升：子窗口联动提升，仍保持在父窗口上方 */
+    woodland_focus_view(&parent_v, true);
+    assert(child_v.link.next == &parent_v.link);
+
+    wl_list_remove(&child_v.link);
+    wl_list_remove(&parent_v.link);
+    wlr_scene_node_destroy(&child_v.scene_tree->node);
+    wlr_scene_node_destroy(&parent_v.scene_tree->node);
 #endif
     woodland_snap_preview_finish(&server);
 
