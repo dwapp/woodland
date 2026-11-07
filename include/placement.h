@@ -188,6 +188,9 @@ int woodland_snap_axis(int desired, int size, int lo, int hi,
 
 /* ==================== 首次放置与尺寸限制 ==================== */
 
+/** 判断视图是否处于浮动状态（非最大化、非全屏、非贴边平铺）。 */
+bool woodland_view_is_floating(const struct woodland_view *view);
+
 /** 首次放置：按策略摆位置（transient 恒为相对父窗口居中）。 */
 void woodland_view_place_initial(struct woodland_view *view);
 

@@ -656,6 +656,14 @@ static struct wlr_box *collect_obstacles(struct woodland_view *view, int *n_out)
     return boxes;
 }
 
+bool woodland_view_is_floating(const struct woodland_view *view)
+{
+    if (!view) {
+        return false;
+    }
+    return !(view->fullscreen || view->maximized || view->snapped_edges != 0);
+}
+
 void woodland_view_place_initial(struct woodland_view *view)
 {
     struct woodland_server *server = view->server;
@@ -666,6 +674,11 @@ void woodland_view_place_initial(struct woodland_view *view)
     woodland_view_content_box(view, &content);
     int content_w = content.width;
     int content_h = content.height;
+
+    /* 全屏、最大化或已平铺窗口不参与常规浮动放置（对齐 labwc set_initial_position） */
+    if (!woodland_view_is_floating(view)) {
+        return;
+    }
 
     /* 目标输出：transient 跟着父窗口走，否则跟随光标（同 labwc placement） */
     struct woodland_output *wo = NULL;
