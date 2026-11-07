@@ -119,7 +119,7 @@ static const struct ipc_field_doc get_tree_fields[] = {
      "deco{managed,titlebar,border_width,border_rgba,"
      "corner_radius,shadow_radius,shadow_offset,"
      "shadow_rgba,rendered[]}, "
-     "bg_effect{blur,region[x,y,w,h]}, limits, snapped[]"},
+     "bg_effect{blur,region[x,y,w,h]}, limits, snapped[], scale_filter"},
     {"count", "int", "number of views"},
 };
 
@@ -380,6 +380,14 @@ static void append_view_details(struct woodland_server *server, struct woodland_
                            view->scene_tree && view->scene_tree->node.enabled);
     woodland_json_obj_bool(&obj, "tearing", view->tearing_hint == WOODLAND_TEARING_ASYNC);
     obj_view_id(&obj, "parent", view->parent);
+#if WOODLAND_HAVE_XWAYLAND
+    if (view->type == WOODLAND_VIEW_XWAYLAND && view->scene_surface && view->scene_surface->buffer) {
+        const char *sf_str = (view->scene_surface->buffer->filter_mode == WLR_SCALE_FILTER_NEAREST)
+                                 ? "nearest"
+                                 : "bilinear";
+        woodland_json_obj_str(&obj, "scale_filter", sf_str);
+    }
+#endif
 
     /*
      * treeland-foreign-toplevel-manager-v3 眼里的这个窗口：identifier 是

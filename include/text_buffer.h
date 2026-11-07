@@ -86,12 +86,13 @@ int woodland_text_buffer_get_width(const struct woodland_text_buffer *tb);
  * @return 新创建的 scene_buffer 节点（归调用者销毁）；失败返回 NULL。
  */
 struct wlr_scene_buffer *woodland_button_icon_create(struct wlr_scene_tree *parent,
-                                                     enum woodland_ssd_button_icon icon, int size);
+                                                     enum woodland_ssd_button_icon icon, int size,
+                                                     float scale);
 
 /**
  * 绘制按钮图标并返回 wlr_buffer（inverted 为 true 时使用白色线条，用于关闭悬停/按下态）。
  */
 struct wlr_buffer *woodland_button_icon_buffer(enum woodland_ssd_button_icon icon, int size,
-                                               bool inverted);
+                                               bool inverted, float scale);
 
 #endif /* WOODLAND_TEXT_BUFFER_H */

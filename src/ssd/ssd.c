@@ -5,6 +5,8 @@
 #include "scene.h"
 #include <wlr/util/edges.h>
 #include <wlr/util/log.h>
+#include <wlr/types/wlr_output.h>
+#include "output.h"
 
 #include "effect.h"
 #include "icon.h"
@@ -69,6 +71,7 @@ struct woodland_ssd {
     int height;                          /* 内容高 */
     /* corner_radius 移动至上方的 #if WOODLAND_HAVE_EFFECTS 块内 */
     bool maximized;                      /* 缓存的最大化状态 */
+    float scale;                         /* 渲染当前使用的输出缩放 */
 };
 
 /* 内容尺寸来源：走 view 的双后端访问器（xdg base geometry / X11 窗口尺寸） */
@@ -96,6 +99,15 @@ static int ssd_titlebar_height(const struct woodland_view *view)
         return view->server->config->ssd.titlebar_height;
     }
     return WOODLAND_SSD_TITLEBAR_H;
+}
+
+static float ssd_view_scale(const struct woodland_view *view)
+{
+    if (!view || !view->server) {
+        return 1.0f;
+    }
+    struct woodland_output *wo = woodland_output_for_view((struct woodland_view *)view);
+    return (wo && wo->wlr_output && wo->wlr_output->scale > 0.0f) ? wo->wlr_output->scale : 1.0f;
 }
 
 static int ssd_border_width(const struct woodland_view *view)
@@ -436,10 +448,12 @@ static void ssd_update_buttons(struct woodland_ssd *ssd)
     /* 关闭按钮悬停/按压时切换为鲜明的白色图标 */
     bool close_active = (hovered == BUTTON_CLOSE || pressed == BUTTON_CLOSE);
     int bwn = ssd_button_width(ssd->view);
+    int bh = WOODLAND_SSD_BUTTON_H;
     struct wlr_buffer *close_buf =
-        woodland_button_icon_buffer(WOODLAND_SSD_ICON_CLOSE, bwn, close_active);
+        woodland_button_icon_buffer(WOODLAND_SSD_ICON_CLOSE, bwn, close_active, ssd->scale);
     if (close_buf) {
         wlr_scene_buffer_set_buffer(ssd->button[BUTTON_CLOSE], close_buf);
+        wlr_scene_buffer_set_dest_size(ssd->button[BUTTON_CLOSE], bwn, bh);
         wlr_buffer_drop(close_buf);
     }
 }
@@ -508,6 +522,7 @@ static void ssd_layout(struct woodland_ssd *ssd)
     if (ssd->title_icon) {
         int icon_y = -th + (th - icon_size) / 2;
         wlr_scene_node_set_position(&ssd->title_icon->node, icon_pad, icon_y);
+        wlr_scene_buffer_set_dest_size(ssd->title_icon, icon_size, icon_size);
     }
 
     /* 标题文字：按 GXDE/Deepin 风格全宽居中，左右分别与应用图标及控制按钮保持安全距离 */
@@ -520,7 +535,7 @@ static void ssd_layout(struct woodland_ssd *ssd)
         }
         const float *text_color = ssd_title_text_color(ssd->view, ssd->active);
         woodland_text_buffer_update(ssd->title_text, ssd->view->title, avail_w, th, text_color,
-                                    1.0f, ssd_font(ssd->view));
+                                    ssd->scale, ssd_font(ssd->view));
 
         int title_w = woodland_text_buffer_get_width(ssd->title_text);
         int tx = (w - title_w) / 2;
@@ -549,13 +564,14 @@ static void ssd_update_icon(struct woodland_ssd *ssd)
 
     int th = ssd_titlebar_height(view);
     int icon_size = th >= 32 ? 22 : 16;
-    struct wlr_buffer *icon_buf = woodland_ssd_get_icon_buffer(view, icon_size, 1.0f);
+    struct wlr_buffer *icon_buf = woodland_ssd_get_icon_buffer(view, icon_size, ssd->scale);
     if (icon_buf) {
         if (ssd->title_icon) {
             wlr_scene_buffer_set_buffer(ssd->title_icon, icon_buf);
         } else {
             ssd->title_icon = wlr_scene_buffer_create(ssd->tree, icon_buf);
         }
+        wlr_scene_buffer_set_dest_size(ssd->title_icon, icon_size, icon_size);
     }
 }
 
@@ -612,12 +628,14 @@ void woodland_ssd_create(struct woodland_view *view)
     }
 
     /* 按钮符号（—/□/×，黑色，对齐 labwc 默认黑色按钮图标） */
+    ssd->scale = ssd_view_scale(view);
+    int btn_w = ssd_button_width(view);
     ssd->button[BUTTON_CLOSE] =
-        woodland_button_icon_create(ssd->tree, WOODLAND_SSD_ICON_CLOSE, WOODLAND_SSD_BUTTON_W);
+        woodland_button_icon_create(ssd->tree, WOODLAND_SSD_ICON_CLOSE, btn_w, ssd->scale);
     ssd->button[BUTTON_MAXIMIZE] =
-        woodland_button_icon_create(ssd->tree, WOODLAND_SSD_ICON_MAXIMIZE, WOODLAND_SSD_BUTTON_W);
+        woodland_button_icon_create(ssd->tree, WOODLAND_SSD_ICON_MAXIMIZE, btn_w, ssd->scale);
     ssd->button[BUTTON_MINIMIZE] =
-        woodland_button_icon_create(ssd->tree, WOODLAND_SSD_ICON_ICONIFY, WOODLAND_SSD_BUTTON_W);
+        woodland_button_icon_create(ssd->tree, WOODLAND_SSD_ICON_ICONIFY, btn_w, ssd->scale);
 
     ssd->title_text = woodland_text_buffer_create(ssd->tree);
 
@@ -708,19 +726,45 @@ void woodland_ssd_update(struct woodland_view *view)
     ssd_content_size(view, &w, &h);
     ssd->width = w;
     ssd->height = h;
+    float scale = ssd_view_scale(view);
+    bool scale_changed = (ssd->scale != scale);
+    ssd->scale = scale;
+    if (scale_changed) {
+        free(ssd->icon_key);
+        ssd->icon_key = NULL;
+    }
     ssd_update_icon(ssd);
 
-    /* 最大化状态切换时更新按钮图标（最大化切换为还原图标，反之亦然） */
+    /* 最大化状态切换或缩放变化时更新按钮图标 */
     bool max = view->maximized;
-    if (ssd->maximized != max) {
+    bool max_changed = (ssd->maximized != max);
+    if (max_changed || scale_changed) {
         ssd->maximized = max;
         enum woodland_ssd_button_icon icon =
             max ? WOODLAND_SSD_ICON_RESTORE : WOODLAND_SSD_ICON_MAXIMIZE;
         int bwn = ssd_button_width(view);
-        struct wlr_buffer *buf = woodland_button_icon_buffer(icon, bwn, false);
+        int bh = WOODLAND_SSD_BUTTON_H;
+        struct wlr_buffer *buf = woodland_button_icon_buffer(icon, bwn, false, ssd->scale);
         if (buf) {
             wlr_scene_buffer_set_buffer(ssd->button[BUTTON_MAXIMIZE], buf);
+            wlr_scene_buffer_set_dest_size(ssd->button[BUTTON_MAXIMIZE], bwn, bh);
             wlr_buffer_drop(buf);
+        }
+        if (scale_changed) {
+            struct wlr_buffer *min_buf =
+                woodland_button_icon_buffer(WOODLAND_SSD_ICON_ICONIFY, bwn, false, ssd->scale);
+            if (min_buf) {
+                wlr_scene_buffer_set_buffer(ssd->button[BUTTON_MINIMIZE], min_buf);
+                wlr_scene_buffer_set_dest_size(ssd->button[BUTTON_MINIMIZE], bwn, bh);
+                wlr_buffer_drop(min_buf);
+            }
+            struct wlr_buffer *close_buf =
+                woodland_button_icon_buffer(WOODLAND_SSD_ICON_CLOSE, bwn, false, ssd->scale);
+            if (close_buf) {
+                wlr_scene_buffer_set_buffer(ssd->button[BUTTON_CLOSE], close_buf);
+                wlr_scene_buffer_set_dest_size(ssd->button[BUTTON_CLOSE], bwn, bh);
+                wlr_buffer_drop(close_buf);
+            }
         }
     }
 
@@ -911,6 +955,11 @@ bool woodland_ssd_content_size(const struct woodland_view *view, int *width, int
     }
     return true;
 }
+float woodland_ssd_get_scale(const struct woodland_view *view)
+{
+    return (view && view->ssd) ? view->ssd->scale : 1.0f;
+}
+
 
 bool woodland_ssd_titlebar_visible(const struct woodland_view *view)
 {

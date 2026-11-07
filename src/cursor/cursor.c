@@ -8,6 +8,7 @@
 
 #include "cursor.h"
 #include "woodland.h"
+#include "output.h"
 
 bool woodland_cursor_init(struct woodland_server *server)
 {
@@ -74,6 +75,17 @@ void woodland_cursor_set(struct woodland_server *server, const char *name)
     wlr_cursor_set_xcursor(server->cursor, server->xcursor_manager, name);
 }
 
+void woodland_cursor_load_scale(struct woodland_server *server, float scale)
+{
+    if (!server || !server->xcursor_manager || scale <= 0.0f) {
+        return;
+    }
+    wlr_xcursor_manager_load(server->xcursor_manager, scale);
+    if (server->xwayland_cursor_hook) {
+        server->xwayland_cursor_hook(server);
+    }
+}
+
 /* 建一个 manager 并确保它至少能加载 1x 一套；失败时自己回收干净 */
 static struct wlr_xcursor_manager *manager_create(const char *theme, int size)
 {
@@ -126,6 +138,17 @@ bool woodland_cursor_apply_theme(struct woodland_server *server, const char *the
         wlr_xcursor_manager_destroy(server->xcursor_manager);
     }
     server->xcursor_manager = mgr;
+    if (server->outputs.next) {
+        struct woodland_output *wo;
+        wl_list_for_each(wo, &server->outputs, link) {
+            if (wo->wlr_output && wo->wlr_output->scale > 0.0f) {
+                wlr_xcursor_manager_load(mgr, wo->wlr_output->scale);
+            }
+        }
+    }
+    if (server->xwayland_cursor_hook) {
+        server->xwayland_cursor_hook(server);
+    }
     /* 光标形状可能正停在 resize 上，重设成默认箭头由调用方决定；这里只
      * 重设一次，保证新主题立刻可见 */
     woodland_cursor_set(server, "default");

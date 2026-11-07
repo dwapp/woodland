@@ -107,6 +107,9 @@ bool woodland_server_init(struct woodland_server *server)
     }
 
     wl_display_set_default_max_buffer_size(server->display, 1024 * 1024);
+    /* Java AWT (JetBrains IDEs 等) 默认非 reparenting 避免窗口空白与错位 (对齐 labwc) */
+    setenv("_JAVA_AWT_WM_NONREPARENTING", "1", 0);
+
 
     server->event_loop = wl_display_get_event_loop(server->display);
 

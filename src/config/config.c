@@ -118,6 +118,9 @@ void woodland_config_default_init(struct woodland_config *config)
     config->effects.shadow_offset_y = 4;
     config->effects.shadow_color = 0x4D000000; /* #0000004d */
 
+    /* [xwayland] */
+    config->xwayland.scale_filter = WOODLAND_SCALE_FILTER_SMART;
+
     /* [[output]] */
     wl_list_init(&config->output_rules);
 }
@@ -419,8 +422,25 @@ struct woodland_config *woodland_config_parse_string(const char *content, size_t
         cfg->effects.shadow_color =
             parse_color(toml_get_string(fx, "shadow_color", NULL), cfg->effects.shadow_color);
     }
+    /* 7. [xwayland] */
+    const struct toml_table *xwl = toml_find_table(doc, "xwayland");
+    if (xwl) {
+        const char *filter = toml_get_string(xwl, "scale_filter", NULL);
+        if (filter) {
+            if (strcmp(filter, "nearest") == 0) {
+                cfg->xwayland.scale_filter = WOODLAND_SCALE_FILTER_NEAREST;
+            } else if (strcmp(filter, "linear") == 0 || strcmp(filter, "bilinear") == 0) {
+                cfg->xwayland.scale_filter = WOODLAND_SCALE_FILTER_BILINEAR;
+            } else if (strcmp(filter, "smart") == 0) {
+                cfg->xwayland.scale_filter = WOODLAND_SCALE_FILTER_SMART;
+            } else {
+                wlr_log(WLR_ERROR, "config: invalid xwayland scale_filter '%s'", filter);
+            }
+        }
+    }
 
-    /* 7. [[output]] 数组表 */
+
+    /* 8. [[output]] 数组表 */
     for (const struct toml_table *t = toml_find_table(doc, "output"); t;
          t = toml_next_table(t, "output")) {
         parse_output_table(t, cfg);
@@ -643,6 +663,19 @@ void woodland_config_dump_json(const struct woodland_config *config, struct wood
     woodland_json_obj_int(&ap, "accent_rgb", (long long)config->appearance.accent_rgb);
     woodland_json_obj_str(&ap, "icon_theme", config->appearance.icon_theme);
     woodland_json_obj_close(&ap);
+    /* xwayland */
+    woodland_json_obj_key(&root, "xwayland");
+    struct woodland_json_obj xo;
+    woodland_json_obj_open(&xo, out);
+    const char *sf_str = "smart";
+    if (config->xwayland.scale_filter == WOODLAND_SCALE_FILTER_NEAREST) {
+        sf_str = "nearest";
+    } else if (config->xwayland.scale_filter == WOODLAND_SCALE_FILTER_BILINEAR) {
+        sf_str = "linear";
+    }
+    woodland_json_obj_str(&xo, "scale_filter", sf_str);
+    woodland_json_obj_close(&xo);
+
 
     /* outputs */
     woodland_json_obj_key(&root, "outputs");

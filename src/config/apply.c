@@ -175,21 +175,25 @@ void woodland_config_apply(struct woodland_server *server, struct woodland_confi
         (new_config->effects.shadow_offset_x != old_config->effects.shadow_offset_x) ||
         (new_config->effects.shadow_offset_y != old_config->effects.shadow_offset_y) ||
         (new_config->effects.shadow_color != old_config->effects.shadow_color);
-    /* 6. 记入决策轨迹 */
+
+    /* 6. xwayland */
+    bool xwl_changed = !old_config ||
+                       (new_config->xwayland.scale_filter != old_config->xwayland.scale_filter);
+    /* 7. 记入决策轨迹 */
     woodland_trace_add("cfg_apply", 0,
                        "path=%s placement=%s kb_changed=%d ssd_changed=%d fx_changed=%d",
                        new_config->loaded_path ? new_config->loaded_path : "defaults",
                        woodland_placement_policy_name(server->placement_policy), kb_changed,
                        ssd_changed, fx_changed);
 
-    /* 7. 替换配置指针并销毁旧配置 */
+    /* 8. 替换配置指针并销毁旧配置 */
     server->config = new_config;
     if (old_config) {
         woodland_config_destroy(old_config);
     }
 
     /*
-     * 8. effects 放在替换之后：woodland_effect_update 读的是 server->config，
+     * 9. effects 放在替换之后：woodland_effect_update 读的是 server->config，
      *    先换指针再重画，否则用的还是旧开关。能力位也要重播一次——客户端只在
      *    bind 时问过一次"你会不会模糊"。
      */
@@ -203,8 +207,18 @@ void woodland_config_apply(struct woodland_server *server, struct woodland_confi
         woodland_protocol_refresh_background_effect(server);
     }
 
+    if (xwl_changed && server->views.next && server->xwayland_scale_filter_hook) {
+        struct woodland_view *view;
+        wl_list_for_each(view, &server->views, link)
+        {
+            if (view->type == WOODLAND_VIEW_XWAYLAND) {
+                server->xwayland_scale_filter_hook(view);
+            }
+        }
+    }
+
     /*
-     * 9. 外观观测者补一次全量。
+     * 10. 外观观测者补一次全量。
      *
      * 文件重载会把 treeland-appearance-manager 写进去的运行期值一起重置
      * （文件是持久化来源，协议只改"此刻"），订阅了 treeland-appearance 的

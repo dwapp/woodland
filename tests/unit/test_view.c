@@ -3,6 +3,8 @@
 #include "ssd.h"
 #include "view.h"
 #include "woodland.h"
+#include "woodland_config.h"
+#include "xwayland.h"
 #include <assert.h>
 #include <wayland-server-core.h>
 #include <wlr/backend.h>
@@ -259,6 +261,67 @@ int main(void)
     wl_list_remove(&ft_view.ft_request_close.link);
     wlr_foreign_toplevel_handle_v1_destroy(ft_view.toplevel_handle);
     wlr_scene_node_destroy(&ft_view.scene_tree->node);
+    /* Xwayland 视图的缩放滤波 (scale_filter) 验证 */
+    struct woodland_view x11_view = {0};
+    x11_view.server = &server;
+    x11_view.type = WOODLAND_VIEW_XWAYLAND;
+    x11_view.scene_tree = wlr_scene_tree_create(&server.scene->tree);
+    struct wlr_scene_buffer *mock_buf = wlr_scene_buffer_create(x11_view.scene_tree, NULL);
+    struct wlr_scene_surface mock_scene_surface = { .buffer = mock_buf };
+    x11_view.scene_surface = &mock_scene_surface;
+
+    /* 默认配置 (smart)：输出缩放 1.0 时为 BILINEAR */
+    woodland_xwayland_view_update_scale_filter(&x11_view);
+    assert(mock_buf->filter_mode == WLR_SCALE_FILTER_BILINEAR);
+
+    /* 输出缩放 2.0 (整数倍) 时在 smart 模式下自动转为 NEAREST，消除模糊 */
+    out->scale = 2.0f;
+    woodland_xwayland_view_update_scale_filter(&x11_view);
+    assert(mock_buf->filter_mode == WLR_SCALE_FILTER_NEAREST);
+
+    /* 配置 scale_filter = "linear" 时强制为 BILINEAR */
+    struct woodland_config cfg_linear = {0};
+    cfg_linear.xwayland.scale_filter = WOODLAND_SCALE_FILTER_BILINEAR;
+    server.config = &cfg_linear;
+    woodland_xwayland_view_update_scale_filter(&x11_view);
+    assert(mock_buf->filter_mode == WLR_SCALE_FILTER_BILINEAR);
+
+    /* 配置 scale_filter = "nearest" 时在任意缩放 (>1.0) 下均为 NEAREST */
+    struct woodland_config cfg_nearest = {0};
+    cfg_nearest.xwayland.scale_filter = WOODLAND_SCALE_FILTER_NEAREST;
+    server.config = &cfg_nearest;
+    out->scale = 1.25f;
+    woodland_xwayland_view_update_scale_filter(&x11_view);
+    assert(mock_buf->filter_mode == WLR_SCALE_FILTER_NEAREST);
+
+    server.config = NULL;
+    /* 验证在 2.0x 输出上的 SSD 自动缩放 */
+    out->scale = 2.0f;
+    woodland_ssd_create(&x11_view);
+    assert(x11_view.ssd != NULL);
+    assert(woodland_ssd_get_scale(&x11_view) == 2.0f);
+    woodland_ssd_destroy(&x11_view);
+
+    /* 跨显示器移动验证：从 1.0x 移到 2.0x 显示器，自动切 NEAREST 并将 SSD 升到 2.0x */
+    out->scale = 1.0f;
+    out2->scale = 2.0f;
+    server.xwayland_scale_filter_hook = woodland_xwayland_view_update_scale_filter;
+    wlr_scene_node_set_position(&x11_view.scene_tree->node, 100, 100);
+    woodland_ssd_create(&x11_view);
+    woodland_view_update_outputs(&x11_view);
+    assert(mock_buf->filter_mode == WLR_SCALE_FILTER_BILINEAR);
+    assert(woodland_ssd_get_scale(&x11_view) == 1.0f);
+
+    wlr_scene_node_set_position(&x11_view.scene_tree->node, 900, 100);
+    woodland_view_update_outputs(&x11_view);
+    assert(mock_buf->filter_mode == WLR_SCALE_FILTER_NEAREST);
+    assert(woodland_ssd_get_scale(&x11_view) == 2.0f);
+
+    woodland_ssd_destroy(&x11_view);
+    server.xwayland_scale_filter_hook = NULL;
+
+    wlr_scene_node_destroy(&x11_view.scene_tree->node);
+
 
     wlr_cursor_destroy(server.cursor);
     server.cursor = NULL;

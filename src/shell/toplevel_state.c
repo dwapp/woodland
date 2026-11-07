@@ -433,6 +433,14 @@ void woodland_view_update_outputs(struct woodland_view *view)
         if (view->fullscreen) {
             woodland_layer_update_top_layer_visibility(view->server);
         }
+#if WOODLAND_HAVE_XWAYLAND
+        if (view->type == WOODLAND_VIEW_XWAYLAND && view->server->xwayland_scale_filter_hook) {
+            view->server->xwayland_scale_filter_hook(view);
+        }
+#endif
+        if (view->ssd) {
+            woodland_ssd_update(view);
+        }
     }
     if (!view || !view->server || !view->toplevel_handle) {
         return;

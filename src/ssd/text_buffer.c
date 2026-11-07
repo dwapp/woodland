@@ -270,9 +270,10 @@ void woodland_text_buffer_update(struct woodland_text_buffer *tb, const char *te
         return;
     }
     b->surface = surf;
-    wlr_buffer_init(&b->base, &text_buffer_impl, logical_w, logical_h);
+    wlr_buffer_init(&b->base, &text_buffer_impl, px_w, px_h);
 
     wlr_scene_buffer_set_buffer(tb->scene_buffer, &b->base);
+    wlr_scene_buffer_set_dest_size(tb->scene_buffer, logical_w, logical_h);
     wlr_buffer_drop(&b->base);
 
     tb->width = logical_w;
@@ -303,14 +304,15 @@ void woodland_text_buffer_set_enabled(struct woodland_text_buffer *tb, bool enab
 /* ==================== 按钮符号（cairo 画线） ==================== */
 
 struct wlr_buffer *woodland_button_icon_buffer(enum woodland_ssd_button_icon icon, int size,
-                                               bool inverted)
+                                               bool inverted, float scale)
 {
     if (size <= 0) {
         return NULL;
     }
-    float scale = 1.0f;
+    if (scale <= 0.0f) {
+        scale = 1.0f;
+    }
     int px = (int)(size * scale);
-    if (px <= 0)
         px = 1;
 
     cairo_surface_t *surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, px, px);
@@ -374,18 +376,20 @@ struct wlr_buffer *woodland_button_icon_buffer(enum woodland_ssd_button_icon ico
         return NULL;
     }
     b->surface = surf;
-    wlr_buffer_init(&b->base, &text_buffer_impl, size, size);
+    wlr_buffer_init(&b->base, &text_buffer_impl, px, px);
     return &b->base;
 }
 
 struct wlr_scene_buffer *woodland_button_icon_create(struct wlr_scene_tree *parent,
-                                                     enum woodland_ssd_button_icon icon, int size)
+                                                     enum woodland_ssd_button_icon icon, int size,
+                                                     float scale)
 {
-    struct wlr_buffer *buf = woodland_button_icon_buffer(icon, size, false);
+    struct wlr_buffer *buf = woodland_button_icon_buffer(icon, size, false, scale);
     if (!buf) {
         return NULL;
     }
     struct wlr_scene_buffer *sb = wlr_scene_buffer_create(parent, buf);
+    wlr_scene_buffer_set_dest_size(sb, size, size);
     wlr_buffer_drop(buf);
     return sb;
 }

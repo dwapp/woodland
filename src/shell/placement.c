@@ -69,7 +69,7 @@ bool woodland_placement_policy_parse(const char *name, enum woodland_placement_p
 
 struct woodland_output *woodland_output_first(struct woodland_server *server)
 {
-    if (!server) {
+    if (!server || !server->outputs.next || wl_list_empty(&server->outputs)) {
         return NULL;
     }
     struct woodland_output *wo;
@@ -82,6 +82,9 @@ struct woodland_output *woodland_output_first(struct woodland_server *server)
 
 struct woodland_output *woodland_output_at(struct woodland_server *server, double lx, double ly)
 {
+    if (!server || !server->output_layout || !server->outputs.next || wl_list_empty(&server->outputs)) {
+        return NULL;
+    }
     struct woodland_output *wo;
     wl_list_for_each(wo, &server->outputs, link)
     {
@@ -106,7 +109,7 @@ struct woodland_output *woodland_output_at(struct woodland_server *server, doubl
 struct woodland_output *woodland_output_nearest(struct woodland_server *server, double lx,
                                                 double ly)
 {
-    if (!server || !server->output_layout) {
+    if (!server || !server->output_layout || !server->outputs.next || wl_list_empty(&server->outputs)) {
         return NULL;
     }
     struct woodland_output *best = NULL;
@@ -139,7 +142,8 @@ struct woodland_output *woodland_output_nearest(struct woodland_server *server, 
 /* 外框中心所在的输出；落在输出之间的空隙时退化为最近的输出。 */
 struct woodland_output *woodland_output_for_view(struct woodland_view *view)
 {
-    if (!view || !view->server) {
+    if (!view || !view->server || !view->server->output_layout ||
+        !view->server->outputs.next || wl_list_empty(&view->server->outputs)) {
         return NULL;
     }
     struct woodland_server *server = view->server;

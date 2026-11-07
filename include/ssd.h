@@ -140,6 +140,9 @@ bool woodland_ssd_is_active(const struct woodland_view *view);
  */
 bool woodland_ssd_content_size(const struct woodland_view *view, int *width, int *height);
 
+/** 返回 SSD 内部缓存的渲染缩放比例；没有 SSD 时返回 1.0f。 */
+float woodland_ssd_get_scale(const struct woodland_view *view);
+
 /** 释放 SSD 全局缓存与资源。 */
 void woodland_ssd_finish(void);
 

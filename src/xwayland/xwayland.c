@@ -14,6 +14,15 @@
 #include "util/listener.h"
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <wlr/types/wlr_xcursor_manager.h>
+#include "cursor.h"
+#include "output.h"
+#include "placement.h"
+#include "woodland_config.h"
 
 #include "scene.h"
 #include <wlr/util/log.h>
@@ -45,12 +54,49 @@ struct woodland_unmanaged {
 static void unmanaged_set_geometry(struct woodland_unmanaged *unmanaged);
 static void unmanaged_map(struct wl_listener *listener, void *data);
 static void unmanaged_unmap(struct wl_listener *listener, void *data);
+static void unmanaged_update_filter_mode(struct woodland_unmanaged *unmanaged);
 
 static void unmanaged_set_geometry(struct woodland_unmanaged *unmanaged) {
     struct wlr_xwayland_surface *xsurface = unmanaged->xsurface;
     wlr_scene_node_set_position(&unmanaged->scene_tree->node,
                                 xsurface->x, xsurface->y);
+    unmanaged_update_filter_mode(unmanaged);
 }
+static enum wlr_scale_filter_mode xwl_get_scale_filter_mode(struct woodland_server *server,
+                                                            float output_scale)
+{
+    enum woodland_scale_filter sf = WOODLAND_SCALE_FILTER_SMART;
+    if (server && server->config) {
+        sf = server->config->xwayland.scale_filter;
+    }
+
+    switch (sf) {
+    case WOODLAND_SCALE_FILTER_NEAREST:
+        return (output_scale > 1.0f) ? WLR_SCALE_FILTER_NEAREST : WLR_SCALE_FILTER_BILINEAR;
+    case WOODLAND_SCALE_FILTER_BILINEAR:
+        return WLR_SCALE_FILTER_BILINEAR;
+    case WOODLAND_SCALE_FILTER_SMART:
+    default:
+        if (output_scale > 1.0f && floorf(output_scale) == output_scale) {
+            return WLR_SCALE_FILTER_NEAREST;
+        }
+        return WLR_SCALE_FILTER_BILINEAR;
+    }
+}
+
+static void unmanaged_update_filter_mode(struct woodland_unmanaged *unmanaged) {
+    if (!unmanaged || !unmanaged->scene_surface || !unmanaged->server) {
+        return;
+    }
+    struct woodland_output *wo = woodland_output_at(unmanaged->server,
+        unmanaged->scene_tree->node.x, unmanaged->scene_tree->node.y);
+    float scale = (wo && wo->wlr_output && wo->wlr_output->scale > 0.0f) ? wo->wlr_output->scale : 1.0f;
+    enum wlr_scale_filter_mode mode = xwl_get_scale_filter_mode(unmanaged->server, scale);
+    if (unmanaged->scene_surface->buffer) {
+        wlr_scene_buffer_set_filter_mode(unmanaged->scene_surface->buffer, mode);
+    }
+}
+
 
 /* 挂上 wlr_surface：建 scene surface + 接 map/unmap */
 static void unmanaged_attach_surface(struct woodland_unmanaged *unmanaged,
@@ -65,6 +111,7 @@ static void unmanaged_attach_surface(struct woodland_unmanaged *unmanaged,
     woodland_listener_connect(&unmanaged->unmap, &surface->events.unmap,
                           unmanaged_unmap, "xwayland.unmap");
     unmanaged_set_geometry(unmanaged);
+    unmanaged_update_filter_mode(unmanaged);
 }
 
 static void unmanaged_associate(struct wl_listener *listener, void *data) {
@@ -234,6 +281,7 @@ static void xwl_associate(struct wl_listener *listener, void *data) {
 
     view->scene_surface = wlr_scene_surface_create(view->scene_tree,
                                                    xsurface->surface);
+    woodland_xwayland_view_update_scale_filter(view);
 
     woodland_listener_connect(&view->map, &xsurface->surface->events.map,
                           xwl_map, "xwayland.map");
@@ -463,6 +511,113 @@ static void xwl_new_surface(struct wl_listener *listener, void *data) {
     woodland_view_set_app_id(view, xsurface->instance
                                       ? xsurface->instance : xsurface->class);
 }
+void woodland_xwayland_view_update_scale_filter(struct woodland_view *view) {
+    if (!view || view->type != WOODLAND_VIEW_XWAYLAND || !view->scene_surface) {
+        return;
+    }
+    struct woodland_output *wo = woodland_output_for_view(view);
+    float scale = (wo && wo->wlr_output && wo->wlr_output->scale > 0.0f) ? wo->wlr_output->scale : 1.0f;
+    enum wlr_scale_filter_mode mode = xwl_get_scale_filter_mode(view->server, scale);
+    if (view->scene_surface->buffer) {
+        wlr_scene_buffer_set_filter_mode(view->scene_surface->buffer, mode);
+    }
+}
+
+void woodland_xwayland_update_cursor(struct woodland_server *server) {
+    if (!server || !server->xwayland || !server->xcursor_manager) {
+        return;
+    }
+    struct wlr_xcursor *xcursor =
+        wlr_xcursor_manager_get_xcursor(server->xcursor_manager, "default", 1);
+    if (!xcursor) {
+        xcursor = wlr_xcursor_manager_get_xcursor(server->xcursor_manager, "left_ptr", 1);
+    }
+    if (xcursor && xcursor->images && xcursor->images[0]) {
+        struct wlr_xcursor_image *image = xcursor->images[0];
+        struct wlr_buffer *cursor_buffer = wlr_xcursor_image_get_buffer(image);
+        if (cursor_buffer) {
+            wlr_xwayland_set_cursor(server->xwayland, cursor_buffer,
+                                    image->hotspot_x, image->hotspot_y);
+        }
+    }
+}
+
+static void spawn_script_async(const char *path) {
+    wlr_log(WLR_INFO, "running xinitrc script: %s", path);
+    pid_t pid = fork();
+    if (pid < 0) {
+        wlr_log_errno(WLR_ERROR, "failed to fork for xinitrc");
+        return;
+    }
+    if (pid == 0) {
+        pid_t grand_pid = fork();
+        if (grand_pid < 0) {
+            _exit(1);
+        }
+        if (grand_pid == 0) {
+            execl("/bin/sh", "sh", path, (char *)NULL);
+            _exit(127);
+        }
+        _exit(0);
+    }
+    waitpid(pid, NULL, 0);
+}
+
+static void run_xinitrc(void) {
+    const char *config_home = getenv("XDG_CONFIG_HOME");
+    const char *home = getenv("HOME");
+    char path[1024];
+
+    /* 1. $XDG_CONFIG_HOME/woodland/xinitrc or ~/.config/woodland/xinitrc */
+    if (config_home && config_home[0]) {
+        snprintf(path, sizeof(path), "%s/woodland/xinitrc", config_home);
+        if (access(path, R_OK) == 0) {
+            spawn_script_async(path);
+            return;
+        }
+    } else if (home && home[0]) {
+        snprintf(path, sizeof(path), "%s/.config/woodland/xinitrc", home);
+        if (access(path, R_OK) == 0) {
+            spawn_script_async(path);
+            return;
+        }
+    }
+
+    /* 2. $XDG_CONFIG_DIRS/woodland/xinitrc or /etc/xdg/woodland/xinitrc */
+    const char *config_dirs = getenv("XDG_CONFIG_DIRS");
+    if (!config_dirs || !config_dirs[0]) {
+        config_dirs = "/etc/xdg";
+    }
+    char dirs_copy[1024];
+    strncpy(dirs_copy, config_dirs, sizeof(dirs_copy) - 1);
+    dirs_copy[sizeof(dirs_copy) - 1] = '\0';
+    char *saveptr = NULL;
+    char *dir = strtok_r(dirs_copy, ":", &saveptr);
+    while (dir) {
+        snprintf(path, sizeof(path), "%s/woodland/xinitrc", dir);
+        if (access(path, R_OK) == 0) {
+            spawn_script_async(path);
+            return;
+        }
+        dir = strtok_r(NULL, ":", &saveptr);
+    }
+
+    /* 3. Fallback: labwc xinitrc */
+    if (config_home && config_home[0]) {
+        snprintf(path, sizeof(path), "%s/labwc/xinitrc", config_home);
+        if (access(path, R_OK) == 0) {
+            spawn_script_async(path);
+            return;
+        }
+    } else if (home && home[0]) {
+        snprintf(path, sizeof(path), "%s/.config/labwc/xinitrc", home);
+        if (access(path, R_OK) == 0) {
+            spawn_script_async(path);
+            return;
+        }
+    }
+}
+
 
 /* ==================== 模块入口 ==================== */
 
@@ -471,6 +626,8 @@ static void xwl_ready(struct wl_listener *listener, void *data) {
         wl_container_of(listener, server, xwayland_ready);
     wlr_log(WLR_INFO, "xwayland ready on DISPLAY=%s",
             server->xwayland ? server->xwayland->display_name : "(null)");
+    run_xinitrc();
+    woodland_xwayland_update_cursor(server);
     (void)data;
 }
 
@@ -495,6 +652,8 @@ bool woodland_xwayland_init(struct woodland_server *server) {
 
     woodland_listener_connect(&server->xwayland_ready, &server->xwayland->events.ready,
                           xwl_ready, "xwayland.ready");
+    server->xwayland_cursor_hook = woodland_xwayland_update_cursor;
+    server->xwayland_scale_filter_hook = woodland_xwayland_view_update_scale_filter;
 
     wlr_log(WLR_INFO, "xwayland initialised, DISPLAY=%s",
             server->xwayland->display_name);
@@ -507,6 +666,8 @@ void woodland_xwayland_finish(struct woodland_server *server) {
     }
     wl_list_remove(&server->new_xwayland_surface.link);
     wl_list_remove(&server->xwayland_ready.link);
+    server->xwayland_cursor_hook = NULL;
+    server->xwayland_scale_filter_hook = NULL;
     wlr_xwayland_destroy(server->xwayland);
     server->xwayland = NULL;
 }

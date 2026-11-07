@@ -203,6 +203,8 @@ struct woodland_server {
      * NULL 表示协议层没建起来或已经回收。
      */
     bool (*shortcut_pointer_hook)(struct woodland_server *server);
+    void (*xwayland_cursor_hook)(struct woodland_server *server);
+    void (*xwayland_scale_filter_hook)(struct woodland_view *view);
 
     /* 截图/录屏（src/capture） */
     struct wlr_screencopy_manager_v1 *screencopy_manager;

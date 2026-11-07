@@ -81,7 +81,9 @@ static struct wlr_buffer *wrap_cairo_surface(cairo_surface_t *surf, int width, i
         return NULL;
     }
     b->surface = surf;
-    wlr_buffer_init(&b->base, &icon_buffer_impl, width, height);
+    int px_w = cairo_image_surface_get_width(surf);
+    int px_h = cairo_image_surface_get_height(surf);
+    wlr_buffer_init(&b->base, &icon_buffer_impl, px_w > 0 ? px_w : width, px_h > 0 ? px_h : height);
     return &b->base;
 }
 
@@ -533,7 +535,10 @@ struct wlr_buffer *woodland_ssd_get_icon_buffer(struct woodland_view *view, int 
         surf = create_fallback_icon(size, scale);
     }
 
-    struct wlr_buffer *buf = wrap_cairo_surface(surf, size, size);
+    int px = (int)(size * scale);
+    if (px <= 0)
+        px = 1;
+    struct wlr_buffer *buf = wrap_cairo_surface(surf, px, px);
     if (!buf) {
         return NULL;
     }
