@@ -162,6 +162,16 @@ int main(void) {
     }
 
     wl_data_source_destroy(source);
+
+    /*
+     * 测试 source = NULL 时的 start_drag（故意用无效 serial）：
+     * 协议允许 source 为 NULL，合成器拒绝时必须妥善销毁内部的 drag 对象，
+     * 既不能崩溃也不能在 ASan 构建下报内存泄漏。
+     */
+    wl_data_device_start_drag(ddev, NULL, origin, NULL, 0xdeadbeefu);
+    wl_display_flush(display);
+    wl_display_roundtrip(display);
+    wl_display_roundtrip(display);
     wl_surface_destroy(origin);
     wl_data_device_destroy(ddev);
     /* 每个 bind 出来的 proxy 都自己还：ASan 构建下漏一个就是一条 leak */

@@ -45,7 +45,6 @@ struct woodland_dnd {
     /* scene 根的子节点，init 时建；空闲时 disabled（不渲染、不参与 hit-test） */
     struct wlr_scene_tree *icons;
     struct wlr_drag *drag;            /* NULL = 当前没有拖拽 */
-    struct wlr_surface *last_surface; /* 上一帧的投放目标，用于抑制重复 enter */
     struct woodland_dnd_icon icon;
     struct {
         struct wl_listener request; /* seat->events.request_start_drag */

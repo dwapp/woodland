@@ -201,22 +201,22 @@ src/dnd/meson.build  静态库，链 scene_deps + trace_lib（与 src/seat/ 同�
 
 ```c
 struct woodland_dnd_icon {
-    struct wlr_scene_tree *tree;     /* 本次拖拽的子树，挂在 icons 下 */
-    struct wlr_drag_icon *icon;
-    struct wl_listener map, unmap, commit, destroy;
+    struct wlr_scene_tree *tree;     /* 本次拖拽的子树，挂在 icons 下；NULL = 没图标 */
+    struct wl_listener tree_destroy; /* 子树被销毁时清 tree，防悬垂 */
 };
 
 struct woodland_dnd {
     struct woodland_server *server;
     struct wlr_scene_tree *icons;    /* scene 根的子节点，init 时建、默认 disabled */
     struct wlr_drag *drag;           /* NULL = 没有拖拽 */
-    struct wlr_surface *last_surface;/* 上一帧的投放目标，用于抑制重复 enter */
     struct woodland_dnd_icon icon;
     struct { struct wl_listener request, start, destroy; } events;
 };
 ```
 
 `server->dnd` 内联进 `struct woodland_server`（和 `hover_view` / `pressed_view` 同层），不额外分配。
+
+投放目标不另存指针：直接用 wlroots 自己维护的 `drag->focus`（它挂了 `focus_destroy` 监听器，目标窗口崩了会自动置 NULL）。早期版本存过 `last_surface`，那是 Use-After-Free 的入口——见 §11.6。
 
 ### 7.3 事件流
 
@@ -233,7 +233,7 @@ struct woodland_dnd {
         ↓
    客户端 A 松手 → notify_button → grab 收尾：drop → wl_data_device.drop 给目标 → drag 销毁
         ↓
-   seat.events.destroy(drag)  → 清 last_surface + 关树 + 摘监听 + trace "dnd end"
+   seat.events.destroy(drag)  → 关树 + 摘监听 + trace "dnd end"
 ```
 
 ### 7.4 图标：交给 `wlr_scene_drag_icon_create`
@@ -275,17 +275,16 @@ wlr_scene_node_set_position(&dnd->icons->node, cursor->x, cursor->y);
 struct wlr_surface *surface = NULL; double sx = 0, sy = 0;
 dnd_surface_at(server, cursor->x, cursor->y, &surface, &sx, &sy);
 
-if (surface != dnd->last_surface) {
-    dnd->last_surface = surface;
+if (surface != dnd->drag->focus) {
     if (surface) wlr_seat_pointer_notify_enter(seat, surface, sx, sy);
     else         wlr_seat_pointer_notify_clear_focus(seat);   /* 必须带 notify */
 }
 if (surface) wlr_seat_pointer_notify_motion(seat, time, sx, sy);
 ```
 
-`dnd_surface_at()` 复用 `woodland_view_at()` 的 hit-test，但要加一条：**命中结果若落在图标子树里就当作没有目标**。做法是拿到 node 后沿 `node->parent` 上溯，遇到 `dnd->icons` 就返回 NULL。（scenefx 没有 `wlr_scene_node_set_input_bypassed`，只能这样。另见 §9.2：图标 surface 的输入区域若为空，`wlr_surface_point_accepts_input()` 本来就会拒掉，但不同工具包不一致，不要赌。）
+`dnd_surface_at()` 在 hit-test 前临时将 `dnd->icons` 隐藏并在返回前恢复（同 labwc 机制），确保光标无论处在图标何处都能穿透命中下方的真正投放窗口；若命中结果仍落在图标子树里则当作没有目标。
 
-只在 surface 变化时 `notify_enter`：重复 enter 虽然被 `drag_set_focus` 的早退挡住，但每帧一次进入 `notify_enter` 是无谓的（而且一旦 wlroots 改了早退条件就会变成每帧重建 offer）。
+只在 surface 变化时 `notify_enter`：以 `drag->focus` 为权威判定，重复 enter 虽然被 `drag_set_focus` 的早退挡住，但每帧一次进入 `notify_enter` 是无谓的（而且一旦 wlroots 改了早退条件就会变成每帧重建 offer）。
 
 ### 7.6 button 分发改造
 
@@ -303,7 +302,7 @@ if (woodland_dnd_active(server)) {
 ### 7.7 生命周期
 
 - **start**：清 `pressed_view` / `pressed_part` 与 hover 态（等价 labwc 的 `cursor_context_save(NULL)`）。
-- **destroy**：`last_surface = NULL`、关 icons 树、摘 drag 的 destroy 监听器、trace。**不 refocus**——woodland 是点击聚焦语义，拖拽期间焦点没变，留在源窗口是对的。
+- **destroy**：关 icons 树、摘 drag 的 destroy 监听器、trace。**不 refocus**——woodland 是点击聚焦语义，拖拽期间焦点没变，留在源窗口是对的。
 - **锁屏**：`woodland_session_lock_is_locked()` 时若正在拖拽，直接 `wlr_seat_pointer_end_grab(seat)`（触发 grab 的 cancel → drag 销毁 → 我们的 destroy 处理器收尾）。放在锁屏请求入口，而不是光标路径里。
 - **工作区/视图销毁**：不需要处理，drag 由 wlroots 持有，图标树在 scene 根。
 
@@ -375,7 +374,7 @@ wlr_scene_subsurface_tree_set_clip
 
 `wlr_scene_node_at()` 命中 buffer 节点后会问 `wlr_surface_point_accepts_input()`，也就是看 surface 的输入区域。拖拽图标的 surface 输入区域在不同工具包里不一定为空（有的把 hotspot 那一点设成可命中）。一旦命中，`notify_enter` 会把**图标自己**当成投放目标，drop 就永远送不到真正的窗口。
 
-**决定**：不赌输入区域，hit-test 后做祖先检查跳过 icons 子树（§7.5）。这条在真机清单第 1、3 项会被覆盖。
+**决定**：双层防御。① hit-test 期间临时 `set_enabled(icons, false)` 再恢复——命中结果直接"穿透"到图标下方的窗口，语义正确（labwc `desktop.c:332` 就是这个做法，注释写着 *Prevent drag icons to be on top of the hitbox detection*）；② 命中结果若仍落在图标子树里，祖先检查当作没有目标（兜底）。只做②是不够的：`wlr_scene_node_at()` 返回的是**最上面**那个节点，图标挡住的窗口根本没机会成为目标，拖到图标覆盖区就等于没有投放目标。
 
 ### 9.3 剪贴板持久化要不要内置
 
@@ -395,7 +394,7 @@ wlroots 不桥接（xwm 只处理 X11 内部 Xdnd），labwc 也不桥接。保�
 ## 10. 待验证清单（进实现前先回答）
 
 1. `dde-clipboard-daemon` / klipper 类客户端是否**硬依赖** `org.kde.KWin.Clipboard`（`getClipboardSelectionPid`）。硬依赖 → 需要 sd-bus 服务（约 80 行 + 一个构建依赖），否则可以只记 TODO。
-2. 常用工具包（GTK3/4、Qt5/6、Firefox、Chromium）的拖拽图标 surface 输入区域到底是不是空。实测结果决定 §9.2 的祖先检查是否"保险"还是"必需"——不管结论如何都保留，成本 12 行。
+2. 常用工具包（GTK3/4、Qt5/6、Firefox、Chromium）的拖拽图标 surface 输入区域到底是不是空。不管结论如何，§9.2 的"隐藏 + 祖先检查"都保留——前者管语义（穿透），后者管兜底。
 3. 分片缩放（`wlr_fractional_scale`）下图标 buffer scale 是否随输出变化：icon surface 的 `preferred_buffer_scale` 由 scenefx 的 surface 树自动处理，但**跨不同 scale 的输出之间拖动**要实测是否出现图标忽大忽小。
 4. 拖拽期间 `[effects] blur` / 圆角是否会错误地作用到图标子树（图标不是 `woodland_view`，不该被 `woodland_effect_update()` 碰到；确认 effect 模块的遍历入口只走 views 链表）。
 
@@ -421,7 +420,7 @@ wlroots 不桥接（xwm 只处理 X11 内部 Xdnd），labwc 也不桥接。保�
 ### 11.2 与设计的差异
 
 1. **自检调度走钩子**。`selfcheck.c` 在 `shell_lib` 里，而 dnd 是 shell 的**下游**（光标层调 dnd），直接调 `woodland_selfcheck_schedule()` 会让两个静态库互相依赖。改成 `server->selfcheck_schedule_hook`，由 `woodland_shell_init/finish` 挂上、摘掉——和既有的 `pointer_constraint_is_focused_hook` 同一套写法。
-2. **hit-test 不用 `woodland_view_at()`**。那条路只认 toplevel 视图，而拖到 panel（layer-shell）、Dock、X11 override-redirect 窗口上都该有 `enter`。直接问 `wlr_scene_node_at()`，拿到什么 surface 就交给 wlroots 自己按 seat client 查表。图标子树的祖先检查（§9.2）照做。
+2. **hit-test 不用 `woodland_view_at()`**。那条路只认 toplevel 视图，而拖到 panel（layer-shell）、Dock、X11 override-redirect 窗口上都该有 `enter`。直接问 `wlr_scene_node_at()`，拿到什么 surface 就交给 wlroots 自己按 seat client 查表。图标子树的双层防御（隐藏 + 祖先检查，§9.2）照做。
 3. **按钮分支做的是"先下发再收尾"**，而不是整段跳过：`notify_button` 必须在任何收尾之前（grab 在里面完成 drop 并销毁 drag），之后只清 SSD 的 pressed/hover 态就返回。
 4. 图标树两层：`icons` 容器跟光标（布局坐标），`wlr_scene_drag_icon_create` 建的子树只承担 `surface->current.dx/dy` 的 hotspot 增量——和 wlroots 自己的实现同构（因为就是它）。
 
@@ -445,3 +444,25 @@ wlroots 不桥接（xwm 只处理 X11 内部 Xdnd），labwc 也不桥接。保�
 - mango（`dependency('scenefx-0.5')`）在 `handle_start_drag` 里直接用 `wlr_scene_drag_icon_create`，生产验证。
 
 修正：`dnd_icon_create()` 换成 helper，`struct woodland_dnd_icon` 从 5 个字段缩到 2 个（`tree` + `tree_destroy` 监听器），`append_dnd()` 的图标尺寸改读 `dnd->drag->icon->surface`。净删 60 行，行为不变（helper 就是把这几个调用串起来）。`AGENTS.md` 第 8 条同步改写。
+
+### 11.6 评审优化：焦点权威源、图标穿透与无源拒绝
+
+根据代码评审结果完成三处优化：
+
+1. **移除 `dnd->last_surface`**：改为直接以 wlroots 自身维护的 `dnd->drag->focus` 作为事实源。原 `last_surface` 指针在目标窗口被销毁时无法同步感知，在 `wctl get_tree`（`append_dnd`）中会引发 Use-After-Free 崩溃。
+2. **图标 hit-test 穿透**：`dnd_surface_at()` 在调用 `wlr_scene_node_at()` 时临时禁用 `dnd->icons`，规避图标自身遮挡底层投放窗口。
+3. **`source == NULL` 时的 drag 对象释放**：在校验失败拒绝请求时，若 `event->drag->source == NULL`，通过 `pointer_grab.interface->cancel` 彻底销毁未启动的 `wlr_drag` 对象，杜绝内存泄漏。
+
+**对这三条的独立核实**（不是照单接收）：
+
+- `struct wlr_drag` 的 `focus` 是公开字段，wlroots 自己挂了 `focus_destroy` 监听器在目标 surface 销毁时置 NULL——所以它比自定义缓存更安全，这条成立。副作用是语义更好：`drag_set_focus()` 的早退条件就是 `surface == drag->focus`，用它判断"目标变没变"天然一致。
+- `pointer_grab.data` / `pointer_grab.interface` 在 `wlr_drag_create()`（`wlr_drag.c:481`）里就设好了，不是 start 之后才设；`drag_destroy()` 对 `started == false` 的 drag 不碰 `seat->drag`，也不 `end_grab`——所以对未启动的 drag 调 cancel 是安全的，不会误伤别人的 grab。`cancelling` 标志还保证幂等。
+- 泄漏是**真的**，不是理论上的：把 `dnd_reject_drag()` 的 `else if` 分支临时去掉，ASan 构建下 `smoke-dnd` 立刻红：
+  ```
+  Direct leak of 312 byte(s) in 1 object(s) allocated from:
+      #1 ... wlr_drag_create ../subprojects/wlroots/types/data_device/wlr_drag.c:446
+  ```
+  恢复后转绿。所以 `tests/smoke/dnd_probe.c` 里新加的 "`start_drag` with `source == NULL`" 用例是有效回归，不是摆设。
+- 图标穿透这条与 labwc 逐行对过：`labwc/src/desktop.c:332` `dnd_icons_show(&server.seat, false)` → `wlr_scene_node_at()` → `:340` 恢复；`labwc/src/dnd.c:104` 的 `dnd_icons_show()` 就是一个 `set_enabled` 包装。我们的实现把这个开关收进 `dnd_surface_at()` 内部，调用方不用知道。
+
+顺带修正：会话里早先写的 `dnd->last_surface` 字段、`dnd_icon_handle_commit()`、`icon.armed` 全部删除；`include/dnd.h` 的 `struct woodland_dnd_icon` 现在只有 `tree` + `tree_destroy` 两个字段。
