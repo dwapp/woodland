@@ -17,7 +17,7 @@
 
 1. **拖拽期间不能用裸 `wlr_seat_pointer_clear_focus()`**（woodland 现在在 SSD 分支里用了，`src/shell/cursor.c:179`、`:199`）。它绕过 pointer grab，不通知 `wlr_drag`，结果是"光标明明在标题栏/桌面上松手，文件却掉进了上一个窗口"。
 2. **图标树必须挂在 scene 根、并在 drag 开始时置顶**，否则会被 layer-shell 的 panel 盖住（labwc 0.7.3 修的就是这个，NEWS #1936）。
-3. **scenefx 0.5 没有实现 `wlr_scene_drag_icon_create`**：它的头文件声明了，`.so` 里没有这个符号（`nm -D` 的 82 个 `wlr_scene_*` 导出里没有它），链接会落到 `libwlroots` 的实现上。两者的 `wlr_scene_node` / `wlr_scene_tree` 目前逐字段相同所以能跑，但这是**跨库结构体布局的隐式依赖**。见 §9.1，建议自己搭 25 行，不碰这个符号。
+3. **`wlr_scene_drag_icon_create` 可以用**（这条初稿判断反了，见 §9.1）。scenefx 0.5 的头里声明了它、`.so` 里没有实现，链接落到 `libwlroots` 那份——而 `wlr_scene_subsurface_tree_create` / `wlr_scene_surface_create` 等十个符号全是同样情况，woodland 每个窗口的表面子树走的本来就是 libwlroots 这份。mango 也是这么用的。
 
 ## 2. 协议层的责任划分
 
@@ -104,7 +104,7 @@ tablet 有隐式抓取         → 强设 pointer_state.grab_button = BTN_LEFT�
 - `commit` → `node->x += surface->current.dx`（跟随 hotspot 增量，和 wlroots 内部实现同款）；
 - 起点就用 `cursor->lx/ly` 定位，**不等第一帧 motion**。
 
-这条路完全绕开了 §9.1 说的跨库符号问题，代价是 60 行重复代码。
+这条路绕开了自己搭的那份逻辑，代价是 60 行重复代码（而且它依赖的 `wlr_scene_subsurface_tree_create` 同样来自 libwlroots——见 §9.1，绕不掉的其实没绕掉）。treeland 血统选择自建大概是历史原因，不是必要。
 
 ### 4.3 拖拽状态是光标层的一等公民
 
@@ -236,27 +236,25 @@ struct woodland_dnd {
    seat.events.destroy(drag)  → 清 last_surface + 关树 + 摘监听 + trace "dnd end"
 ```
 
-### 7.4 图标：自己搭，不用 `wlr_scene_drag_icon_create`
+### 7.4 图标：交给 `wlr_scene_drag_icon_create`
 
-理由见 §9.1。等价实现（照 wlroots `types/scene/drag_icon.c` 的语义，但只依赖 scenefx 也有的符号）：
+理由见 §9.1（初稿曾主张自搭，实现时推翻）：
 
 ```c
-static void icon_handle_commit(struct wl_listener *l, void *data) {
-    struct woodland_dnd_icon *icon = wl_container_of(l, icon, commit);
-    struct wlr_surface *s = icon->icon->surface;
-    /* hotspot 增量：surface->current.dx/dy，不是 sx/sy */
-    wlr_scene_node_set_position(&icon->tree->node,
-                                icon->tree->node.x + s->current.dx,
-                                icon->tree->node.y + s->current.dy);
-}
+/* icons 是 scene 根下的容器，跟光标走；helper 建的子树只承担 hotspot 增量 */
+dnd->icon.tree = wlr_scene_drag_icon_create(dnd->icons, drag->icon);
+/* 子树被销毁（drag 收尾 / 客户端撤 icon surface）时清指针，避免悬垂 */
+woodland_listener_connect(&dnd->icon.tree_destroy,
+                          &dnd->icon.tree->node.events.destroy,
+                          dnd_icon_handle_tree_destroy, "dnd.icon_tree_destroy");
 ```
 
 要点：
 
-- `wlr_scene_subsurface_tree_create(icons, icon->surface)` 建子树（这个符号 scenefx 有）；
-- 起点在 start 处理器里就 `set_position(icons, cursor->x, cursor->y)`，别等第一帧 motion——否则图标闪一下左上角（labwc 就闪，因为它只在 motion 里挪）；
-- `enabled` 跟 `surface->mapped` 走，而不是跟 drag 生命周期走（客户端可能先给个空图标再贴 buffer）；
-- `drag->icon == NULL` 是合法状态，此时只置 active。
+- helper 内部已经做了 `wlr_scene_tree_create` + `wlr_scene_subsurface_tree_create` + 跟 `surface->current.dx/dy` 的 commit 监听器 + 自动销毁，不用再挂 `map`/`unmap`/`commit`；
+- 容器 `icons` 仍然自己管：它跟光标走（`set_position(icons, cursor->x, cursor->y)`），**起点在 start 处理器里就给一次**，别等第一帧 motion——否则图标闪一下左上角（labwc 就闪，因为它只在 motion 里挪）；
+- 容器空闲时 `enabled=false`：不渲染、不参与 hit-test，self_check 的 `dnd_icon` 也据此判断；
+- `drag->icon == NULL` 是合法状态，此时只置 active，不建节点。
 
 ### 7.5 motion 分发改造（`src/shell/cursor.c`）
 
@@ -348,21 +346,30 @@ if (woodland_dnd_active(server)) {
 
 ## 9. 风险与取舍
 
-### 9.1 scenefx 0.5 缺 `wlr_scene_drag_icon_create`（关键）
+### 9.1 `wlr_scene_drag_icon_create` 到底能不能用（初稿结论已推翻）
 
-证据：
+初稿的判断是"不能用：scenefx 缺这个符号，链接落到 libwlroots 会跨库访问结构体"。**这个判断是错的**，实现阶段复核后推翻。
+
+事实是：`wlr_scene_*` 这一族符号**本来就分属两个库**，而且是有意的切分。scenefx 只替换 buffer / rect / blur / shadow / node / tree / output 那一层，**没有**替换"把 surface 包成节点"那一层：
 
 ```
-$ nm -D --defined-only build/subprojects/scenefx/libscenefx-0.5.so | grep -c wlr_scene   # 82
-$ nm -D --defined-only ... | grep -i drag_icon                                          # 空
-$ nm -D --defined-only ... | grep wlr_scene_tree_create                                 # 有
+$ nm -D --defined-only libscenefx-0.5.so | grep '^wlr_scene' | wc -l      # 82
+# comm -13 scenefx wlroots —— 只有 libwlroots 有的：
+wlr_scene_subsurface_tree_create      wlr_scene_surface_create
+wlr_scene_xdg_surface_create          wlr_scene_surface_send_frame_done
+wlr_scene_layer_surface_v1_create     wlr_scene_surface_try_from_buffer
+wlr_scene_layer_surface_v1_configure  wlr_scene_drag_icon_create
+wlr_scene_attach_output_layout        wlr_scene_output_layout_add_output
+wlr_scene_subsurface_tree_set_clip
 ```
 
-即：scenefx 声明了这个 API（`include/scenefx/types/wlr_scene.h:995`）但没实现，链接时 `scene_deps = [scenefx, wlroots]` 会落到 `libwlroots` 的实现。而该实现在 wlroots 内部按**自己的** `struct wlr_scene_tree` / `wlr_scene_node` 布局访问字段（`icon->tree->node.events.destroy`），树却是 scenefx 建的。
+也就是说 `wlr_scene_subsurface_tree_create` 和 `wlr_scene_drag_icon_create` 属于**同一类**——woodland 每个窗口的表面子树原本走的就是 libwlroots 这份，渲染一直是好的。所以"绕开 drag_icon_create"自相矛盾：要绕就得连 `wlr_scene_subsurface_tree_create` 一起绕，那整个合成器就不用画窗口了。
 
-我逐字段 diff 过两份头文件，`wlr_scene_node`（type/parent/link/enabled/x/y/events/data/addons/visible）和 `wlr_scene_tree`（node + children）目前**完全一致**，所以今天能跑。但这是**隐式耦合**：scenefx 哪天在 `wlr_scene_node` 中间加一个字段，症状会是随机的内存破坏而不是编译错误，而且只在开了 effects 的默认构建里出现。
+而且 `wlr_scene_drag_icon_create` 的实现（`subprojects/wlroots/types/scene/drag_icon.c`，约 60 行）就是 `wlr_scene_tree_create` + `wlr_scene_subsurface_tree_create` + 一条跟 `surface->current.dx/dy` 的 commit 监听器 + 两条销毁监听器——**手搭等于把它抄一遍**。它只调用公开 API，两头的 `struct wlr_scene_node` / `wlr_scene_tree` 也逐字段相同（type/parent/link/enabled/x/y/events/data/addons/visible）。
 
-**决定**：自己搭（§7.4，25 行），不碰这个符号。同时在 `AGENTS.md` 的 scenefx 硬约束里记一条：*不要用 `wlr_scene_drag_icon_create`，scenefx 未实现，会静默落到 libwlroots 并跨库访问结构体*。
+旁证：mango（mangowm，`dependency('scenefx-0.5')`）在 `src/input/pointer.c:handle_start_drag` 里就是 `wlr_scene_drag_icon_create(server.drag_icon, drag->icon)`，生产在用。
+
+**决定**：用上游的 `wlr_scene_drag_icon_create()`。初稿手搭的那 60 行已删除（见 §11.5）。`AGENTS.md` 的 scenefx 硬约束第 8 条相应改写为"符号分属两库是有意的，别当缺符号绕"。
 
 ### 9.2 图标会不会被 hit-test 命中
 
@@ -416,7 +423,7 @@ wlroots 不桥接（xwm 只处理 X11 内部 Xdnd），labwc 也不桥接。保�
 1. **自检调度走钩子**。`selfcheck.c` 在 `shell_lib` 里，而 dnd 是 shell 的**下游**（光标层调 dnd），直接调 `woodland_selfcheck_schedule()` 会让两个静态库互相依赖。改成 `server->selfcheck_schedule_hook`，由 `woodland_shell_init/finish` 挂上、摘掉——和既有的 `pointer_constraint_is_focused_hook` 同一套写法。
 2. **hit-test 不用 `woodland_view_at()`**。那条路只认 toplevel 视图，而拖到 panel（layer-shell）、Dock、X11 override-redirect 窗口上都该有 `enter`。直接问 `wlr_scene_node_at()`，拿到什么 surface 就交给 wlroots 自己按 seat client 查表。图标子树的祖先检查（§9.2）照做。
 3. **按钮分支做的是"先下发再收尾"**，而不是整段跳过：`notify_button` 必须在任何收尾之前（grab 在里面完成 drop 并销毁 drag），之后只清 SSD 的 pressed/hover 态就返回。
-4. 图标树两层：`icons` 跟光标（布局坐标），`icon.tree` 只承担 `surface->current.dx/dy` 的 hotspot 增量——和 wlroots 自己的实现同构，但只依赖 `wlr_scene_subsurface_tree_create` 这个 scenefx 真有的符号。
+4. 图标树两层：`icons` 容器跟光标（布局坐标），`wlr_scene_drag_icon_create` 建的子树只承担 `surface->current.dx/dy` 的 hotspot 增量——和 wlroots 自己的实现同构（因为就是它）。
 
 ### 11.3 测试结论
 
@@ -428,3 +435,13 @@ wlroots 不桥接（xwm 只处理 X11 内部 Xdnd），labwc 也不桥接。保�
 
 - touch drag：woodland 还没接 `WLR_INPUT_DEVICE_TOUCH`，`request_start_drag` 里留了注释而不是死分支。
 - `xdg-toplevel-drag-v1`（§4.6）、剪贴板持久化（§9.3）、`org.kde.KWin.Clipboard`（§4.5）——与设计一致，本轮不做。
+
+### 11.5 交付后修正：图标改用 `wlr_scene_drag_icon_create`
+
+提交 `f4d9970` 里的图标是自己搭的（60 行：建 tree、建 subsurface 树、commit 监听器跟 dx/dy、两条销毁监听器）。交付后被问到"mango 为什么能用 `wlr_scene_drag_icon_create`"，复核发现**初稿 §9.1 的结论是错的**：
+
+- `nm -D libscenefx-0.5.so` 里确实没有这个符号，但 `wlr_scene_subsurface_tree_create`、`wlr_scene_surface_create`、`wlr_scene_xdg_surface_create`、`wlr_scene_layer_surface_v1_create` 等十个符号**全都没有**——它们本来就在 libwlroots 里，woodland 每个窗口的表面子树走的就是那一份。把"符号在另一个库里"当成风险，等于说整个合成器不该工作。
+- 自搭的代码里第一个调用就是 `wlr_scene_subsurface_tree_create`，即"Risk"根本没被绕开。
+- mango（`dependency('scenefx-0.5')`）在 `handle_start_drag` 里直接用 `wlr_scene_drag_icon_create`，生产验证。
+
+修正：`dnd_icon_create()` 换成 helper，`struct woodland_dnd_icon` 从 5 个字段缩到 2 个（`tree` + `tree_destroy` 监听器），`append_dnd()` 的图标尺寸改读 `dnd->drag->icon->surface`。净删 60 行，行为不变（helper 就是把这几个调用串起来）。`AGENTS.md` 第 8 条同步改写。

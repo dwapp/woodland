@@ -14,11 +14,12 @@
  *      了上一个窗口"。光标层一律用 notify_ 版本。
  *   2. 图标树必须挂在 scene 根并在开始时置顶：layer-shell 的 panel/dock 也是
  *      scene 根的子节点，不置顶就被面板盖住（labwc #1936）。
- *   3. 图标子树自己搭，不用 wlr_scene_drag_icon_create()：scenefx 0.5 声明了
- *      这个符号但没实现，链接会落到 libwlroots 的实现上，而那是按自己的
- *      wlr_scene_node / wlr_scene_tree 布局访问 scenefx 建的树——今天字段恰好
- *      一致，改天就是随机内存破坏。见
- *      docs/superpowers/specs/2026-11-08-clipboard-dnd-design.md §9.1。
+ *   3. 图标用 wlr_scene_drag_icon_create()，别自己搭。scenefx 0.5 的头里
+ *      声明了它但 .so 里没有实现，链接落到 libwlroots 那份——这是这个
+ *      混合栈的正常状态（wlr_scene_subsurface_tree_create /
+ *      wlr_scene_surface_create / wlr_scene_xdg_surface_create 全都一样：
+ *      scenefx 只替换 buffer/rect/blur/render 那一层），不是陷阱。
+ *      自己搭反而会把同一段 commit 逻辑抄一遍。见设计文档 §9.1。
  */
 #include "config.h"
 #include "util/listener.h"
@@ -40,55 +41,35 @@ static void dnd_handle_destroy(struct wl_listener *listener, void *data);
 /* ==================== 图标 ==================== */
 
 /*
- * 图标子树的销毁。
- *
- * 三条路径会走到这里（drag 销毁 / 客户端把 icon surface 销毁 / 模块收尾），
- * 所以必须幂等：armed 关掉之后 rest 全部跳过。
+ * 图标子树被销毁（拖拽收尾 / 客户端撤掉 icon surface / 模块收尾）时清指针。
+ * 谁销毁的不重要：子树和它的事务都由 wlr_scene_drag_icon_create() 的监听器
+ * 自己收，这里只负责让 dnd->icon.tree 不再是个悬垂指针。
+ */
+static void dnd_icon_handle_tree_destroy(struct wl_listener *listener, void *data)
+{
+    struct woodland_dnd_icon *icon = wl_container_of(listener, icon, tree_destroy);
+    icon->tree = NULL;
+    (void)data;
+}
+
+/*
+ * 主动释放。必须幂等：外面三条路径都会调，而它们可能已经互相覆盖过
+ * （拖拽销毁时 wlr_drag 会先把自己的 icon 一起销毁，走到这里时树已经没了）。
  */
 static void dnd_icon_release(struct woodland_dnd *dnd)
 {
     struct woodland_dnd_icon *icon = &dnd->icon;
-    if (!icon->armed) {
+    if (!icon->tree) {
         return;
     }
-    icon->armed = false;
-    wl_list_remove(&icon->commit.link);
-    wl_list_remove(&icon->destroy.link);
-    if (icon->tree) {
-        /* 连带销毁 subsurface 子树（wlr_scene_subsurface_tree_create 建的） */
-        wlr_scene_node_destroy(&icon->tree->node);
-        icon->tree = NULL;
+    struct wlr_scene_tree *tree = icon->tree;
+    /* 先摘监听器再销毁：否则自己的回调会在下面 wlr_scene_node_destroy 里被调，
+     * 拿到的 tree 已经进了解构流程 */
+    if (icon->tree_destroy.link.prev) {
+        wl_list_remove(&icon->tree_destroy.link);
     }
-    icon->icon = NULL;
-}
-
-/*
- * hotspot 增量：客户端每次 commit 可以把图标相对指针的偏移改一点
- * （surface->current.dx/dy），照抄 wlroots types/scene/drag_icon.c 的语义。
- * 注意不是 sx/sy：那两个是 surface 内的坐标，跟位置无关。
- */
-static void dnd_icon_handle_commit(struct wl_listener *listener, void *data)
-{
-    struct woodland_dnd_icon *icon = wl_container_of(listener, icon, commit);
-    if (!icon->tree || !icon->icon) {
-        return;
-    }
-    struct wlr_surface *surface = icon->icon->surface;
-    if (!surface) {
-        return;
-    }
-    wlr_scene_node_set_position(&icon->tree->node, icon->tree->node.x + surface->current.dx,
-                                icon->tree->node.y + surface->current.dy);
-    (void)data;
-}
-
-static void dnd_icon_handle_destroy(struct wl_listener *listener, void *data)
-{
-    struct woodland_dnd_icon *icon = wl_container_of(listener, icon, destroy);
-    /* 收尾只看 dnd，不需要 icon 本身：release 会把它一并清掉 */
-    struct woodland_dnd *dnd = wl_container_of(icon, dnd, icon);
-    dnd_icon_release(dnd);
-    (void)data;
+    icon->tree = NULL;
+    wlr_scene_node_destroy(&tree->node);
 }
 
 static void dnd_icon_create(struct woodland_dnd *dnd, struct wlr_drag_icon *icon)
@@ -98,22 +79,20 @@ static void dnd_icon_create(struct woodland_dnd *dnd, struct wlr_drag_icon *icon
         return;
     }
     /*
-     * subsurface 树自带 map/unmap → enabled 的处理（跟着 surface->mapped 走），
-     * 所以这里不挂 map/unmap 监听器：客户端可能先给个空图标再贴 buffer，
-     * 节点可见性交给 scenefx 比我们自己跟更准。
+     * 交给 wlroots：它做的事就是 wlr_scene_tree_create + 一棵 subsurface 树
+     * + 一条跟着 surface->current.dx/dy 挪位置的 commit 监听器，正好是需要
+     * 的全部。subsurface 树自带 map/unmap → enabled 的处理（跟着
+     * surface->mapped 走），客户端"先给空图标再贴 buffer"也跟得准，
+     * 不需要我们再挂 map/unmap。
      */
-    struct wlr_scene_tree *tree = wlr_scene_subsurface_tree_create(dnd->icons, icon->surface);
+    struct wlr_scene_tree *tree = wlr_scene_drag_icon_create(dnd->icons, icon);
     if (!tree) {
         wlr_log(WLR_ERROR, "failed to create drag icon node");
         return;
     }
     dnd->icon.tree = tree;
-    dnd->icon.icon = icon;
-    dnd->icon.armed = true;
-    woodland_listener_connect(&dnd->icon.commit, &icon->surface->events.commit,
-                              dnd_icon_handle_commit, "dnd.icon_commit");
-    woodland_listener_connect(&dnd->icon.destroy, &icon->events.destroy,
-                              dnd_icon_handle_destroy, "dnd.icon_destroy");
+    woodland_listener_connect(&dnd->icon.tree_destroy, &tree->node.events.destroy,
+                              dnd_icon_handle_tree_destroy, "dnd.icon_tree_destroy");
 }
 
 /* ==================== 投放目标 ==================== */
