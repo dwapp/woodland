@@ -21,6 +21,18 @@ struct woodland_config_general {
     bool focus_follows_mouse;
     int32_t snap_distance;
     bool snap_preview;
+    /*
+     * 贴边预览的样式。color 是 0xAARRGGBB：RGB 是色调，A 是**边框**不透明度；
+     * 填充另给 opacity（同一个 RGB、更低的不透明度），边框宽度单独给。
+     *
+     * color_specified 和 ssd.colors_specified 同一个用途：默认色固定写死，
+     * 光看数值分不出"用户要这个色"和"没写所以拿默认"。没写时跟随
+     * treeland-appearance 的强调色（accent），写了就以文件为准。
+     */
+    uint32_t snap_preview_color;
+    bool snap_preview_color_specified;
+    double snap_preview_opacity;
+    int32_t snap_preview_border_width;
     bool allow_tearing;
 };
 

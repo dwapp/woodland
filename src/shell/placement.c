@@ -516,6 +516,48 @@ uint32_t woodland_snap_cursor_edges(const struct wlr_box *area, double cursor_x,
     return 0;
 }
 
+/*
+ * 某条输出边是不是**整个输出布局**的外边界。
+ *
+ * 用途只有一个：拖窗口跨屏时，"两个显示器之间的接缝"和"屏幕墙的外沿"
+ * 在几何上都表现为一条边，但前者要防抖（用户可能只是路过）、后者可以
+ * 立刻给预览。判定办法是在边外 1px 处探一个点，看那里是否还有输出接着。
+ */
+bool woodland_snap_edge_is_layout_edge(struct wlr_output_layout *layout,
+                                       struct wlr_output *output, uint32_t edge)
+{
+    if (!layout || !output) {
+        /* 没有布局信息：按外边界处理（立刻预览）。宁可少一次防抖，
+         * 也不要因为拿不到布局而永远不显示预览 */
+        return true;
+    }
+    struct wlr_box box;
+    wlr_output_layout_get_box(layout, output, &box);
+    if (box.width <= 0 || box.height <= 0) {
+        return true;
+    }
+
+    int test_x = box.x + box.width / 2;
+    int test_y = box.y + box.height / 2;
+    switch (edge) {
+    case WLR_EDGE_LEFT:
+        test_x = box.x - 1;
+        break;
+    case WLR_EDGE_RIGHT:
+        test_x = box.x + box.width;
+        break;
+    case WLR_EDGE_TOP:
+        test_y = box.y - 1;
+        break;
+    case WLR_EDGE_BOTTOM:
+        test_y = box.y + box.height;
+        break;
+    default:
+        return true;
+    }
+
+    return !wlr_output_layout_contains_point(layout, NULL, test_x, test_y);
+}
 
 bool woodland_snap_tile_box(const struct wlr_box *area, uint32_t edges, struct wlr_box *out_outer)
 {

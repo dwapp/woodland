@@ -57,6 +57,7 @@ meson test -C build --print-errorlogs  # 跑全部测试
 wctl get_tree   | jq '.views[] | {id,title,focused,activated,outer,snapped}'
 wctl get_tree   | jq '.views[] | {id, margins: .ssd.margins, deco}'
 wctl get_focus  | jq .        # 焦点在谁身上（recorded_view vs keyboard_view）
+wctl get_tree   | jq '.snap_preview'   # 贴边预览：active / edges / box / output
 wctl get_trace  | jq '.entries[] | "\(.seq) \(.what) \(.obj) \(.detail)"'
 wctl self_check | jq .        # 不变量断言；失败项带 expected / actual
 wctl dump_scene | jq '.nodes' # wlr_scene 树，排查「画了但看不见」
@@ -277,3 +278,39 @@ X11 窗口的缩放滤波（按所在输出的 scale 选 nearest/bilinear）全�
   没有 press 配对的 release；③ session inactive 时 `handle_frame` 直接跳过渲染
   （labwc 同款守卫），设备暂停/恢复由 wlroots 后端自己处理，**不要**去监听
   session_active 信号。回归：`tests/unit/test_seat.c` 的 `test_vt_from_keysym`。
+- **贴边预览（snap preview）已实现**（`feature/snap-preview`）：拖动窗口时在目标
+  区域画一层半透明预览（左/右半屏、上边最大化、四角 1/4），松手就按它铺满。
+  几条容易改错的规矩：
+  ① **判定是"光标优先、窗口外框兜底"**（`woodland_snap_determine_edges()`）。
+  光标在阈值内就按光标所在边（gxde-wlcom 语义）；光标不在边附近才退回旧的
+  "外框贴住工作区边"判定。兜底不能删：松手时 `shell_view_apply_snap()` 用的就是
+  这个函数的返回值，删了会出现"预览没亮、窗口却跳了"——预览可以比用户预期早，
+  但不能说谎。
+  ② **跨屏要防抖。** 两个显示器之间的接缝在外沿判定上和屏幕墙一样都是"一条边"，
+  但用户可能只是路过。`woodland_snap_edge_is_layout_edge()`（纯函数，布局边外 1px
+  探点）分出"接缝"，接缝走 200ms 定时器；定时器到期还要二次校验
+  `cursor_mode == MOVE && grabbed_view == pending_view`，抓取断了不复活。
+  ③ **预览树是场景节点，不是 surface。** 挂到被拖窗口的同一个父节点、压在窗口
+  下面；z 序只在建树（或换父树）时排一次，别每帧 `wlr_scene_node_place_below`。
+  effects 构建用"一个覆盖外框的 rect + clipped_region 挖空内框"画边框（圆角才画
+  得对），非 effects 构建没有 clip，用四条细条拼——两套节点在 `woodland.h` 里
+  都声明，公开头不依赖 `WOODLAND_HAVE_EFFECTS`。
+  ④ **样式可配**：`[general] snap_preview` / `snap_preview_color`（`#RRGGBB` 或
+  `#RRGGBBAA`，alpha 是**边框**不透明度）/ `snap_preview_opacity`（填充）/
+  `snap_preview_border_width`。没写颜色时跟随 treeland-appearance 的强调色
+  （`appearance.accent_set`），写了就以文件为准——和 `ssd.colors_specified` 一个套路。
+  拖动中途改样式（SIGHUP 重载、协议改强调色）要当帧生效：`show()` 那个
+  "位置没变就跳过"的判据里带了样式指纹 `style_key`，别只比 edges/box。
+  ⑤ 状态在 `wctl get_tree` 的 `snap_preview`（未激活时只有 `active:false`，
+  不吐 edges/box 残值），轨迹标签 `snap`（`preview` / `preview_hide` / `apply`）。
+  回归：`tests/unit/test_view.c` 用 `woodland_cursor_process_motion()` 走完整的
+  拖动管线（光标 → pending → 预览 → 松手铺满 → 打断清理），
+  `tests/unit/test_placement.c` 覆盖光标四角/半屏边界与接缝判定。
+  **注意冒烟测试注入不了输入事件**（headless 后端没有指针设备），所以"真拖动"
+  只有单测覆盖；smoke 只断言 IPC 字段契约。
+  已知限制：预览框是布局坐标的整数矩形，多屏不同 scale 时 2px 边框在
+  scale>1 的输出上会被拉伸（内容对齐不受影响）。上文那条统一刷新入口
+  （`woodland_output_refresh_all()`）治不了它——那个入口重刷的是与 scale 绑定的
+  **资源**（光标主题、scenefx 缓存、SSD buffer、X11 滤波），这里缺的是"按输出
+  scale 生成设备像素对齐的几何"，是另一件事：要么给预览加一条 output-local
+  绘制路径，要么接受这 2px 软边。

@@ -68,6 +68,11 @@ void woodland_config_default_init(struct woodland_config *config)
     config->general.focus_follows_mouse = false;
     config->general.snap_distance = WOODLAND_SNAP_DISTANCE;
     config->general.snap_preview = true;
+    /* 天蓝 #0080ff，边框 75% 不透明；填充 25%，边框 2px */
+    config->general.snap_preview_color = 0xBF0080FF;
+    config->general.snap_preview_color_specified = false;
+    config->general.snap_preview_opacity = 0.25;
+    config->general.snap_preview_border_width = 2;
     config->general.allow_tearing = false;
 
     /* [decorations] */
@@ -259,6 +264,24 @@ struct woodland_config *woodland_config_parse_string(const char *content, size_t
         }
         cfg->general.snap_preview =
             toml_get_bool(gen, "snap_preview", cfg->general.snap_preview);
+        /* 颜色写错（不是 #RRGGBB/#RRGGBBAA）就当没写：继续保持"跟随强调色"，
+         * 而不是把一个能解析出 0 的半截值当成用户的意愿 */
+        uint32_t preview_color =
+            parse_color(toml_get_string(gen, "snap_preview_color", NULL), 0);
+        if (preview_color) {
+            cfg->general.snap_preview_color = preview_color;
+            cfg->general.snap_preview_color_specified = true;
+        }
+        double preview_opacity = toml_get_float(gen, "snap_preview_opacity",
+                                                cfg->general.snap_preview_opacity);
+        if (preview_opacity >= 0.0 && preview_opacity <= 1.0) {
+            cfg->general.snap_preview_opacity = preview_opacity;
+        }
+        int64_t preview_border = toml_get_int(gen, "snap_preview_border_width",
+                                              cfg->general.snap_preview_border_width);
+        if (preview_border >= 0 && preview_border <= 32) {
+            cfg->general.snap_preview_border_width = (int32_t)preview_border;
+        }
         cfg->general.allow_tearing =
             toml_get_bool(gen, "allow_tearing", cfg->general.allow_tearing);
     }
@@ -579,6 +602,15 @@ void woodland_config_dump_json(const struct woodland_config *config, struct wood
     woodland_json_obj_bool(&gen, "focus_follows_mouse", config->general.focus_follows_mouse);
     woodland_json_obj_int(&gen, "snap_distance", config->general.snap_distance);
     woodland_json_obj_bool(&gen, "snap_preview", config->general.snap_preview);
+    /* 颜色按 0xAARRGGBB 报，和 decorations 的 *_color 同一口径 */
+    woodland_json_obj_int(&gen, "snap_preview_color",
+                          (long long)config->general.snap_preview_color);
+    woodland_json_obj_bool(&gen, "snap_preview_color_specified",
+                           config->general.snap_preview_color_specified);
+    woodland_json_obj_int(&gen, "snap_preview_opacity_milli",
+                          (long long)(config->general.snap_preview_opacity * 1000.0 + 0.5));
+    woodland_json_obj_int(&gen, "snap_preview_border_width",
+                          config->general.snap_preview_border_width);
     woodland_json_obj_bool(&gen, "allow_tearing", config->general.allow_tearing);
     woodland_json_obj_close(&gen);
 

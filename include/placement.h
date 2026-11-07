@@ -14,6 +14,7 @@ struct woodland_server;
 struct woodland_view;
 struct woodland_output;
 struct wlr_output;
+struct wlr_output_layout;
 
 /* 贴边吸附阈值（px）：外框边缘距目标线不超过该值即吸附（labwc
  * screen_edge_strength 默认 20）。 */
@@ -171,6 +172,15 @@ uint32_t woodland_snap_cursor_edges(const struct wlr_box *area,
                                     double cursor_x, double cursor_y,
                                     int threshold);
 
+/**
+ * 该输出边是否落在外**输出布局**的外边界上（纯函数）。
+ *
+ * 输出之间的接缝在几何上也是一条边，但它外面还有别的显示器：贴到那儿
+ * 只是"路过"，预览要防抖；布局外沿才是真的贴边，可以立刻显示。
+ * layout 或 output 为空（拿不到布局/输出）时返回 true：按外边界处理。
+ */
+bool woodland_snap_edge_is_layout_edge(struct wlr_output_layout *layout,
+                                       struct wlr_output *output, uint32_t edge);
 
 /**
  * 贴边铺满的目标外框（布局坐标，写入 out_outer）。
@@ -241,6 +251,20 @@ void woodland_snap_preview_hide(struct woodland_server *server);
 void woodland_snap_preview_destroy(struct woodland_server *server);
 void woodland_snap_preview_update(struct woodland_server *server, struct woodland_view *view);
 void shell_view_apply_snap(struct woodland_view *view);
+
+/**
+ * "松手会铺满哪条边"的判定（纯函数，入参是几何量而非 server）。
+ *
+ * **光标优先，窗口外框兜底**：先看光标是否落进工作区边的阈值内；没落进
+ * 才看外框是否已经贴住边。兜底路径与松手时的真实行为（shell_view_apply_snap
+ * 用的就是同一个返回值）一致，所以预览不会出现"窗口跳了但预览没亮"。
+ * 全屏、尺寸被客户端钉死这两种情况返回 0。
+ */
+uint32_t woodland_snap_determine_edges(struct woodland_view *view,
+                                       const struct wlr_box *outer,
+                                       const struct wlr_box *area,
+                                       double cursor_x, double cursor_y,
+                                       int threshold);
 
 
 /** 告诉客户端"当前被 tiled"（xdg 专用，X11 无对应语义）。 */
