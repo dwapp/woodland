@@ -109,7 +109,9 @@ void woodland_view_request_size(struct woodland_view *view, int width, int heigh
         return;
     }
 #endif
-    wlr_xdg_toplevel_set_size(view->xdg_toplevel, width, height);
+    if (view->xdg_toplevel) {
+        wlr_xdg_toplevel_set_size(view->xdg_toplevel, width, height);
+    }
 }
 
 void woodland_view_set_activated(struct woodland_view *view, bool activated)
@@ -648,6 +650,8 @@ bool woodland_shell_init(struct woodland_server *server)
                                   &server->xdg_decoration_manager->events.new_toplevel_decoration,
                                   server_new_toplevel_decoration, "shell.new_toplevel_decoration");
     }
+    woodland_snap_preview_init(server);
+
 
     return true;
 }
@@ -661,4 +665,5 @@ void woodland_shell_finish(struct woodland_server *server)
     if (server->xdg_decoration_manager) {
         wl_list_remove(&server->new_toplevel_decoration.link);
     }
+    woodland_snap_preview_finish(server);
 }

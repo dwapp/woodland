@@ -38,6 +38,27 @@ struct woodland_ime_relay;
 struct woodland_session_lock;
 struct wlr_pointer_constraints_v1;
 struct wlr_pointer_constraint_v1;
+/* 贴边铺满预览（拖动窗口靠近屏幕边缘时显示的半透明目标区域预览） */
+struct woodland_snap_preview {
+    struct woodland_server *server;
+    struct wlr_scene_tree *tree;
+    struct wlr_scene_rect *fill;
+    struct wlr_scene_rect *border;
+#if !WOODLAND_HAVE_EFFECTS
+    struct wlr_scene_rect *border_edges[4];
+#endif
+    struct woodland_output *output;
+    uint32_t edges;
+    struct wlr_box box;
+
+    /* 延迟计时器（多屏之间跨屏移动时防抖） */
+    struct wl_event_source *filter_timer;
+    bool filter_pending;
+    uint32_t pending_edges;
+    struct woodland_output *pending_output;
+    struct woodland_view *pending_view;
+};
+
 struct woodland_server {
     struct wl_display *display;
     struct wl_event_loop *event_loop;
@@ -136,6 +157,7 @@ struct woodland_server {
     double drag_start_x, drag_start_y; // 本次拖动起点（判断是否真的拖动了）
     struct wlr_box grab_geobox;
     uint32_t resize_edges;
+    struct woodland_snap_preview snap_preview;
 
     /* 指针约束（zwp_pointer_constraints_v1） */
     struct wlr_pointer_constraints_v1 *pointer_constraints;

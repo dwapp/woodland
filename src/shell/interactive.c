@@ -21,6 +21,7 @@
 #include "ssd.h"
 #include "view.h"
 #include "woodland.h"
+#include "woodland_config.h"
 #include <wlr/types/wlr_foreign_toplevel_management_v1.h>
 #include "scene.h"
 #include <wlr/types/wlr_xdg_shell.h>
@@ -128,9 +129,20 @@ static void view_unsnap_for_drag(struct woodland_view *view)
 /* 释放鼠标时把"拖到边上的窗口"铺满（左/右半屏、上边最大化、四角 1/4） */
 void shell_view_apply_snap(struct woodland_view *view)
 {
+    struct woodland_server *server = view->server;
     uint32_t edges = view->pending_snap_edges;
+    struct woodland_output *target_wo = NULL;
+    if (server) {
+        if (server->snap_preview.edges == edges && server->snap_preview.output) {
+            target_wo = server->snap_preview.output;
+        } else if (server->snap_preview.pending_edges == edges &&
+                   server->snap_preview.pending_output) {
+            target_wo = server->snap_preview.pending_output;
+        }
+        woodland_snap_preview_destroy(server);
+    }
     view->pending_snap_edges = 0;
-    if (woodland_view_snap_to(view, edges)) {
+    if (woodland_view_snap_to_output(view, edges, target_wo)) {
         shell_view_schedule_configure(view);
     }
 }
@@ -237,18 +249,23 @@ void shell_process_cursor_move(struct woodland_server *server)
          * 贴边铺满的判定：只有真的拖动了（超过阈值距离）才算，
          * 否则"按住标题栏不动就松手"会把刚开在角落的窗口变成半屏。
          */
+        int snap_threshold =
+            server->config ? server->config->general.snap_distance : WOODLAND_SNAP_DISTANCE;
         double dx = server->cursor->x - server->drag_start_x;
         double dy = server->cursor->y - server->drag_start_y;
-        if ((dx < 0 ? -dx : dx) > WOODLAND_SNAP_DISTANCE ||
-            (dy < 0 ? -dy : dy) > WOODLAND_SNAP_DISTANCE) {
+        if ((dx < 0 ? -dx : dx) > snap_threshold ||
+            (dy < 0 ? -dy : dy) > snap_threshold) {
             struct wlr_box outer = {x, y, outer_w, outer_h};
             view->pending_snap_edges =
-                woodland_snap_edges_for(&outer, &area, WOODLAND_SNAP_DISTANCE);
+                woodland_snap_determine_edges(server, view, wo, &outer, &area,
+                                              server->cursor->x, server->cursor->y,
+                                              snap_threshold);
         }
-    }
+        }
 
     wlr_scene_node_set_position(&view->scene_tree->node, x + margins.left, y + margins.top);
     woodland_view_update_outputs(view);
+    woodland_snap_preview_update(server, view);
 }
 
 void shell_process_cursor_resize(struct woodland_server *server)
@@ -325,6 +342,7 @@ void shell_process_cursor_resize(struct woodland_server *server)
 
 void woodland_cursor_reset_mode(struct woodland_server *server)
 {
+    woodland_snap_preview_destroy(server);
     server->cursor_mode = WOODLAND_CURSOR_PASSTHROUGH;
     server->grabbed_view = NULL;
     server->resize_edges = 0;

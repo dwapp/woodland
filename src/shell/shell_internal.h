@@ -48,4 +48,21 @@ void shell_process_cursor_resize(struct woodland_server *server);
 /** 松手时把"拖到边上的窗口"铺满（由 cursor.c 在释放分支调用）。 */
 void shell_view_apply_snap(struct woodland_view *view);
 
+/* ---- snap_preview.c ---- */
+struct woodland_output;
+void woodland_snap_preview_init(struct woodland_server *server);
+void woodland_snap_preview_finish(struct woodland_server *server);
+void woodland_snap_preview_show(struct woodland_server *server, struct woodland_view *view,
+                                struct woodland_output *output, uint32_t edges);
+void woodland_snap_preview_hide(struct woodland_server *server);
+void woodland_snap_preview_destroy(struct woodland_server *server);
+void woodland_snap_preview_update(struct woodland_server *server, struct woodland_view *view);
+uint32_t woodland_snap_determine_edges(struct woodland_server *server,
+                                       struct woodland_view *view,
+                                       struct woodland_output *wo,
+                                       const struct wlr_box *outer,
+                                       const struct wlr_box *area,
+                                       double cursor_x, double cursor_y,
+                                       int threshold);
+
 #endif

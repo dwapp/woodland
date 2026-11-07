@@ -477,6 +477,45 @@ uint32_t woodland_snap_edges_for(const struct wlr_box *outer, const struct wlr_b
     }
     return edges;
 }
+uint32_t woodland_snap_cursor_edges(const struct wlr_box *area, double cursor_x, double cursor_y,
+                                    int threshold)
+{
+    if (!area || threshold <= 0 || area->width <= 0 || area->height <= 0) {
+        return 0;
+    }
+    if (cursor_x < area->x - threshold || cursor_x > area->x + area->width + threshold ||
+        cursor_y < area->y - threshold || cursor_y > area->y + area->height + threshold) {
+        return 0;
+    }
+
+    double y1 = cursor_y - area->y;
+    double corner_limit = area->height * 0.25;
+
+    /* 左右优先判定（四角是 1/4 屏，中间是半屏） */
+    if (cursor_x - area->x <= threshold) {
+        if (y1 <= corner_limit) {
+            return WLR_EDGE_LEFT | WLR_EDGE_TOP;
+        } else if (y1 >= area->height - corner_limit) {
+            return WLR_EDGE_LEFT | WLR_EDGE_BOTTOM;
+        } else {
+            return WLR_EDGE_LEFT;
+        }
+    } else if ((area->x + area->width) - cursor_x <= threshold) {
+        if (y1 <= corner_limit) {
+            return WLR_EDGE_RIGHT | WLR_EDGE_TOP;
+        } else if (y1 >= area->height - corner_limit) {
+            return WLR_EDGE_RIGHT | WLR_EDGE_BOTTOM;
+        } else {
+            return WLR_EDGE_RIGHT;
+        }
+    } else if (cursor_y - area->y <= threshold) {
+        /* 单贴上边 = 最大化 */
+        return WLR_EDGE_TOP;
+    }
+
+    return 0;
+}
+
 
 bool woodland_snap_tile_box(const struct wlr_box *area, uint32_t edges, struct wlr_box *out_outer)
 {
@@ -779,7 +818,8 @@ void woodland_view_set_tiled(struct woodland_view *view, uint32_t edges)
     }
 }
 
-bool woodland_view_snap_to(struct woodland_view *view, uint32_t edges)
+bool woodland_view_snap_to_output(struct woodland_view *view, uint32_t edges,
+                                  struct woodland_output *output)
 {
     if (!view || !view->mapped || edges == 0) {
         return false;
@@ -787,8 +827,14 @@ bool woodland_view_snap_to(struct woodland_view *view, uint32_t edges)
     if (view->maximized || view->fullscreen) {
         return false;
     }
+    if (!output) {
+        output = woodland_output_for_view(view);
+    }
+    if (!output) {
+        return false;
+    }
     struct wlr_box area;
-    woodland_output_workarea(woodland_output_for_view(view), &area);
+    woodland_output_workarea(output, &area);
     if (area.width <= 0 || area.height <= 0) {
         return false;
     }
@@ -797,6 +843,8 @@ bool woodland_view_snap_to(struct woodland_view *view, uint32_t edges)
     if (edges == WLR_EDGE_TOP) {
         woodland_view_set_maximized(view, true);
         view->snapped_edges = WLR_EDGE_TOP;
+        woodland_trace_add("snap", view->id, "apply output=%s edges=top (maximize)",
+                           output->wlr_output ? output->wlr_output->name : "-");
         return true;
     }
 
@@ -809,7 +857,15 @@ bool woodland_view_snap_to(struct woodland_view *view, uint32_t edges)
     view->snapped_edges = edges;
     woodland_view_set_tiled(view, edges);
     woodland_view_apply_outer_geometry(view, &tile);
+    woodland_trace_add("snap", view->id, "apply output=%s edges=%u tile=%dx%d at %d,%d",
+                       output->wlr_output ? output->wlr_output->name : "-",
+                       edges, tile.width, tile.height, tile.x, tile.y);
     return true;
+}
+
+bool woodland_view_snap_to(struct woodland_view *view, uint32_t edges)
+{
+    return woodland_view_snap_to_output(view, edges, NULL);
 }
 
 /* ==================== 尺寸限制 ==================== */

@@ -108,6 +108,8 @@ static const struct ipc_field_doc get_tree_fields[] = {
      "last_dock_request (str|null), dock_preview (str: always \"recorded\", "
      "the popover itself is not rendered)"},
     {"focus", "obj", "same fields as get_focus"},
+    {"snap_preview", "obj",
+     "snap preview overlay: active, edges[], box[x,y,w,h], output"},
     {"views", "obj[]",
      "per view: id, kind, z, title, app_id, tag, workspace, "
      "output, mapped, placed, minimized, maximized, "
@@ -566,6 +568,9 @@ static void ipc_get_tree(struct woodland_server *server, struct woodland_json *o
     woodland_json_obj_open(&focus_obj, out);
     write_focus_fields(server, &focus_obj);
     woodland_json_obj_close(&focus_obj);
+    woodland_json_obj_key(&obj, "snap_preview");
+    woodland_snap_preview_status(server, out);
+
 
     woodland_json_obj_key(&obj, "views");
     struct woodland_json_arr arr;

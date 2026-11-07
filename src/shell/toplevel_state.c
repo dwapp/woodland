@@ -61,7 +61,9 @@ void shell_view_schedule_configure(struct woodland_view *view)
     if (view->type == WOODLAND_VIEW_XWAYLAND) {
         return;
     }
-    wlr_xdg_surface_schedule_configure(view->xdg_toplevel->base);
+    if (view->xdg_toplevel && view->xdg_toplevel->base) {
+        wlr_xdg_surface_schedule_configure(view->xdg_toplevel->base);
+    }
 }
 
 /* ==================== 状态标志的协议侧同步 ==================== */
@@ -76,7 +78,9 @@ void shell_view_apply_maximized_state(struct woodland_view *view, bool maximized
         return;
     }
 #endif
-    wlr_xdg_toplevel_set_maximized(view->xdg_toplevel, maximized);
+    if (view->xdg_toplevel) {
+        wlr_xdg_toplevel_set_maximized(view->xdg_toplevel, maximized);
+    }
 }
 
 static void view_apply_fullscreen_state(struct woodland_view *view, bool fullscreen)

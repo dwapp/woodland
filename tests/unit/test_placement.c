@@ -104,6 +104,29 @@ int main(void) {
     outer = (struct wlr_box){ .x = 0, .y = 0, .width = 900, .height = 200 };
     assert((woodland_snap_edges_for(&outer, &area, 20) & WLR_EDGE_RIGHT) == 0);
 
+    /* ---------- 光标贴边触发判定（gxde-wlcom 语义，阈值 20） ---------- */
+    /* 1. 左沿中间（height=600，角区域为 <150 和 >450，中间 150~450） */
+    assert(woodland_snap_cursor_edges(&area, 5, 300, 20) == WLR_EDGE_LEFT);
+    /* 2. 左沿上部（y=50 <= 150） -> 左上 1/4 屏 */
+    assert(woodland_snap_cursor_edges(&area, 10, 50, 20) == (WLR_EDGE_LEFT | WLR_EDGE_TOP));
+    /* 3. 左沿下部（y=550 >= 450） -> 左下 1/4 屏 */
+    assert(woodland_snap_cursor_edges(&area, 15, 550, 20) == (WLR_EDGE_LEFT | WLR_EDGE_BOTTOM));
+    /* 4. 右沿中间 -> 右半屏 */
+    assert(woodland_snap_cursor_edges(&area, 795, 300, 20) == WLR_EDGE_RIGHT);
+    /* 5. 右沿上部 -> 右上 1/4 屏 */
+    assert(woodland_snap_cursor_edges(&area, 785, 100, 20) == (WLR_EDGE_RIGHT | WLR_EDGE_TOP));
+    /* 6. 右沿下部 -> 右下 1/4 屏 */
+    assert(woodland_snap_cursor_edges(&area, 790, 500, 20) == (WLR_EDGE_RIGHT | WLR_EDGE_BOTTOM));
+    /* 7. 上沿中间（不在左右边缘阈值内） -> 最大化 (TOP) */
+    assert(woodland_snap_cursor_edges(&area, 400, 10, 20) == WLR_EDGE_TOP);
+    /* 8. 屏幕中央 -> 不触发 */
+    assert(woodland_snap_cursor_edges(&area, 400, 300, 20) == 0);
+    /* 9. 略超出屏幕边缘（拖到边缘外面 5px） -> 依然触发 */
+    assert(woodland_snap_cursor_edges(&area, -5, 300, 20) == WLR_EDGE_LEFT);
+    assert(woodland_snap_cursor_edges(&area, 400, -5, 20) == WLR_EDGE_TOP);
+    /* 10. 距离边缘超过阈值（x=30 > 20） -> 不触发 */
+    assert(woodland_snap_cursor_edges(&area, 30, 300, 20) == 0);
+
     /* ---------- 约束 ---------- */
     struct wlr_box box = { .x = -50, .y = -80, .width = 300, .height = 200 };
     woodland_box_constrain(&box, &area);
