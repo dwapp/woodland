@@ -86,6 +86,11 @@ int main(void) {
     assert(woodland_focus_topmost(&server) == NULL);
     assert(woodland_focus_pick(&server, &a, true) == NULL);
     assert(woodland_focus_pick(&server, NULL, false) == NULL);
+    /* ---------- wants_focus 期望模型判定 ---------- */
+    assert(woodland_view_wants_focus(&a) == WOODLAND_VIEW_WANTS_FOCUS_ALWAYS);
+    assert(woodland_view_wants_focus(NULL) == WOODLAND_VIEW_WANTS_FOCUS_NEVER);
+    woodland_seat_focus_surface(&server, NULL);
+
 
     return 0;
 }

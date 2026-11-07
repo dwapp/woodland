@@ -16,6 +16,19 @@ struct wlr_surface;
  * （之前 layer.c 和 shell.c 各写了一份几乎一样的过滤）。
  */
 bool woodland_view_focusable(const struct woodland_view *view);
+enum woodland_view_wants_focus {
+    WOODLAND_VIEW_WANTS_FOCUS_ALWAYS,
+    WOODLAND_VIEW_WANTS_FOCUS_LIKELY,
+    WOODLAND_VIEW_WANTS_FOCUS_UNLIKELY,
+    WOODLAND_VIEW_WANTS_FOCUS_NEVER,
+};
+
+/** 检查视图对焦点的期望模型（Wayland 恒为 ALWAYS；XWayland 按 ICCCM 区分）。 */
+enum woodland_view_wants_focus woodland_view_wants_focus(const struct woodland_view *view);
+
+/** 向指定的 surface 下发键盘焦点（若锁屏则忽略；surface 为 NULL 则清空键盘焦点）。 */
+void woodland_seat_focus_surface(struct woodland_server *server, struct wlr_surface *surface);
+
 
 /** 当前持有键盘焦点的视图；焦点在 layer surface 或没有焦点时返回 NULL。 */
 struct woodland_view *woodland_focus_current(struct woodland_server *server);

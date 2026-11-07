@@ -8,6 +8,10 @@
  * 窗口几何。SSD 按钮的 hover/pressed 是纯指针状态，跟着这里走，因为它
  * 唯一的更新时机就是 motion 与 button。
  */
+#include "config.h"
+#if WOODLAND_HAVE_XWAYLAND
+#include <wlr/xwayland.h>
+#endif
 #include "util/listener.h"
 #include <wlr/types/wlr_cursor.h>
 #include "scene.h"
@@ -271,6 +275,16 @@ static void server_cursor_button(struct wl_listener *listener, void *data)
         if (view) {
             woodland_focus_view(view, true);
         } else {
+#if WOODLAND_HAVE_XWAYLAND
+            if (surface) {
+                struct wlr_xwayland_surface *xsurface =
+                    wlr_xwayland_surface_try_from_wlr_surface(surface);
+                if (xsurface && wlr_xwayland_surface_override_redirect_wants_focus(xsurface)) {
+                    woodland_seat_focus_surface(server, surface);
+                    return;
+                }
+            }
+#endif
             /* 未命中 surface：先查 SSD 区域（按钮/标题栏/边框） */
             uint32_t edges = 0;
             struct woodland_view *ssd_view = NULL;

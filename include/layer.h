@@ -31,6 +31,8 @@ struct woodland_layer_popup {
     struct wlr_scene_tree *scene_tree;
     struct wl_listener commit;
     struct wl_listener destroy;
+    struct woodland_layer_surface *layer;
+    bool parent_was_focused;
 };
 
 bool woodland_layer_init(struct woodland_server *server);

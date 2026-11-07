@@ -136,43 +136,110 @@ void woodland_layer_update_top_layer_visibility(struct woodland_server *server)
 
 /* ==================== 焦点（任务 3 完整实现，本任务先提供供 commit 调用） ==================== */
 
+static bool focused_layer_has_exclusive_interactivity(struct woodland_server *server)
+{
+    if (!server || !server->focused_layer) {
+        return false;
+    }
+    return server->focused_layer->current.keyboard_interactive ==
+           ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE;
+}
+
+static bool has_precedence(struct woodland_server *server,
+                           enum zwlr_layer_shell_v1_layer layer)
+{
+    if (!server || !server->focused_layer) {
+        return true;
+    }
+    if (!focused_layer_has_exclusive_interactivity(server)) {
+        return true;
+    }
+    if (layer >= server->focused_layer->current.layer) {
+        return true;
+    }
+    return false;
+}
+
+static void seat_set_focus_layer(struct woodland_server *server,
+                                 struct wlr_layer_surface_v1 *layer_surface)
+{
+    if (!layer_surface) {
+        server->focused_layer = NULL;
+        woodland_focus_fallback(server);
+        return;
+    }
+    server->focused_layer = layer_surface;
+    woodland_focus_yield_to_layer(server);
+    woodland_seat_focus_surface(server, layer_surface->surface);
+}
+
+static void try_to_focus_next_layer_or_toplevel(struct woodland_server *server)
+{
+    if (!server || woodland_session_lock_is_locked(server)) {
+        return;
+    }
+
+    struct woodland_output *output;
+    wl_list_for_each(output, &server->outputs, link) {
+        if (!output->wlr_output || !output->wlr_output->enabled) {
+            continue;
+        }
+        for (int i = (int)ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY;
+             i >= (int)ZWLR_LAYER_SHELL_V1_LAYER_TOP; i--) {
+            struct wlr_scene_tree *tree = output->layer_tree[i];
+            if (!tree) {
+                continue;
+            }
+            struct wlr_scene_node *node;
+            wl_list_for_each_reverse(node, &tree->children, link) {
+                struct woodland_layer_surface *layer = node->data;
+                if (!layer || !layer->scene_layer_surface) {
+                    continue;
+                }
+                struct wlr_layer_surface_v1 *ls = layer->scene_layer_surface->layer_surface;
+                if (!ls || !ls->surface || !ls->surface->mapped) {
+                    continue;
+                }
+                if (ls->current.keyboard_interactive ==
+                    ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE) {
+                    seat_set_focus_layer(server, ls);
+                    return;
+                }
+            }
+        }
+    }
+
+    if (server->focused_layer) {
+        seat_set_focus_layer(server, NULL);
+    } else {
+        woodland_focus_fallback(server);
+    }
+}
+
 void woodland_layer_try_focus(struct woodland_server *server,
                               struct wlr_layer_surface_v1 *layer_surface)
 {
-    if (woodland_session_lock_is_locked(server)) {
+    if (!server || woodland_session_lock_is_locked(server)) {
         return;
     }
 
     enum zwlr_layer_surface_v1_keyboard_interactivity interactivity =
         layer_surface->current.keyboard_interactive;
-    struct wlr_seat *seat = server->seat;
 
     switch (interactivity) {
     case ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE:
-    case ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND:
-        if (interactivity == ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND &&
-            server->focused_layer != NULL) {
-            /* on_demand 不抢占已有 exclusive 层的焦点 */
-            if (server->focused_layer->current.keyboard_interactive ==
-                ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE) {
-                return;
-            }
+        if (has_precedence(server, layer_surface->current.layer)) {
+            seat_set_focus_layer(server, layer_surface);
         }
-        server->focused_layer = layer_surface;
-        /* 失活当前 toplevel（xdg 或 xwayland 通吃）：
-         * activated / SSD 激活色 / foreign-toplevel 三处一起改 */
-        woodland_focus_yield_to_layer(server);
-        struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(seat);
-        if (keyboard != NULL) {
-            wlr_seat_keyboard_notify_enter(seat, layer_surface->surface, keyboard->keycodes,
-                                           keyboard->num_keycodes, &keyboard->modifiers);
+        break;
+    case ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND:
+        if (!focused_layer_has_exclusive_interactivity(server)) {
+            seat_set_focus_layer(server, layer_surface);
         }
         break;
     case ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE:
         if (server->focused_layer == layer_surface) {
-            server->focused_layer = NULL;
-            /* 焦点还给当前工作区顶层视图（统一的回退逻辑） */
-            woodland_focus_fallback(server);
+            try_to_focus_next_layer_or_toplevel(server);
         }
         break;
     }
@@ -222,9 +289,15 @@ static void handle_map(struct wl_listener *listener, void *data)
     if (layer_surface->output) {
         struct woodland_output *output = layer_surface->output->data;
         woodland_layer_arrange(layer->server, output);
-        /* exclusive 交互时给键盘焦点 */
+        /*
+         * 独占交互，或处于 top/overlay 层的 on_demand 交互在 map 时尝试获取焦点。
+         * 位于 bottom/background 层的 on_demand（如桌面或面板组件重启）禁止偷取键盘焦点。
+         */
         if (layer_surface->current.keyboard_interactive ==
-            ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE) {
+                ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE ||
+            (layer_surface->current.keyboard_interactive ==
+                 ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND &&
+             layer_surface->current.layer >= ZWLR_LAYER_SHELL_V1_LAYER_TOP)) {
             woodland_layer_try_focus(layer->server, layer_surface);
         }
     }
@@ -242,6 +315,9 @@ static void handle_unmap(struct wl_listener *listener, void *data)
     if (layer_surface->output) {
         struct woodland_output *output = layer_surface->output->data;
         woodland_layer_arrange(layer->server, output);
+    }
+    if (layer->server && layer->server->focused_layer == layer_surface) {
+        try_to_focus_next_layer_or_toplevel(layer->server);
     }
     if (layer_surface->current.layer == ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND) {
         woodland_effect_mark_blur_dirty(layer->server);
@@ -266,9 +342,15 @@ static void handle_surface_commit(struct wl_listener *listener, void *data)
                                 output->layer_tree[layer_surface->current.layer]);
     }
     /* 处理 keyboard interactivity 变化 */
-    if (committed & WLR_LAYER_SURFACE_V1_STATE_KEYBOARD_INTERACTIVITY) {
-        woodland_layer_try_focus(output->server, layer_surface);
-    }
+        if (layer_surface->current.keyboard_interactive ==
+            ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND) {
+            if (output->server->focused_layer == layer_surface) {
+                /* 从 EXCLUSIVE 降级到 ON_DEMAND 时释放独占焦点 */
+                try_to_focus_next_layer_or_toplevel(output->server);
+            }
+        } else {
+            woodland_layer_try_focus(output->server, layer_surface);
+        }
 
     if (committed || layer->mapped != layer_surface->surface->mapped) {
         layer->mapped = layer_surface->surface->mapped;
@@ -292,7 +374,7 @@ static void handle_node_destroy(struct wl_listener *listener, void *data)
      * layer 被销毁会带走键盘焦点，不回退的话输入会直接丢失 */
     if (server->focused_layer == layer->layer_surface) {
         server->focused_layer = NULL;
-        woodland_focus_fallback(server);
+        try_to_focus_next_layer_or_toplevel(server);
     }
     /* wlroots 可能已释放 scene_layer_surface，置 NULL 防误用 */
     layer->scene_layer_surface = NULL;
@@ -324,6 +406,17 @@ static void handle_popup_commit(struct wl_listener *listener, void *data)
     struct woodland_layer_popup *popup = wl_container_of(listener, popup, commit);
     if (popup->xdg_popup->base->initial_commit) {
         wlr_xdg_surface_schedule_configure(popup->xdg_popup->base);
+
+        /* 客户端请求 grab 时（如面板应用菜单）赋予键盘焦点 */
+        struct woodland_server *server = popup->layer ? popup->layer->server : NULL;
+        struct wlr_seat *seat = server ? server->seat : NULL;
+        bool requesting_grab = !!popup->xdg_popup->seat;
+        if (requesting_grab && seat && !woodland_session_lock_is_locked(server)) {
+            if (seat->keyboard_state.focused_surface == popup->xdg_popup->parent) {
+                popup->parent_was_focused = true;
+            }
+            woodland_seat_focus_surface(server, popup->xdg_popup->base->surface);
+        }
     }
     (void)data;
 }
@@ -331,6 +424,17 @@ static void handle_popup_commit(struct wl_listener *listener, void *data)
 static void handle_popup_destroy(struct wl_listener *listener, void *data)
 {
     struct woodland_layer_popup *popup = wl_container_of(listener, popup, destroy);
+    struct woodland_server *server = popup->layer ? popup->layer->server : NULL;
+    struct wlr_seat *seat = server ? server->seat : NULL;
+
+    if (seat && seat->keyboard_state.focused_surface == popup->xdg_popup->base->surface) {
+        if (popup->parent_was_focused && popup->xdg_popup->parent) {
+            woodland_seat_focus_surface(server, popup->xdg_popup->parent);
+        } else if (server) {
+            woodland_focus_fallback(server);
+        }
+    }
+
     wl_list_remove(&popup->commit.link);
     wl_list_remove(&popup->destroy.link);
     free(popup);
@@ -347,6 +451,7 @@ static void handle_new_popup(struct wl_listener *listener, void *data)
         wlr_log(WLR_ERROR, "failed to allocate layer popup");
         return;
     }
+    popup->layer = layer;
     popup->xdg_popup = xdg_popup;
     popup->scene_tree =
         wlr_scene_xdg_surface_create(layer->scene_layer_surface->tree, xdg_popup->base);
