@@ -252,6 +252,7 @@ struct woodland_server {
     void (*xwayland_scale_filter_hook)(struct woodland_view *view);
     void (*xwayland_refresh_hook)(struct woodland_server *server);
     void (*xwayland_restack_hook)(struct woodland_view *view);
+    void (*xwayland_flush_hook)(struct woodland_server *server);
     /*
      * 指针约束的"申请者是否持有焦点"：视图 / layer / 锁屏状态只有 shell 层
      * 知道，而 cursor_lib 不能反向依赖 shell_lib（只链 cursor_lib 的单测会缺

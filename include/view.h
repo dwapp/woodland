@@ -59,6 +59,7 @@ struct woodland_view {
     /* X11 视图的 surface 节点：associate 时建、dissociate 时清（xdg 由 shell 自带） */
     struct wlr_scene_surface *scene_surface;
     bool override_redirect; // X11 覆盖重定向窗口：无装饰、不聚焦、不进窗口列表
+    bool focused_before_map; // X11 焦点在 map 之前到达时置位，map 时补偿
     struct wlr_scene_tree *scene_tree;
     struct woodland_workspace *workspace; // 归属工作区
     struct woodland_view *parent;         // 父视图（transient 对话框）
@@ -150,7 +151,6 @@ struct woodland_view {
     struct wl_listener set_window_type;
     struct wl_listener request_skip_taskbar;
     struct wl_listener set_decorations;
-    bool focused_before_map;
     struct wl_listener focus_in;
 };
 

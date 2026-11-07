@@ -6,7 +6,8 @@
 
 struct woodland_server;
 struct woodland_view;
-
+struct wlr_xwayland_surface;
+#include <stdint.h>
 
 /**
  * 初始化 Xwayland 支持。
@@ -36,5 +37,9 @@ void woodland_xwayland_flush(struct woodland_server *server);
 
 /** 当 X11 视图被提升至最前时，向 X11 侧同步 Z 轴堆叠顺序并刷新。 */
 void woodland_xwayland_restack_view(struct woodland_view *view);
+
+/** 提取 X11 客户端的初始位置提示（USPosition/PPosition），有提示返回 true */
+bool woodland_xwayland_initial_position_hint(const struct wlr_xwayland_surface *xsurface,
+                                            int16_t *x, int16_t *y);
 
 #endif /* WOODLAND_XWAYLAND_H */
