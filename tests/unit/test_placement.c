@@ -213,6 +213,35 @@ int main(void) {
     struct wlr_box max1 = woodland_view_maximized_geometry_on(&server, o1);
     assert(max1.x == 0 && max1.width == 800);
 
+    /*
+     * ---------- 输出边的"布局外沿 vs 显示器接缝" ----------
+     * 布局 o1[0,800) o2[800,1600) 空隙 o3[2400,3200)。
+     * 接缝（外面还有显示器）要防抖，外沿与空隙可以立刻给预览。
+     */
+    assert(woodland_snap_edge_is_layout_edge(server.output_layout, o1->wlr_output, WLR_EDGE_LEFT));
+    /* o1 右边紧挨 o2：是接缝 */
+    assert(!woodland_snap_edge_is_layout_edge(server.output_layout, o1->wlr_output,
+                                              WLR_EDGE_RIGHT));
+    /* 没有任何显示器在 o1 上下：外沿 */
+    assert(woodland_snap_edge_is_layout_edge(server.output_layout, o1->wlr_output, WLR_EDGE_TOP));
+    assert(woodland_snap_edge_is_layout_edge(server.output_layout, o1->wlr_output,
+                                             WLR_EDGE_BOTTOM));
+    /* o2 左边是 o1（接缝），右边是空隙（无输出 → 按外沿处理） */
+    assert(!woodland_snap_edge_is_layout_edge(server.output_layout, o2->wlr_output,
+                                              WLR_EDGE_LEFT));
+    assert(woodland_snap_edge_is_layout_edge(server.output_layout, o2->wlr_output,
+                                             WLR_EDGE_RIGHT));
+    /* 最右输出：左邻近空隙、右边是墙 */
+    assert(woodland_snap_edge_is_layout_edge(server.output_layout, o3->wlr_output, WLR_EDGE_LEFT));
+    assert(woodland_snap_edge_is_layout_edge(server.output_layout, o3->wlr_output,
+                                             WLR_EDGE_RIGHT));
+    /* 拿不到布局/输出：按外沿处理（宁可少一次防抖，也不要永远不出预览） */
+    assert(woodland_snap_edge_is_layout_edge(NULL, o1->wlr_output, WLR_EDGE_LEFT));
+    assert(woodland_snap_edge_is_layout_edge(server.output_layout, NULL, WLR_EDGE_LEFT));
+    /* 非单边（例如 LEFT|TOP 传进来）：不参与判定，直接按外沿 */
+    assert(woodland_snap_edge_is_layout_edge(server.output_layout, o1->wlr_output,
+                                              WLR_EDGE_LEFT | WLR_EDGE_TOP));
+
     /* ---------- 尺寸限制（无客户端时是 1/1/无上限） ---------- */
     struct woodland_view fake_view = {0};
     int min_w, min_h, max_w, max_h;

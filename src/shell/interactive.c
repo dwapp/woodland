@@ -236,32 +236,30 @@ void shell_process_cursor_move(struct woodland_server *server)
         struct wlr_box area;
         woodland_output_workarea(wo, &area);
 
+        /* 吸附阈值和"真的拖动了"用同一个数：配置给了 snap_distance 就以它
+         * 为准，否则退回内置默认。两处用不同值会出现"吸过去了但不算拖动" */
+        int snap_threshold =
+            server->config ? server->config->general.snap_distance : WOODLAND_SNAP_DISTANCE;
+
         int edges[WOODLAND_SNAP_MAX_EDGES];
         int n = collect_snap_edges(server, view, true, y, outer_h, edges, WOODLAND_SNAP_MAX_EDGES);
-        x = woodland_snap_axis(x, outer_w, area.x, area.x + area.width, edges, n,
-                               WOODLAND_SNAP_DISTANCE);
+        x = woodland_snap_axis(x, outer_w, area.x, area.x + area.width, edges, n, snap_threshold);
 
         n = collect_snap_edges(server, view, false, x, outer_w, edges, WOODLAND_SNAP_MAX_EDGES);
-        y = woodland_snap_axis(y, outer_h, area.y, area.y + area.height, edges, n,
-                               WOODLAND_SNAP_DISTANCE);
+        y = woodland_snap_axis(y, outer_h, area.y, area.y + area.height, edges, n, snap_threshold);
 
         /*
          * 贴边铺满的判定：只有真的拖动了（超过阈值距离）才算，
          * 否则"按住标题栏不动就松手"会把刚开在角落的窗口变成半屏。
          */
-        int snap_threshold =
-            server->config ? server->config->general.snap_distance : WOODLAND_SNAP_DISTANCE;
         double dx = server->cursor->x - server->drag_start_x;
         double dy = server->cursor->y - server->drag_start_y;
-        if ((dx < 0 ? -dx : dx) > snap_threshold ||
-            (dy < 0 ? -dy : dy) > snap_threshold) {
+        if ((dx < 0 ? -dx : dx) > snap_threshold || (dy < 0 ? -dy : dy) > snap_threshold) {
             struct wlr_box outer = {x, y, outer_w, outer_h};
-            view->pending_snap_edges =
-                woodland_snap_determine_edges(server, view, wo, &outer, &area,
-                                              server->cursor->x, server->cursor->y,
-                                              snap_threshold);
+            view->pending_snap_edges = woodland_snap_determine_edges(
+                view, &outer, &area, server->cursor->x, server->cursor->y, snap_threshold);
         }
-        }
+    }
 
     wlr_scene_node_set_position(&view->scene_tree->node, x + margins.left, y + margins.top);
     woodland_view_update_outputs(view);

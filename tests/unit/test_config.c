@@ -22,6 +22,11 @@ static void test_default_config(void)
     assert(cfg->general.snap_distance == 20);
     assert(!cfg->general.allow_tearing);
     assert(cfg->general.snap_preview);
+    /* 预览样式：天蓝、边框 75% alpha、填充 25%、边框 2px */
+    assert(cfg->general.snap_preview_color == 0xBF0080FF);
+    assert(!cfg->general.snap_preview_color_specified);
+    assert(cfg->general.snap_preview_opacity == 0.25);
+    assert(cfg->general.snap_preview_border_width == 2);
 
     assert(cfg->ssd.enabled);
     assert(cfg->ssd.titlebar_height == 26);
@@ -70,6 +75,9 @@ static void test_parse_valid_toml(void)
                        "snap_distance = 35\n"
                        "allow_tearing = true\n"
                        "snap_preview = false\n"
+                       "snap_preview_color = \"#12345678\"\n"
+                       "snap_preview_opacity = 0.5\n"
+                       "snap_preview_border_width = 4\n"
                        "\n"
                        "[decorations]\n"
                        "enabled = false\n"
@@ -136,6 +144,12 @@ static void test_parse_valid_toml(void)
     assert(cfg->general.snap_distance == 35);
     assert(cfg->general.allow_tearing);
     assert(!cfg->general.snap_preview);
+    /* #RRGGBBAA：文件里 alpha 在最后，落进结构体时按 0xAARRGGBB 存放
+     * （与 decorations 的 *_color 同一口径） */
+    assert(cfg->general.snap_preview_color == 0x78123456);
+    assert(cfg->general.snap_preview_color_specified);
+    assert(cfg->general.snap_preview_opacity == 0.5);
+    assert(cfg->general.snap_preview_border_width == 4);
 
     assert(!cfg->ssd.enabled);
     assert(cfg->ssd.titlebar_height == 30);
@@ -234,6 +248,9 @@ static void test_boundary_clamping(void)
     const char *toml = "[general]\n"
                        "workspace_count = 9999\n"
                        "snap_distance = -10\n"
+                       "snap_preview_color = \"nonsense\"\n"
+                       "snap_preview_opacity = 5.0\n"
+                       "snap_preview_border_width = 999\n"
                        "[decorations]\n"
                        "titlebar_height = -5\n"
                        "border_width = 1000\n"
@@ -246,6 +263,12 @@ static void test_boundary_clamping(void)
     assert(cfg->general.workspace_count == 10);
     /* 负数被忽略，保留默认 20 */
     assert(cfg->general.snap_distance == 20);
+    /* 颜色写错 = 没写（不能既改色又装作"用户指定过"）；超范围的不透明度
+     * 与边框宽度一律忽略，保留默认 0.25 / 2 */
+    assert(cfg->general.snap_preview_color == 0xBF0080FF);
+    assert(!cfg->general.snap_preview_color_specified);
+    assert(cfg->general.snap_preview_opacity == 0.25);
+    assert(cfg->general.snap_preview_border_width == 2);
     /* 非法高度/边框被忽略，保留默认 26/1 */
     assert(cfg->ssd.titlebar_height == 26);
     assert(cfg->ssd.border_width == 1);
@@ -309,6 +332,9 @@ static void test_json_dump(void)
     assert(strstr(data, "\"workspace_count\":10") != NULL);
     assert(strstr(data, "\"decorations\":") != NULL);
     assert(strstr(data, "\"titlebar_height\":26") != NULL);
+    /* 预览样式也要能被 wctl get_config 看到（颜色 0xAARRGGBB、不透明度毫值） */
+    assert(strstr(data, "\"snap_preview_color\":3204481279") != NULL);
+    assert(strstr(data, "\"snap_preview_opacity_milli\":250") != NULL);
     assert(strstr(data, "\"keyboard\":") != NULL);
     assert(strstr(data, "\"cursor\":") != NULL);
     assert(strstr(data, "\"active_border_color\":") != NULL);

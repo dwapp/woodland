@@ -8,7 +8,6 @@
 
 #include <wayland-server-core.h>
 #include <wlr/types/wlr_output.h>
-#include <wlr/types/wlr_output_layout.h>
 #include "scene.h"
 #include <wlr/util/box.h>
 #include <wlr/util/edges.h>
@@ -23,76 +22,74 @@
 #include "woodland.h"
 #include "woodland_config.h"
 
-#define SNAP_PREVIEW_BORDER_WIDTH 2
 #define SNAP_PREVIEW_FILTER_MS 200
+/* 配置缺省（server->config 为空，例如单测直接调）时的边框宽度 */
+#define SNAP_PREVIEW_DEFAULT_BORDER 2
 
-/* 判断某输出边缘是否为输出布局的外边界（跨屏防抖判定） */
-static bool output_edge_is_layout_edge(struct woodland_server *server,
-                                       struct woodland_output *output,
-                                       uint32_t edge)
-{
-    if (!server || !server->output_layout || !output || !output->wlr_output) {
-        return true;
-    }
-    struct wlr_box box;
-    wlr_output_layout_get_box(server->output_layout, output->wlr_output, &box);
-
-    int test_x = 0;
-    int test_y = 0;
-
-    switch (edge) {
-    case WLR_EDGE_LEFT:
-        test_x = box.x - 1;
-        test_y = box.y + box.height / 2;
-        break;
-    case WLR_EDGE_RIGHT:
-        test_x = box.x + box.width;
-        test_y = box.y + box.height / 2;
-        break;
-    case WLR_EDGE_TOP:
-        test_x = box.x + box.width / 2;
-        test_y = box.y - 1;
-        break;
-    case WLR_EDGE_BOTTOM:
-        test_x = box.x + box.width / 2;
-        test_y = box.y + box.height;
-        break;
-    default:
-        return true;
-    }
-
-    return !wlr_output_layout_contains_point(server->output_layout, NULL, test_x, test_y);
-}
-
+/*
+ * 预览配色：显式配置 > treeland-appearance 强调色 > 内置天蓝。
+ *
+ * 强调色只借 RGB：不透明度仍按 [general] 给的来（边框用颜色自带的 alpha、
+ * 填充用 snap_preview_opacity）。这样桌面换主题时预览跟着变，用户想固定
+ * 自己的颜色时又压得住。
+ */
 static void snap_preview_get_colors(struct woodland_server *server, float fill_color[4],
                                     float border_color[4])
 {
-    if (server && server->config && server->config->appearance.accent_set) {
-        uint32_t c = server->config->appearance.accent_rgb;
-        float r = ((c >> 16) & 0xff) / 255.0f;
-        float g = ((c >> 8) & 0xff) / 255.0f;
-        float b = (c & 0xff) / 255.0f;
-        fill_color[0] = r;
-        fill_color[1] = g;
-        fill_color[2] = b;
-        fill_color[3] = 0.25f;
-
-        border_color[0] = r;
-        border_color[1] = g;
-        border_color[2] = b;
-        border_color[3] = 0.75f;
-    } else {
-        /* 默认半透明天蓝色 (0, 128, 255) */
-        fill_color[0] = 0.0f;
-        fill_color[1] = 0.5f;
-        fill_color[2] = 1.0f;
-        fill_color[3] = 0.25f;
-
-        border_color[0] = 0.0f;
-        border_color[1] = 0.5f;
-        border_color[2] = 1.0f;
-        border_color[3] = 0.75f;
+    struct woodland_config *cfg = server ? server->config : NULL;
+    uint32_t color = cfg ? cfg->general.snap_preview_color : 0xBF0080FFu;
+    if (cfg && !cfg->general.snap_preview_color_specified && cfg->appearance.accent_set) {
+        color = (color & 0xFF000000u) | (cfg->appearance.accent_rgb & 0xFFFFFFu);
     }
+    float r = ((color >> 16) & 0xff) / 255.0f;
+    float g = ((color >> 8) & 0xff) / 255.0f;
+    float b = (color & 0xff) / 255.0f;
+    float border_alpha = ((color >> 24) & 0xff) / 255.0f;
+    float fill_alpha = cfg ? (float)cfg->general.snap_preview_opacity : 0.25f;
+
+    fill_color[0] = r;
+    fill_color[1] = g;
+    fill_color[2] = b;
+    fill_color[3] = fill_alpha;
+
+    border_color[0] = r;
+    border_color[1] = g;
+    border_color[2] = b;
+    border_color[3] = border_alpha;
+}
+
+static int snap_preview_border_width(struct woodland_server *server)
+{
+    int32_t w = server && server->config ? server->config->general.snap_preview_border_width
+                                         : SNAP_PREVIEW_DEFAULT_BORDER;
+    if (w < 0) {
+        w = 0;
+    }
+    if (w > 32) {
+        w = 32;
+    }
+    return (int)w;
+}
+
+/*
+ * 样式指纹：边框宽度 + 配色，量化到 8bit 后做 FNV-1a。
+ *
+ * 用途是让 show() 的"位置没变就跳过"不会连样式变更一起跳过——拖动中途
+ * SIGHUP 重载配置、treeland-appearance 换强调色，都得当帧生效。
+ */
+static uint32_t snap_preview_style_key(int border_width, const float fill_color[4],
+                                       const float border_color[4])
+{
+    const float *parts[2] = {fill_color, border_color};
+    uint32_t h = 2166136261u;
+    h = (h ^ (uint32_t)(border_width & 0xff)) * 16777619u;
+    for (int i = 0; i < 2; i++) {
+        for (int c = 0; c < 4; c++) {
+            unsigned int v = (unsigned int)(parts[i][c] * 255.0f + 0.5f);
+            h = (h ^ (v & 0xff)) * 16777619u;
+        }
+    }
+    return h;
 }
 
 static int handle_snap_filter_timer(void *data)
@@ -158,14 +155,13 @@ void woodland_snap_preview_destroy(struct woodland_server *server)
         sp->tree = NULL;
         sp->fill = NULL;
         sp->border = NULL;
-#if !WOODLAND_HAVE_EFFECTS
         for (int i = 0; i < 4; i++) {
             sp->border_edges[i] = NULL;
         }
-#endif
     }
     sp->edges = 0;
     sp->output = NULL;
+    sp->style_key = 0;
     memset(&sp->box, 0, sizeof(sp->box));
 }
 
@@ -210,8 +206,15 @@ void woodland_snap_preview_show(struct woodland_server *server, struct woodland_
 
     struct woodland_snap_preview *sp = &server->snap_preview;
 
+    const int b = snap_preview_border_width(server);
+    float fill_color[4];
+    float border_color[4];
+    snap_preview_get_colors(server, fill_color, border_color);
+    uint32_t style_key = snap_preview_style_key(b, fill_color, border_color);
+
+    /* 位置和样式都没变就什么都不用做（拖动中每次 motion 都会进来） */
     if (sp->tree && sp->tree->node.enabled && sp->edges == edges && sp->output == output &&
-        sp->box.x == tile_box.x && sp->box.y == tile_box.y &&
+        sp->style_key == style_key && sp->box.x == tile_box.x && sp->box.y == tile_box.y &&
         sp->box.width == tile_box.width && sp->box.height == tile_box.height) {
         return;
     }
@@ -222,15 +225,14 @@ void woodland_snap_preview_show(struct woodland_server *server, struct woodland_
         parent = &server->scene->tree;
     }
 
-    float fill_color[4];
-    float border_color[4];
-    snap_preview_get_colors(server, fill_color, border_color);
-
-    const int b = SNAP_PREVIEW_BORDER_WIDTH;
     int inner_w = tile_box.width - 2 * b;
     int inner_h = tile_box.height - 2 * b;
-    if (inner_w < 1) inner_w = 1;
-    if (inner_h < 1) inner_h = 1;
+    if (inner_w < 1) {
+        inner_w = 1;
+    }
+    if (inner_h < 1) {
+        inner_h = 1;
+    }
 
     if (!sp->tree) {
         sp->tree = wlr_scene_tree_create(parent);
@@ -241,100 +243,101 @@ void woodland_snap_preview_show(struct woodland_server *server, struct woodland_
 #if WOODLAND_HAVE_EFFECTS
         sp->border = wlr_scene_rect_create(sp->tree, tile_box.width, tile_box.height, border_color);
         sp->fill = wlr_scene_rect_create(sp->tree, inner_w, inner_h, fill_color);
-        if (sp->fill) {
-            wlr_scene_node_set_position(&sp->fill->node, b, b);
-        }
 #else
         sp->fill = wlr_scene_rect_create(sp->tree, inner_w, inner_h, fill_color);
-        if (sp->fill) {
-            wlr_scene_node_set_position(&sp->fill->node, b, b);
-        }
         /* 四条边框 */
         sp->border_edges[0] = wlr_scene_rect_create(sp->tree, tile_box.width, b, border_color);
         sp->border_edges[1] = wlr_scene_rect_create(sp->tree, tile_box.width, b, border_color);
         sp->border_edges[2] = wlr_scene_rect_create(sp->tree, b, inner_h, border_color);
         sp->border_edges[3] = wlr_scene_rect_create(sp->tree, b, inner_h, border_color);
 #endif
-    } else {
-        if (sp->tree->node.parent != parent) {
-            wlr_scene_node_reparent(&sp->tree->node, parent);
+        /*
+         * z 序只在建树时排一次：预览树和被拖的窗口是兄弟节点，拖动过程中
+         * 窗口既不换父树也不换 z，每次 update 都 place_below 等于每帧白排一次。
+         */
+        if (view->scene_tree) {
+            wlr_scene_node_place_below(&sp->tree->node, &view->scene_tree->node);
         }
-#if WOODLAND_HAVE_EFFECTS
-        if (sp->border) {
-            wlr_scene_rect_set_size(sp->border, tile_box.width, tile_box.height);
-            wlr_scene_rect_set_color(sp->border, border_color);
+    } else if (sp->tree->node.parent != parent) {
+        /* 窗口换了父树（切工作区后重挂一类）：跟着搬，并重新压回窗口下面 */
+        wlr_scene_node_reparent(&sp->tree->node, parent);
+        if (view->scene_tree) {
+            wlr_scene_node_place_below(&sp->tree->node, &view->scene_tree->node);
         }
-        if (sp->fill) {
-            wlr_scene_rect_set_size(sp->fill, inner_w, inner_h);
-            wlr_scene_rect_set_color(sp->fill, fill_color);
-            wlr_scene_node_set_position(&sp->fill->node, b, b);
-        }
-#else
-        if (sp->fill) {
-            wlr_scene_rect_set_size(sp->fill, inner_w, inner_h);
-            wlr_scene_rect_set_color(sp->fill, fill_color);
-            wlr_scene_node_set_position(&sp->fill->node, b, b);
-        }
-        if (sp->border_edges[0]) {
-            wlr_scene_rect_set_size(sp->border_edges[0], tile_box.width, b);
-            wlr_scene_node_set_position(&sp->border_edges[0]->node, 0, 0);
-            wlr_scene_rect_set_color(sp->border_edges[0], border_color);
-        }
-        if (sp->border_edges[1]) {
-            wlr_scene_rect_set_size(sp->border_edges[1], tile_box.width, b);
-            wlr_scene_node_set_position(&sp->border_edges[1]->node, 0, tile_box.height - b);
-            wlr_scene_rect_set_color(sp->border_edges[1], border_color);
-        }
-        if (sp->border_edges[2]) {
-            wlr_scene_rect_set_size(sp->border_edges[2], b, inner_h);
-            wlr_scene_node_set_position(&sp->border_edges[2]->node, 0, b);
-            wlr_scene_rect_set_color(sp->border_edges[2], border_color);
-        }
-        if (sp->border_edges[3]) {
-            wlr_scene_rect_set_size(sp->border_edges[3], b, inner_h);
-            wlr_scene_node_set_position(&sp->border_edges[3]->node, tile_box.width - b, b);
-            wlr_scene_rect_set_color(sp->border_edges[3], border_color);
-        }
-#endif
     }
 
+    /* 尺寸 / 位置 / 配色每次重设：节点复用，只是改属性 */
 #if WOODLAND_HAVE_EFFECTS
-    if (server->config && server->config->effects.enabled && sp->border && sp->fill) {
-        int r = server->config->effects.corner_radius;
-        if (r > 0) {
-            wlr_scene_rect_set_corner_radii(sp->border,
-                                            corner_radii_new(r + b, r + b, r + b, r + b));
-            struct clipped_region clip = clipped_region_get_default();
-            clip.area = (struct wlr_box){b, b, inner_w, inner_h};
-            clip.corners = corner_radii_new(r, r, r, r);
-            wlr_scene_rect_set_clipped_region(sp->border, clip);
+    if (sp->border) {
+        wlr_scene_rect_set_size(sp->border, tile_box.width, tile_box.height);
+        wlr_scene_rect_set_color(sp->border, border_color);
+    }
+    if (sp->fill) {
+        wlr_scene_rect_set_size(sp->fill, inner_w, inner_h);
+        wlr_scene_rect_set_color(sp->fill, fill_color);
+        wlr_scene_node_set_position(&sp->fill->node, b, b);
+    }
+#else
+    if (sp->fill) {
+        wlr_scene_rect_set_size(sp->fill, inner_w, inner_h);
+        wlr_scene_rect_set_color(sp->fill, fill_color);
+        wlr_scene_node_set_position(&sp->fill->node, b, b);
+    }
+    if (sp->border_edges[0]) {
+        wlr_scene_rect_set_size(sp->border_edges[0], tile_box.width, b);
+        wlr_scene_node_set_position(&sp->border_edges[0]->node, 0, 0);
+        wlr_scene_rect_set_color(sp->border_edges[0], border_color);
+    }
+    if (sp->border_edges[1]) {
+        wlr_scene_rect_set_size(sp->border_edges[1], tile_box.width, b);
+        wlr_scene_node_set_position(&sp->border_edges[1]->node, 0, tile_box.height - b);
+        wlr_scene_rect_set_color(sp->border_edges[1], border_color);
+    }
+    if (sp->border_edges[2]) {
+        wlr_scene_rect_set_size(sp->border_edges[2], b, inner_h);
+        wlr_scene_node_set_position(&sp->border_edges[2]->node, 0, b);
+        wlr_scene_rect_set_color(sp->border_edges[2], border_color);
+    }
+    if (sp->border_edges[3]) {
+        wlr_scene_rect_set_size(sp->border_edges[3], b, inner_h);
+        wlr_scene_node_set_position(&sp->border_edges[3]->node, tile_box.width - b, b);
+        wlr_scene_rect_set_color(sp->border_edges[3], border_color);
+    }
+#endif
 
+#if WOODLAND_HAVE_EFFECTS
+    /*
+     * 圆角描边：外框 rect 画满色，再用 clipped_region 把内框挖掉，
+     * 剩下的一圈就是边框；内半径 r、外半径 r+b 才能让内外弧同心。
+     * 不在 1px 细条上设圆角（scenefx 会按 rect 自身尺寸 clamp 掉半径）。
+     */
+    if (sp->border && sp->fill) {
+        int r = (server->config && server->config->effects.enabled)
+                    ? server->config->effects.corner_radius
+                    : 0;
+        struct clipped_region clip = clipped_region_get_default();
+        clip.area = (struct wlr_box){b, b, inner_w, inner_h};
+
+        if (r > 0) {
+            wlr_scene_rect_set_corner_radii(sp->border, corner_radii_new(r + b, r + b, r + b, r + b));
+            clip.corners = corner_radii_new(r, r, r, r);
             wlr_scene_rect_set_corner_radii(sp->fill, corner_radii_new(r, r, r, r));
         } else {
             wlr_scene_rect_set_corner_radii(sp->border, corner_radii_none());
-            struct clipped_region clip = clipped_region_get_default();
-            clip.area = (struct wlr_box){b, b, inner_w, inner_h};
-            wlr_scene_rect_set_clipped_region(sp->border, clip);
             wlr_scene_rect_set_corner_radii(sp->fill, corner_radii_none());
         }
-    } else if (sp->border && sp->fill) {
-        wlr_scene_rect_set_corner_radii(sp->border, corner_radii_none());
-        struct clipped_region clip = clipped_region_get_default();
-        clip.area = (struct wlr_box){b, b, inner_w, inner_h};
         wlr_scene_rect_set_clipped_region(sp->border, clip);
-        wlr_scene_rect_set_corner_radii(sp->fill, corner_radii_none());
     }
 #endif
 
-    if (view->scene_tree) {
-        wlr_scene_node_place_below(&sp->tree->node, &view->scene_tree->node);
-    }
+    /* z 序已在建树（或换父树）时排过，这里只摆位置、开可见 */
     wlr_scene_node_set_position(&sp->tree->node, tile_box.x, tile_box.y);
     wlr_scene_node_set_enabled(&sp->tree->node, true);
 
     sp->edges = edges;
     sp->output = output;
     sp->box = tile_box;
+    sp->style_key = style_key;
 
     woodland_trace_add("snap", view->id, "preview output=%s edges=%u box=%dx%d at %d,%d",
                        output->wlr_output ? output->wlr_output->name : "-", edges,
@@ -364,22 +367,23 @@ void woodland_snap_preview_update(struct woodland_server *server, struct woodlan
 
     uint32_t edges = view->pending_snap_edges;
 
-    /* 检查触发的边缘是否为整个输出布局的外边界 */
+    /*
+     * 触发的边是输出之间的接缝还是屏幕墙外沿：接缝（外面还有显示器）
+     * 要防抖，外沿可以立刻显示。只看参与判定的那几条边。
+     */
+    struct wlr_output *wo_output = wo->wlr_output;
     bool is_outer = true;
-    if (edges & WLR_EDGE_LEFT) {
-        if (!output_edge_is_layout_edge(server, wo, WLR_EDGE_LEFT)) {
-            is_outer = false;
-        }
+    if ((edges & WLR_EDGE_LEFT) &&
+        !woodland_snap_edge_is_layout_edge(server->output_layout, wo_output, WLR_EDGE_LEFT)) {
+        is_outer = false;
     }
-    if (edges & WLR_EDGE_RIGHT) {
-        if (!output_edge_is_layout_edge(server, wo, WLR_EDGE_RIGHT)) {
-            is_outer = false;
-        }
+    if ((edges & WLR_EDGE_RIGHT) &&
+        !woodland_snap_edge_is_layout_edge(server->output_layout, wo_output, WLR_EDGE_RIGHT)) {
+        is_outer = false;
     }
-    if (edges & WLR_EDGE_TOP) {
-        if (!output_edge_is_layout_edge(server, wo, WLR_EDGE_TOP)) {
-            is_outer = false;
-        }
+    if ((edges & WLR_EDGE_TOP) &&
+        !woodland_snap_edge_is_layout_edge(server->output_layout, wo_output, WLR_EDGE_TOP)) {
+        is_outer = false;
     }
 
     struct woodland_snap_preview *sp = &server->snap_preview;
@@ -411,28 +415,35 @@ void woodland_snap_preview_update(struct woodland_server *server, struct woodlan
     }
 }
 
-uint32_t woodland_snap_determine_edges(struct woodland_server *server,
-                                       struct woodland_view *view,
-                                       struct woodland_output *wo,
+uint32_t woodland_snap_determine_edges(struct woodland_view *view,
                                        const struct wlr_box *outer,
                                        const struct wlr_box *area,
                                        double cursor_x, double cursor_y,
                                        int threshold)
 {
-    (void)server;
-    (void)wo;
     if (!view || !area || threshold <= 0) {
         return 0;
     }
     if (view->fullscreen) {
         return 0;
     }
+    /* 尺寸被客户端钉死的窗口（max == min）铺满也没意义 */
     int min_w = 0, min_h = 0, max_w = 0, max_h = 0;
     woodland_view_size_limits(view, &min_w, &min_h, &max_w, &max_h);
     if (max_w > 0 && max_h > 0 && min_w == max_w && min_h == max_h) {
         return 0;
     }
 
+    /*
+     * 判定顺序：**光标优先，窗口外框兜底**。
+     *
+     * 光标优先是 gxde-wlcom / 各家桌面的一致语义，也是"我要把这窗口放左半屏"
+     * 最直接的表达。外框兜底不是历史包袱而是必须保留的：松手时
+     * shell_view_apply_snap() 用的就是这里返回的 pending_snap_edges，只要
+     * 外框已经贴住工作区边（老行为，woodland_snap_edges_for），松手就真的
+     * 会铺满——那这一刻预览也必须跟着亮，否则"预览没亮、窗口却跳了"。
+     * 预览可以比用户预期早一点，但不能说谎。
+     */
     uint32_t edges = woodland_snap_cursor_edges(area, cursor_x, cursor_y, threshold);
     if (edges == 0 && outer) {
         edges = woodland_snap_edges_for(outer, area, threshold);

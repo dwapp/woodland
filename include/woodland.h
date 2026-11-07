@@ -43,13 +43,25 @@ struct woodland_snap_preview {
     struct woodland_server *server;
     struct wlr_scene_tree *tree;
     struct wlr_scene_rect *fill;
+    /*
+     * 边框走两条路：effects 构建用**一个**覆盖整个外框的 rect + clipped_region
+     * 挖空内框（圆角描边只有这条路画得对），非 effects 构建没有 clip，只能用
+     * 四条细条拼。两种节点**始终都声明**：公开头不该依赖 build config 宏
+     * （别人直接 include woodland.h 时未必先包含 config.h），代价是没有边框
+     * 路径上多 4 个空指针。
+     */
     struct wlr_scene_rect *border;
-#if !WOODLAND_HAVE_EFFECTS
     struct wlr_scene_rect *border_edges[4];
-#endif
     struct woodland_output *output;
     uint32_t edges;
     struct wlr_box box;
+    /*
+     * 上一次真正写进节点的样式指纹（边框宽度 + 配色）。show() 用"边/输出/
+     * box 都没变就跳过"省掉每帧重设，但样式可能在拖动中途变（SIGHUP 重载、
+     * treeland-appearance 改强调色），所以指纹也得进这个判据，否则要等到
+     * 位置变了才刷新。
+     */
+    uint32_t style_key;
 
     /* 延迟计时器（多屏之间跨屏移动时防抖） */
     struct wl_event_source *filter_timer;

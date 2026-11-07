@@ -388,6 +388,152 @@ int main(void)
     assert(server.snap_preview.tree == NULL);
 
     wlr_scene_node_destroy(&preview_view.scene_tree->node);
+
+    /*
+     * ---------- 拖动管线端到端：光标 → pending → 预览 → 松手铺满 ----------
+     * 只有输入事件是伪造的（直接写 cursor->x/y），几何推进、贴边判定、
+     * 预览显隐、松手应用走的都是真实函数：woodland_cursor_process_motion
+     * → shell_process_cursor_move → woodland_snap_preview_update →
+     * shell_view_apply_snap。前面那些用例是"直接调 show()"，绕过了判定。
+     */
+    struct wlr_xdg_surface pipe_base = {0};
+    pipe_base.geometry = (struct wlr_box){.width = 400, .height = 300};
+    struct wlr_xdg_toplevel pipe_toplevel = {.base = &pipe_base};
+    struct woodland_view pipe_view = {0};
+    pipe_view.server = &server;
+    pipe_view.xdg_toplevel = &pipe_toplevel;
+    pipe_view.mapped = true;
+    pipe_view.scene_tree = wlr_scene_tree_create(&server.scene->tree);
+    wl_list_insert(&server.views, &pipe_view.link);
+
+    server.grabbed_view = &pipe_view;
+    server.cursor_mode = WOODLAND_CURSOR_MOVE;
+    server.grab_x = 0;
+    server.grab_y = 0;
+    server.drag_start_x = 300;
+    server.drag_start_y = 200;
+
+    /* 光标在屏幕中央：既不贴边也不预览 */
+    server.cursor->x = 300;
+    server.cursor->y = 200;
+    woodland_cursor_process_motion(&server, 0);
+    assert(pipe_view.pending_snap_edges == 0);
+    assert(server.snap_preview.edges == 0);
+    assert(server.snap_preview.tree == NULL);
+
+    /*
+     * 判定语义钉死：**光标优先、外框兜底**（见 woodland_snap_determine_edges）。
+     * 兜底那条不是死代码——松手时 shell_view_apply_snap 用的就是这里的返回值，
+     * 外框贴住边就一定会铺满，所以那一刻预览必须亮。
+     */
+    struct woodland_view probe_view = {0};
+    struct wlr_box probe_area = {.x = 10, .y = 10, .width = 780, .height = 580};
+    struct wlr_box probe_outer = {.x = 10, .y = 200, .width = 300, .height = 300};
+    /* 光标在中央、外框已经贴住左边：兜底判 LEFT */
+    assert(woodland_snap_determine_edges(&probe_view, &probe_outer, &probe_area, 400, 300, 20) ==
+           WLR_EDGE_LEFT);
+    /* 光标在中央、外框也不靠边：什么都不判 */
+    probe_outer.x = 300;
+    assert(woodland_snap_determine_edges(&probe_view, &probe_outer, &probe_area, 400, 300, 20) == 0);
+    /* 光标贴右边时优先于"外框贴左边" */
+    probe_outer.x = 10;
+    assert(woodland_snap_determine_edges(&probe_view, &probe_outer, &probe_area, 788, 300, 20) ==
+           WLR_EDGE_RIGHT);
+    /* 全屏窗口不参与 */
+    probe_view.fullscreen = true;
+    probe_outer.x = 10;
+    assert(woodland_snap_determine_edges(&probe_view, &probe_outer, &probe_area, 12, 300, 20) == 0);
+    probe_view.fullscreen = false;
+
+    /* [general] snap_preview = false：判定照旧（松手照样铺满），但不上屏 */
+    cfg.general.snap_preview = false;
+    server.cursor->x = 12;
+    woodland_cursor_process_motion(&server, 0);
+    assert(pipe_view.pending_snap_edges == WLR_EDGE_LEFT);
+    assert(server.snap_preview.tree == NULL);
+    cfg.general.snap_preview = true;
+    server.cursor->x = 300;
+    woodland_cursor_process_motion(&server, 0);
+    assert(server.snap_preview.tree == NULL);
+
+    /* 拖到左沿（工作区 x=10，光标 x=12 在阈值内）：左半屏预览亮起 */
+    server.cursor->x = 12;
+    woodland_cursor_process_motion(&server, 0);
+    assert(pipe_view.pending_snap_edges == WLR_EDGE_LEFT);
+    assert(server.snap_preview.edges == WLR_EDGE_LEFT);
+    assert(server.snap_preview.tree != NULL && server.snap_preview.tree->node.enabled);
+    assert(server.snap_preview.box.x == 10 && server.snap_preview.box.width == 390);
+    /* 预览树挂在被拖窗口的同一个父节点下（不是新开一棵根树），
+     * 且位置是布局绝对坐标——AGENTS.md 陷阱 3 是"重复累计 tree 自身的 x/y" */
+    assert(server.snap_preview.tree->node.parent == pipe_view.scene_tree->node.parent);
+    assert(server.snap_preview.tree->node.x == 10);
+    assert(server.snap_preview.tree->node.y == 10);
+    /*
+     * z 序：预览必须紧贴在被拖窗口"下面"（同级兄弟里排在它前面）。
+     * 这条是"把 place_below 从每帧挪到建树一次"这个优化的前提——节点
+     * 顺序一旦不是这样，预览要么盖住窗口、要么沉到壁纸下面（画了看不见）。
+     */
+    assert(pipe_view.scene_tree->node.link.prev == &server.snap_preview.tree->node.link);
+
+    /* 光标拖回中央：预览立刻消失，pending 清零（松手不会铺满） */
+
+    /* 样式变更要能穿透"位置没变就跳过"的缓存：预览还亮着的时候改配置，
+     * 光标不动也要当帧重设节点属性（边框 2px → 6px，填充内缩跟着变） */
+    cfg.general.snap_preview_border_width = 6;
+    woodland_cursor_process_motion(&server, 0);
+    assert(server.snap_preview.fill != NULL);
+    assert(server.snap_preview.fill->node.x == 6);
+    assert(server.snap_preview.fill->node.y == 6);
+    cfg.general.snap_preview_border_width = 2;
+    woodland_cursor_process_motion(&server, 0);
+    assert(server.snap_preview.fill->node.x == 2);
+
+    server.cursor->x = 300;
+    woodland_cursor_process_motion(&server, 0);
+    assert(pipe_view.pending_snap_edges == 0);
+    assert(server.snap_preview.edges == 0);
+    assert(server.snap_preview.tree != NULL && !server.snap_preview.tree->node.enabled);
+
+    /* 再拖到左沿后松手：按左半屏铺满，预览整棵树拆掉。
+     * 松手前摘掉假 toplevel：wlr_xdg_toplevel_set_tiled 会解引用
+     * base->client（单测里没有真客户端），而铺满的几何路径不依赖它 */
+    server.cursor->x = 12;
+    woodland_cursor_process_motion(&server, 0);
+    assert(server.snap_preview.edges == WLR_EDGE_LEFT);
+    /* 隐藏后重新显示也不重排 z（树复用、父节点没变），顺序仍然是"预览在窗口下" */
+    assert(pipe_view.scene_tree->node.link.prev == &server.snap_preview.tree->node.link);
+    pipe_view.xdg_toplevel = NULL;
+    shell_view_apply_snap(&pipe_view);
+    assert(pipe_view.pending_snap_edges == 0);
+    assert(pipe_view.snapped_edges == WLR_EDGE_LEFT);
+    /* 外框铺到工作区左半屏，内容原点再让出该 view 自己的边距 */
+    struct woodland_ssd_margins pipe_margins;
+    woodland_ssd_get_margins(&pipe_view, &pipe_margins);
+    assert(pipe_view.scene_tree->node.x == 10 + pipe_margins.left);
+    assert(pipe_view.scene_tree->node.y == 10 + pipe_margins.top);
+    assert(!server.snap_preview.edges);
+    assert(server.snap_preview.tree == NULL);
+
+    /* 抓取被打断（例如客户端断开、ESC 取消）时预览也要收干净 */
+    pipe_view.xdg_toplevel = &pipe_toplevel;
+    server.cursor->x = 12;
+    woodland_cursor_process_motion(&server, 0);
+    assert(server.snap_preview.tree != NULL);
+    /* reset_mode 末尾要把光标换回 "default"，那条路要 xcursor manager；
+     * 单测里没有主题目录，建一个空 manager 只为不空指针 */
+    server.xcursor_manager = wlr_xcursor_manager_create("Adwaita", 24);
+    woodland_cursor_reset_mode(&server);
+    assert(server.snap_preview.tree == NULL);
+    assert(server.snap_preview.pending_view == NULL);
+    assert(server.cursor_mode == WOODLAND_CURSOR_PASSTHROUGH);
+    if (server.xcursor_manager) {
+        wlr_xcursor_manager_destroy(server.xcursor_manager);
+        server.xcursor_manager = NULL;
+    }
+
+    wl_list_remove(&pipe_view.link);
+    wlr_scene_node_destroy(&pipe_view.scene_tree->node);
+
     woodland_snap_preview_finish(&server);
 
     wlr_cursor_destroy(server.cursor);

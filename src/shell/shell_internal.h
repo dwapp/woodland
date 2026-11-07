@@ -57,12 +57,5 @@ void woodland_snap_preview_show(struct woodland_server *server, struct woodland_
 void woodland_snap_preview_hide(struct woodland_server *server);
 void woodland_snap_preview_destroy(struct woodland_server *server);
 void woodland_snap_preview_update(struct woodland_server *server, struct woodland_view *view);
-uint32_t woodland_snap_determine_edges(struct woodland_server *server,
-                                       struct woodland_view *view,
-                                       struct woodland_output *wo,
-                                       const struct wlr_box *outer,
-                                       const struct wlr_box *area,
-                                       double cursor_x, double cursor_y,
-                                       int threshold);
 
 #endif
