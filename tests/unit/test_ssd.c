@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "icon.h"
+#include "output.h"
 #include "ssd.h"
 #include "view.h"
 #include "woodland.h"

@@ -12,6 +12,7 @@ struct wlr_pointer_constraint_v1;
 bool woodland_cursor_init(struct woodland_server *server);
 void woodland_cursor_finish(struct woodland_server *server);
 void woodland_cursor_set(struct woodland_server *server, const char *name);
+void woodland_cursor_load_scale(struct woodland_server *server, float scale);
 
 /*
  * 光标尺寸的支持范围。协议（treeland-appearance-manager）要求把越界值

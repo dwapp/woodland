@@ -5,6 +5,8 @@
 #include <stdbool.h>
 
 struct woodland_server;
+struct woodland_view;
+
 
 /**
  * 初始化 Xwayland 支持。
@@ -19,5 +21,11 @@ bool woodland_xwayland_init(struct woodland_server *server);
 
 /** 摘掉监听器（display 销毁会连带释放 wlr_xwayland）。 */
 void woodland_xwayland_finish(struct woodland_server *server);
+
+/** 更新 X11 窗口的缩放滤波模式（nearest / bilinear / smart） */
+void woodland_xwayland_view_update_scale_filter(struct woodland_view *view);
+
+/** 设置/刷新 Xwayland 根光标（按当前主题与尺寸） */
+void woodland_xwayland_update_cursor(struct woodland_server *server);
 
 #endif /* WOODLAND_XWAYLAND_H */

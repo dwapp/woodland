@@ -139,6 +139,16 @@ struct woodland_config_appearance {
     char *icon_theme;      /* NULL = 未设，按 icon.c 的内置主题表找图标 */
 };
 
+enum woodland_scale_filter {
+    WOODLAND_SCALE_FILTER_SMART = 0,
+    WOODLAND_SCALE_FILTER_NEAREST,
+    WOODLAND_SCALE_FILTER_BILINEAR,
+};
+
+struct woodland_config_xwayland {
+    enum woodland_scale_filter scale_filter;
+};
+
 struct woodland_config {
     char *loaded_path; /* 实际生效的文件路径，无文件或内置默认时为 NULL */
     struct woodland_config_general general;
@@ -149,6 +159,7 @@ struct woodland_config {
     struct woodland_config_effects effects;
     struct woodland_config_appearance appearance;
     struct wl_list output_rules; /* struct woodland_config_output_rule.link */
+    struct woodland_config_xwayland xwayland;
 };
 
 /**

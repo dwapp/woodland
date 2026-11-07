@@ -54,6 +54,7 @@ static void test_default_config(void)
     assert(cfg->effects.shadow_radius == 20);
     assert(cfg->effects.shadow_offset_y == 4);
     assert(wl_list_empty(&cfg->output_rules));
+    assert(cfg->xwayland.scale_filter == WOODLAND_SCALE_FILTER_SMART);
 
     woodland_config_destroy(cfg);
 }
@@ -118,7 +119,10 @@ static void test_parse_valid_toml(void)
                        "name = \"*\"\n"
                        "scale = 2.0\n"
                        "position = \"auto\"\n"
-                       "enabled = false\n";
+                       "enabled = false\n"
+                       "\n"
+                       "[xwayland]\n"
+                       "scale_filter = \"nearest\"\n";
 
     struct woodland_config *cfg = woodland_config_parse_string(toml, strlen(toml), "test_valid");
     assert(cfg != NULL);
@@ -163,6 +167,7 @@ static void test_parse_valid_toml(void)
     assert(cfg->effects.shadow_radius == 25);
     assert(cfg->effects.shadow_offset_y == 6);
 
+    assert(cfg->xwayland.scale_filter == WOODLAND_SCALE_FILTER_NEAREST);
     /* 验证输出规则 */
     assert(wl_list_length(&cfg->output_rules) == 2);
     struct woodland_config_output_rule *r1 = wl_container_of(cfg->output_rules.next, r1, link);
@@ -182,6 +187,29 @@ static void test_parse_valid_toml(void)
 
     woodland_config_destroy(cfg);
 }
+static void test_xwayland_config(void)
+{
+    const char *toml_smart = "[xwayland]\nscale_filter = \"smart\"\n";
+    struct woodland_config *c1 = woodland_config_parse_string(toml_smart, strlen(toml_smart), "t1");
+    assert(c1 && c1->xwayland.scale_filter == WOODLAND_SCALE_FILTER_SMART);
+    woodland_config_destroy(c1);
+
+    const char *toml_linear = "[xwayland]\nscale_filter = \"linear\"\n";
+    struct woodland_config *c2 = woodland_config_parse_string(toml_linear, strlen(toml_linear), "t2");
+    assert(c2 && c2->xwayland.scale_filter == WOODLAND_SCALE_FILTER_BILINEAR);
+    woodland_config_destroy(c2);
+
+    const char *toml_bilinear = "[xwayland]\nscale_filter = \"bilinear\"\n";
+    struct woodland_config *c3 = woodland_config_parse_string(toml_bilinear, strlen(toml_bilinear), "t3");
+    assert(c3 && c3->xwayland.scale_filter == WOODLAND_SCALE_FILTER_BILINEAR);
+    woodland_config_destroy(c3);
+
+    const char *toml_nearest = "[xwayland]\nscale_filter = \"nearest\"\n";
+    struct woodland_config *c4 = woodland_config_parse_string(toml_nearest, strlen(toml_nearest), "t4");
+    assert(c4 && c4->xwayland.scale_filter == WOODLAND_SCALE_FILTER_NEAREST);
+    woodland_config_destroy(c4);
+}
+
 
 static void test_malformed_fallback(void)
 {
@@ -370,6 +398,7 @@ int main(void)
     test_invalid_syntax_checks();
     test_json_dump();
     test_hot_reload_file();
+    test_xwayland_config();
 
     printf("test_config: all assertions passed\n");
     return 0;

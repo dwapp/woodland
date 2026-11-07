@@ -11,6 +11,7 @@
 #include <wlr/util/log.h>
 
 #include "effect.h"
+#include "cursor.h"
 #include "layer.h"
 #include "output.h"
 #include "session_lock.h"
@@ -18,6 +19,24 @@
 #include "view.h"
 #include "woodland.h"
 #include "woodland_config.h"
+
+static struct woodland_config_output_rule *find_output_rule(struct woodland_server *server,
+                                                            const char *name)
+{
+    if (!server || !server->config || !name) {
+        return NULL;
+    }
+    struct woodland_config_output_rule *rule, *wildcard = NULL;
+    wl_list_for_each(rule, &server->config->output_rules, link) {
+        if (rule->name && strcmp(rule->name, name) == 0) {
+            return rule;
+        }
+        if (rule->name && strcmp(rule->name, "*") == 0) {
+            wildcard = rule;
+        }
+    }
+    return wildcard;
+}
 
 bool woodland_output_get_tearing_allowance(struct woodland_output *output)
 {
@@ -90,6 +109,7 @@ static void handle_request_state(struct wl_listener *listener, void *data)
     struct woodland_output *output = wl_container_of(listener, output, request_state);
     const struct wlr_output_event_request_state *event = data;
     wlr_output_commit_state(output->wlr_output, event->state);
+    woodland_cursor_load_scale(output->server, output->wlr_output->scale);
     woodland_effect_output_update(output);
     woodland_session_lock_update_layout(output->server);
     if (output->server->views.next) {
@@ -247,6 +267,10 @@ static void handle_new_output(struct wl_listener *listener, void *data)
     if (mode != NULL) {
         wlr_output_state_set_mode(&state, mode);
     }
+    struct woodland_config_output_rule *rule = find_output_rule(server, wlr_output->name);
+    if (rule && rule->scale > 0.0) {
+        wlr_output_state_set_scale(&state, rule->scale);
+    }
     if (!wlr_output_commit_state(wlr_output, &state)) {
         wlr_log(WLR_ERROR, "failed to commit output state");
     }
@@ -260,6 +284,7 @@ static void handle_new_output(struct wl_listener *listener, void *data)
                        wlr_output->height, wl_list_length(&server->outputs));
     woodland_session_lock_add_output(server, output);
     woodland_effect_output_update(output);
+    woodland_cursor_load_scale(server, wlr_output->scale);
     if (server->views.next) {
         struct woodland_view *view;
         wl_list_for_each(view, &server->views, link)

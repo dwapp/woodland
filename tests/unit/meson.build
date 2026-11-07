@@ -33,7 +33,7 @@ test('workspace', test_workspace)
 test_view = executable('test_view', 'test_view.c',
   dependencies: [scene_deps, wayland_server],
   include_directories: woodland_inc,
-  link_with: [output_lib, cursor_lib, shell_lib, layer_lib, ssd_lib, effect_lib, workspace_lib, session_lock_lib, capture_lib, util_lib])
+  link_with: [output_lib, cursor_lib, shell_lib, layer_lib, ssd_lib, effect_lib, workspace_lib, session_lock_lib, capture_lib, util_lib] + xwayland_libs)
 test('view', test_view)
 
 test_layer = executable('test_layer', 'test_layer.c',
