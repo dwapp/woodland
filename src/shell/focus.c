@@ -45,6 +45,12 @@ enum woodland_view_wants_focus woodland_view_wants_focus(const struct woodland_v
     }
 #if WOODLAND_HAVE_XWAYLAND
     if (view->type == WOODLAND_VIEW_XWAYLAND && view->xwayland_surface) {
+        if (!woodland_view_wants_foreign_toplevel(view)) {
+            return WOODLAND_VIEW_WANTS_FOCUS_NEVER;
+        }
+        if (!view->xwayland_surface->xwm) {
+            return WOODLAND_VIEW_WANTS_FOCUS_ALWAYS;
+        }
         switch (wlr_xwayland_surface_icccm_input_model(view->xwayland_surface)) {
         case WLR_ICCCM_INPUT_MODEL_PASSIVE:
         case WLR_ICCCM_INPUT_MODEL_LOCAL:

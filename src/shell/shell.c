@@ -248,6 +248,11 @@ void woodland_view_map(struct woodland_view *view)
     /* CSD 视图没有 SSD，map 之后补一次圆角/模糊（SSD 视图由 ssd_create 覆盖） */
     woodland_effect_update(view);
     woodland_selfcheck_schedule(server, "map");
+    /* 若尚未创建 handles 且属于 toplevel，按需初始化任务栏句柄（针对 Xwayland 视图） */
+    if (!view->toplevel_handle && woodland_view_wants_foreign_toplevel(view)) {
+        woodland_view_init_handles(view);
+        woodland_view_update_outputs(view);
+    }
     /* 协议层在这里拿"窗口出现了"的第一手通知（foreign-toplevel 类） */
     woodland_signal_emit(&server->view_mapped, view);
 }
@@ -289,6 +294,10 @@ void woodland_view_unmap(struct woodland_view *view)
         woodland_view_update_outputs(view);
         woodland_layer_update_top_layer_visibility(view->server);
     }
+    /* Xwayland 视图在 unmap 时销毁任务栏句柄，避免未映射时残留 */
+    if (view->type == WOODLAND_VIEW_XWAYLAND) {
+        woodland_view_finish_handles(view);
+    }
     /* unmap 时销毁 SSD（避免残留空装饰）；remap 时按 deco_csd 重建 */
     if (view->ssd) {
         woodland_ssd_destroy(view);
@@ -325,22 +334,8 @@ void woodland_view_destroy(struct woodland_view *view)
         view->mapped = false;
         woodland_layer_update_top_layer_visibility(view->server);
     }
-    /* foreign-toplevel handle 与 listener */
-    if (view->toplevel_handle) {
-        wl_list_remove(&view->ft_request_activate.link);
-        wl_list_remove(&view->ft_request_maximize.link);
-        wl_list_remove(&view->ft_request_fullscreen.link);
-        wl_list_remove(&view->ft_request_minimize.link);
-        wl_list_remove(&view->ft_request_close.link);
-        wlr_foreign_toplevel_handle_v1_destroy(view->toplevel_handle);
-        view->toplevel_handle = NULL;
-    }
-    /* ext-foreign-toplevel-list 句柄 */
-    if (view->ext_toplevel_handle) {
-        wl_list_remove(&view->ext_handle_destroy.link);
-        wlr_ext_foreign_toplevel_handle_v1_destroy(view->ext_toplevel_handle);
-        view->ext_toplevel_handle = NULL;
-    }
+    /* foreign-toplevel 与 ext-foreign-toplevel-list 句柄 */
+    woodland_view_finish_handles(view);
     /* 按窗口捕获源：源随 scene 节点释放，这里只摘监听 */
     woodland_capture_view_finish(view);
     /* SSD 在 scene 树销毁时级联释放，这里只清指针 */

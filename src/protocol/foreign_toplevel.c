@@ -1206,11 +1206,9 @@ static void manager_bind(struct wl_client *client, void *data, uint32_t version,
 
 /* ==================== 视图通知 ==================== */
 
-static void view_mapped(struct wl_listener *listener, void *data)
+static void ftl_add_view(struct woodland_proto_toplevel *ftl, struct woodland_view *view)
 {
-    struct woodland_proto_toplevel *ftl = wl_container_of(listener, ftl, view_mapped);
-    struct woodland_view *view = data;
-    if (!view || entry_for_view(ftl, view)) {
+    if (!view || entry_for_view(ftl, view) || !woodland_view_wants_foreign_toplevel(view)) {
         return;
     }
     struct toplevel_entry *e = calloc(1, sizeof(*e));
@@ -1238,6 +1236,11 @@ static void view_mapped(struct wl_listener *listener, void *data)
                        view->app_id ? view->app_id : "-");
 }
 
+static void view_mapped(struct wl_listener *listener, void *data)
+{
+    struct woodland_proto_toplevel *ftl = wl_container_of(listener, ftl, view_mapped);
+    ftl_add_view(ftl, data);
+}
 static void view_unmapped(struct wl_listener *listener, void *data)
 {
     struct woodland_proto_toplevel *ftl = wl_container_of(listener, ftl, view_unmapped);
@@ -1250,7 +1253,21 @@ static void view_unmapped(struct wl_listener *listener, void *data)
 static void view_changed(struct wl_listener *listener, void *data)
 {
     struct woodland_proto_toplevel *ftl = wl_container_of(listener, ftl, view_changed);
-    struct toplevel_entry *e = entry_for_view(ftl, data);
+    struct woodland_view *view = data;
+    if (!view) {
+        return;
+    }
+    struct toplevel_entry *e = entry_for_view(ftl, view);
+    if (!woodland_view_wants_foreign_toplevel(view)) {
+        if (e) {
+            entry_close(e);
+        }
+        return;
+    }
+    if (!e && view->mapped) {
+        ftl_add_view(ftl, view);
+        return;
+    }
     if (e) {
         entry_refresh(e);
     }
