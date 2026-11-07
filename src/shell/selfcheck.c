@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <wlr/types/wlr_data_device.h>
 #include <wlr/types/wlr_foreign_toplevel_management_v1.h>
 #include "scene.h"
 #include <wlr/types/wlr_seat.h>
@@ -475,6 +476,67 @@ static void check_wallpaper_z_order(struct woodland_server *server,
              bottom == &tree->node ? "the wallpaper tree" : "something else");
 }
 
+/*
+ * 拖拽图标树的不变量。
+ *
+ * 三条都是"画了但看不见 / 掉错窗口"的直接成因：图标树忘了 enable（拖起来
+ * 什么都没有）、忘了置顶（被 panel 盖住，labwc #1936）、drag 已经结束但树
+ * 还亮着（拖拽残影）。
+ *
+ * 只在 start / destroy 之后跑，**不在拖拽过程中跑**：那时图标坐标每帧都在
+ * 变，拿它做断言只会制造假警报。
+ */
+static void check_dnd_icon(struct woodland_server *server,
+                           struct woodland_check *check) {
+    const struct woodland_dnd *dnd = &server->dnd;
+    check->ok = true;
+    set_text(check->expected, sizeof(check->expected),
+             "icon tree enabled iff dragging, top-most and populated while dragging");
+
+    if (!dnd->icons) {
+        /* 没 init 拖拽（单元测试里伪造的 server 很常见）不算失败 */
+        set_text(check->actual, sizeof(check->actual), "no drag icon tree");
+        return;
+    }
+
+    if (!dnd->drag) {
+        if (dnd->icons->node.enabled) {
+            check->ok = false;
+            set_text(check->actual, sizeof(check->actual),
+                     "idle but icon tree is still enabled");
+        } else {
+            set_text(check->actual, sizeof(check->actual), "idle, icon tree disabled");
+        }
+        return;
+    }
+
+    if (!dnd->icons->node.enabled) {
+        check->ok = false;
+        set_text(check->actual, sizeof(check->actual),
+                 "dragging but icon tree is disabled (invisible icon)");
+        return;
+    }
+
+    struct wl_list *last = server->scene->tree.children.prev;
+    struct wlr_scene_node *top = last ? wl_container_of(last, top, link) : NULL;
+    if (top != &dnd->icons->node) {
+        check->ok = false;
+        set_text(check->actual, sizeof(check->actual),
+                 "dragging but icon tree is not the top-most scene child");
+        return;
+    }
+
+    /* 有图标必须有节点：节点由我们建，不存在"客户端给了图标我们没建"的合法态 */
+    if (dnd->drag->icon && !dnd->icon.tree) {
+        check->ok = false;
+        set_text(check->actual, sizeof(check->actual),
+                 "drag has an icon surface but no icon node");
+        return;
+    }
+    set_text(check->actual, sizeof(check->actual), "dragging, icon %s, top-most",
+             dnd->drag->icon ? "present" : "absent");
+}
+
 /* ==================== 汇总 ==================== */
 
 int woodland_selfcheck_collect(struct woodland_server *server,
@@ -498,6 +560,7 @@ int woodland_selfcheck_collect(struct woodland_server *server,
         {"xdg_activated_matches", check_xdg_activated},
         {"ssd_geometry_matches", check_ssd_geometry},
         {"wallpaper_below_layers", check_wallpaper_z_order},
+        {"dnd_icon", check_dnd_icon},
     };
 
     int count = 0;

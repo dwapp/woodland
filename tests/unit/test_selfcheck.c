@@ -15,6 +15,7 @@
 
 #include <wayland-server-core.h>
 #include <wlr/types/wlr_compositor.h>
+#include <wlr/types/wlr_data_device.h>
 #include "scene.h"
 #include <wlr/types/wlr_xdg_shell.h>
 
@@ -98,7 +99,7 @@ int main(void) {
     /* ---------- 空状态：全部通过 ---------- */
     struct woodland_check out[WOODLAND_SELFCHECK_MAX];
     int n = run(&server, out);
-    assert(n == 9);
+    assert(n == 10);
     assert_all_ok(&server, "empty");
 
     /* ---------- 壁纸树必须在 scene 最底层 ---------- */
@@ -119,6 +120,37 @@ int main(void) {
     assert_all_ok(&server, "wallpaper lowered");
     server.wallpaper_tree = NULL;
     wlr_scene_node_destroy(&wallpaper->node);
+
+    /* ---------- 拖拽图标树：空闲时必须关着，拖拽中必须开着且置顶 ---------- */
+    /*
+     * 没有图标树（没 init 拖拽）不算失败，上面几步已经覆盖。这里造出
+     * "拖完了但树还亮着"的形状——症状是屏幕上留着一个拖拽影子。
+     */
+    struct woodland_dnd *dnd = &server.dnd;
+    dnd->icons = wlr_scene_tree_create(&server.scene->tree);
+    assert(dnd->icons);
+    wlr_scene_node_set_enabled(&dnd->icons->node, true);
+    n = run(&server, out);
+    const struct woodland_check *dnd_check = find(out, n, "dnd_icon");
+    assert(!dnd_check->ok);
+    assert(strstr(dnd_check->actual, "still enabled"));
+
+    wlr_scene_node_set_enabled(&dnd->icons->node, false);
+    assert_all_ok(&server, "idle dnd tree disabled");
+
+    /* 拖拽中：树要开着、在最上层，图标节点可以没有（客户端不设图标） */
+    struct wlr_drag drag = {0};
+    dnd->drag = &drag;
+    n = run(&server, out);
+    assert(!find(out, n, "dnd_icon")->ok); /* 还关着 → 图标看不见 */
+    wlr_scene_node_set_enabled(&dnd->icons->node, true);
+    assert_all_ok(&server, "dragging with icon tree on top");
+    wlr_scene_node_lower_to_bottom(&dnd->icons->node);
+    n = run(&server, out);
+    assert(!find(out, n, "dnd_icon")->ok); /* 被顶下去 → 会被 panel 盖住 */
+    dnd->drag = NULL;
+    wlr_scene_node_destroy(&dnd->icons->node);
+    dnd->icons = NULL;
 
     /* ---------- 一个正常聚焦的视图：全部通过 ---------- */
     struct fake_view a;

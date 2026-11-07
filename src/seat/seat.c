@@ -12,6 +12,7 @@
 #include <xkbcommon/xkbcommon.h>
 
 #include "cursor.h"
+#include "dnd.h"
 #include "focus.h"
 #include "ime.h"
 #include "protocol.h"
@@ -350,12 +351,23 @@ bool woodland_seat_init(struct woodland_server *server)
                               &server->seat->events.request_set_selection,
                               seat_request_set_selection, "seat.request_set_selection");
 
+    /*
+     * 拖拽：图标树 + request_start_drag / start_drag 两个监听器。
+     * 放在 seat 里而不是 shell 里，因为它起的是 seat 的 grab——和
+     * request_set_selection 同一层，剪贴板与拖拽的入口在一处更好查。
+     */
+    if (!woodland_dnd_init(server)) {
+        return false;
+    }
+
     return true;
 }
 
 void woodland_seat_finish(struct woodland_server *server)
 {
     if (server->seat) {
+        /* 拖拽监听器挂在 seat 上（图标树挂在 scene 上），成对摘除 */
+        woodland_dnd_finish(server);
         wl_list_remove(&server->new_input.link);
         wl_list_remove(&server->request_cursor.link);
         wl_list_remove(&server->request_set_selection.link);

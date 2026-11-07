@@ -47,6 +47,7 @@ struct woodland_check {
  *   ft_activated_matches     foreign-toplevel 激活位与 activated 一致
  *   xdg_activated_matches    xdg configure 的 activated 与 activated 一致
  *   ssd_geometry_matches     SSD 缓存的内容尺寸与当前内容尺寸一致
+ *   dnd_icon                 拖拽图标树：拖拽中启用且置顶，空闲时关闭
  *
  * 刻意不检查"窗口几何 == 期望几何"：configure 是否被客户端 ack 是异步的，
  * 刚发出去时几何必然还是旧的，那种断言只会制造假警报。

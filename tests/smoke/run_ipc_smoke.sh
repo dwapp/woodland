@@ -103,6 +103,14 @@ echo "$TREE" | jq -e '.snap_preview.active == false' >/dev/null \
 # 判"激活了但 box 还是 0"），也避免把上一轮的残值当当前状态读
 echo "$TREE" | jq -e '.snap_preview | (has("edges") or has("box") or has("output")) | not' >/dev/null \
     || smoke_fail "inactive snap_preview should carry only 'active'"
+# 没拖拽时 dnd 必须是干净的：图标树关着、没有投放目标。这里能抓的是
+# "空闲还留着上一次的 target/icon"这类残值（真拖拽没法 headless 驱动）
+echo "$TREE" | jq -e '.dnd.active == false and .dnd.dropped == false' >/dev/null \
+    || smoke_fail "dnd should be inactive initially"
+echo "$TREE" | jq -e '.dnd.icon | .visible == false and .width == 0 and .height == 0' >/dev/null \
+    || smoke_fail "idle dnd should have no visible icon"
+echo "$TREE" | jq -e '.dnd.target == null' >/dev/null \
+    || smoke_fail "idle dnd should not report a drop target"
 
 echo "== get_focus =="
 "$WCTL" -s "$SOCK" get_focus | jq -e '.ok and .view == 1 and .recorded_view == 1' >/dev/null \
@@ -114,6 +122,8 @@ echo "$CHECK" | jq -e '.ok == true and .failures == 0' >/dev/null \
     || smoke_fail "self_check not clean: $CHECK"
 echo "$CHECK" | jq -e '[.checks[].name] | index("activated_unique") != null' >/dev/null \
     || smoke_fail "activated_unique check missing"
+echo "$CHECK" | jq -e '[.checks[].name] | index("dnd_icon") != null' >/dev/null \
+    || smoke_fail "dnd_icon check missing"
 
 echo "== dump_scene =="
 "$WCTL" -s "$SOCK" dump_scene | jq -e '.ok and .tree.type == "tree" and .nodes > 0' >/dev/null \

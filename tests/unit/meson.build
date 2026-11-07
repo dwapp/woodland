@@ -254,3 +254,11 @@ if wayland_client_dep.found() and wayland_scanner.found() and wp_datadir != ''
   endif
 endif
 endif
+
+# dnd 同样是叶子模块（scene + trace）。真拖拽没法 headless 驱动，这里只
+# 驱动状态机：图标树的开关/置顶、空图标、重复 destroy。
+test_dnd = executable('test_dnd', 'test_dnd.c',
+  dependencies: [scene_deps, wayland_server],
+  include_directories: woodland_inc,
+  link_with: [dnd_lib, trace_lib, util_lib])
+test('dnd', test_dnd)

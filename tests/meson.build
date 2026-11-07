@@ -29,6 +29,21 @@ if get_option('test').enabled()
        args: [meson.current_source_dir() / 'smoke' / 'run_protocol_smoke.sh',
               woodland_bin.full_path()],
        is_parallel: false)
+
+  # 拖拽：start_drag 必须被回应。拒绝路径可以 headless 驱动（serial 无效），
+  # 真正的按下→拖→投放不行——serial 必须来自真实的 pointer button press。
+  if wayland_client_dep.found()
+    dnd_probe = executable('dnd_probe', 'smoke/dnd_probe.c',
+                           dependencies: [wayland_client_dep])
+    test('smoke-dnd',
+         find_program('sh'),
+         args: [meson.current_source_dir() / 'smoke' / 'run_dnd_smoke.sh',
+                woodland_bin.full_path(),
+                dnd_probe.full_path(),
+                wctl_bin.full_path()],
+         is_parallel: false,
+         timeout: 60)
+  endif
   # 调试接口（wctl）：只断言状态，不数像素
   # 依赖 simple_ssd 客户端（显式请求 SERVER_SIDE SSD）
 

@@ -19,6 +19,7 @@
 #include <wlr/types/wlr_pointer_constraints_v1.h>
 
 #include "cursor.h"
+#include "dnd.h"
 #include "focus.h"
 #include "layer.h"
 #include "session_lock.h"
@@ -118,6 +119,19 @@ void woodland_cursor_process_motion(struct woodland_server *server, uint32_t tim
         return;
     }
 
+    /*
+     * 拖拽优先于一切光标策略：图标要跟手、投放目标每帧都要重算，而 SSD
+     * hover / 贴边吸附 / 光标形状在拖拽期间全都不该跑（拖拽不是隐式抓取，
+     * 也不能把客户端设的拖拽光标顶掉）。
+     *
+     * 必须在 cursor_mode 分支之前：窗口拖动/缩放的 grab 与拖拽互斥，真同时
+     * 出现时以拖拽为准（它有 grab，按 grab 的状态走）。
+     */
+    if (woodland_dnd_active(server)) {
+        woodland_dnd_motion(server, time);
+        return;
+    }
+
     if (server->cursor_mode == WOODLAND_CURSOR_MOVE) {
         shell_process_cursor_move(server);
         return;
@@ -176,7 +190,13 @@ void woodland_cursor_process_motion(struct woodland_server *server, uint32_t tim
         } else {
             woodland_cursor_set(server, "default");
         }
-        wlr_seat_pointer_clear_focus(seat);
+        /*
+         * 必须用 notify_ 版本：裸 wlr_seat_pointer_clear_focus() 绕过 pointer
+         * grab。平时没差别（默认 grab 的实现就是它），但拖拽期间 grab 是
+         * wlr_drag 的——绕过它，drag 收不到 leave，表现是"在标题栏上松手，
+         * 文件掉进了上一个窗口"。
+         */
+        wlr_seat_pointer_notify_clear_focus(seat);
         /* 只有按钮才亮；标题栏/边框传 NONE（顺带清掉上一个按钮的高亮） */
         bool on_button = ssd_part == WOODLAND_SSD_BUTTON_CLOSE ||
                          ssd_part == WOODLAND_SSD_BUTTON_MAXIMIZE ||
@@ -196,7 +216,8 @@ void woodland_cursor_process_motion(struct woodland_server *server, uint32_t tim
         wlr_seat_pointer_notify_enter(seat, surface, sx, sy);
         wlr_seat_pointer_notify_motion(seat, time, sx, sy);
     } else {
-        wlr_seat_pointer_clear_focus(seat);
+        /* 同上：走 grab 才不会被拖拽绕过 */
+        wlr_seat_pointer_notify_clear_focus(seat);
     }
 }
 
@@ -266,7 +287,28 @@ static void server_cursor_button(struct wl_listener *listener, void *data)
         return;
     }
 
+    /*
+     * 拖拽期间按钮只做一件事：让 grab 收尾（drop 就在 notify_button 里发生，
+     * 随后 drag 自己销毁）。顺序不能反——labwc #1657 的"release 发给了
+     * layer client"就是先做收尾再下发造成的。
+     *
+     * 也不能因为"光标下没有 surface"就跳过下发：桌面上松手一样要结束拖拽
+     * （labwc #1673）。
+     */
+    bool dragging = woodland_dnd_active(server);
     wlr_seat_pointer_notify_button(server->seat, event->time_msec, event->button, event->state);
+    if (dragging) {
+        if (event->state == WL_POINTER_BUTTON_STATE_RELEASED) {
+            /*
+             * 拖拽期间 hover / pressed 不会更新（motion 早就 return 了），
+             * 所以"按下启动拖拽"那一下留下的高亮要在这里统一清掉。
+             */
+            ssd_clear_pressed(server);
+            ssd_update_hover(server, NULL, WOODLAND_SSD_NONE);
+        }
+        return;
+    }
+
     if (event->state == WL_POINTER_BUTTON_STATE_RELEASED) {
         /* 拖动结束：先决定是否贴边铺满，再清抓取状态（铺满要用 grabbed_view） */
         if (server->cursor_mode == WOODLAND_CURSOR_MOVE && server->grabbed_view) {

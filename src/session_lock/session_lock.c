@@ -9,6 +9,7 @@
 #include <wlr/types/wlr_session_lock_v1.h>
 #include <wlr/util/log.h>
 
+#include "dnd.h"
 #include "focus.h"
 #include "output.h"
 #include "seat.h"
@@ -358,6 +359,13 @@ static void handle_new_lock(struct wl_listener *listener, void *data)
     }
 
     session_lock->last_focused_view = session_lock->server->focused_view;
+    /*
+     * 锁屏先取消拖拽：拖拽持有 pointer/keyboard grab，不取消的话锁屏表面
+     * 拿不到指针事件，而且图标会留在遮罩下面（drag 由 wlroots 持有，不会
+     * 因为切了状态自己消失）。放在清焦点之前——cancel 会走 grab 的收尾，
+     * 那一步需要 seat 状态还没被拆掉。
+     */
+    woodland_dnd_cancel(session_lock->server);
     wlr_seat_keyboard_clear_focus(session_lock->server->seat);
     wlr_seat_pointer_clear_focus(session_lock->server->seat);
     woodland_cursor_reset_mode(session_lock->server);
