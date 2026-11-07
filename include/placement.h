@@ -158,6 +158,19 @@ void woodland_placement_autoplace(const struct wlr_box *area,
  */
 uint32_t woodland_snap_edges_for(const struct wlr_box *outer,
                                  const struct wlr_box *area, int threshold);
+/**
+ * 拖动中光标所处边缘触发的贴边模式（bitmask，WLR_EDGE_* 语义，纯函数）。
+ *
+ * 参照 gxde-wlcom 语义：
+ *   光标靠近上沿（阈值内）       → 最大化 (WLR_EDGE_TOP)
+ *   光标靠近左/右沿上 25% 区域   → 上角 1/4 屏 (LEFT|TOP 或 RIGHT|TOP)
+ *   光标靠近左/右沿下 25% 区域   → 下角 1/4 屏 (LEFT|BOTTOM 或 RIGHT|BOTTOM)
+ *   光标靠近左/右沿中间 50% 区域 → 半屏 (LEFT 或 RIGHT)
+ */
+uint32_t woodland_snap_cursor_edges(const struct wlr_box *area,
+                                    double cursor_x, double cursor_y,
+                                    int threshold);
+
 
 /**
  * 贴边铺满的目标外框（布局坐标，写入 out_outer）。
@@ -210,6 +223,25 @@ void woodland_view_apply_outer_geometry(struct woodland_view *view,
  * 返回 false 表示该边组合不支持/窗口当前状态不允许。
  */
 bool woodland_view_snap_to(struct woodland_view *view, uint32_t edges);
+/**
+ * 把视图贴到指定输出的指定边（左/右半屏、上边最大化、四角 1/4）。
+ * output 为 NULL 时自动取视图当前所在输出。
+ */
+bool woodland_view_snap_to_output(struct woodland_view *view, uint32_t edges,
+                                  struct woodland_output *output);
+
+/** 贴边铺满预览状态序列化（供 wctl get_tree）。 */
+struct woodland_json;
+void woodland_snap_preview_status(struct woodland_server *server, struct woodland_json *out);
+void woodland_snap_preview_init(struct woodland_server *server);
+void woodland_snap_preview_finish(struct woodland_server *server);
+void woodland_snap_preview_show(struct woodland_server *server, struct woodland_view *view,
+                                struct woodland_output *output, uint32_t edges);
+void woodland_snap_preview_hide(struct woodland_server *server);
+void woodland_snap_preview_destroy(struct woodland_server *server);
+void woodland_snap_preview_update(struct woodland_server *server, struct woodland_view *view);
+void shell_view_apply_snap(struct woodland_view *view);
+
 
 /** 告诉客户端"当前被 tiled"（xdg 专用，X11 无对应语义）。 */
 void woodland_view_set_tiled(struct woodland_view *view, uint32_t edges);

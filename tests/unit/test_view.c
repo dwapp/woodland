@@ -6,6 +6,10 @@
 #include "woodland_config.h"
 #include "xwayland.h"
 #include <assert.h>
+#include <string.h>
+#include "placement.h"
+#include "util/json.h"
+#include "woodland_config.h"
 #include <wayland-server-core.h>
 #include <wlr/backend.h>
 #include <wlr/backend/headless.h>
@@ -322,6 +326,69 @@ int main(void)
 
     wlr_scene_node_destroy(&x11_view.scene_tree->node);
 
+
+    /* ---------- 贴边预览（snap preview）测试 ---------- */
+    struct woodland_config cfg = {0};
+    cfg.general.snap_preview = true;
+    cfg.general.snap_distance = 20;
+    server.config = &cfg;
+
+    woodland_snap_preview_init(&server);
+    assert(!server.snap_preview.edges);
+
+    /* 初始状态 IPC json 输出 active=false */
+    struct woodland_json json;
+    woodland_json_init(&json);
+    woodland_snap_preview_status(&server, &json);
+    assert(strstr(woodland_json_data(&json), "\"active\":false"));
+    woodland_json_finish(&json);
+
+    /* 创建测试 view 并展示左半屏贴边预览 */
+    struct woodland_view preview_view = {0};
+    preview_view.server = &server;
+    preview_view.mapped = true;
+    preview_view.scene_tree = wlr_scene_tree_create(&server.scene->tree);
+    assert(preview_view.scene_tree);
+
+    woodland_snap_preview_show(&server, &preview_view, wo, WLR_EDGE_LEFT);
+    assert(server.snap_preview.edges == WLR_EDGE_LEFT);
+    assert(server.snap_preview.tree != NULL);
+    assert(server.snap_preview.tree->node.enabled);
+    /* wo 工作区为 (10, 10, 780, 580) -> 左半屏为 (10, 10, 390, 580) */
+    assert(server.snap_preview.box.width == 390);
+    assert(server.snap_preview.box.height == 580);
+    assert(server.snap_preview.box.x == 10);
+    assert(server.snap_preview.box.y == 10);
+
+    /* 检查 IPC json 输出 active=true 且 edges 包含 "left" */
+    woodland_json_init(&json);
+    woodland_snap_preview_status(&server, &json);
+    assert(strstr(woodland_json_data(&json), "\"active\":true"));
+    assert(strstr(woodland_json_data(&json), "\"left\""));
+    woodland_json_finish(&json);
+
+    /* 隐藏预览 */
+    woodland_snap_preview_hide(&server);
+    assert(!server.snap_preview.edges);
+    assert(!server.snap_preview.tree->node.enabled);
+
+    /* 展示全屏预览 (TOP) */
+    woodland_snap_preview_show(&server, &preview_view, wo, WLR_EDGE_TOP);
+    assert(server.snap_preview.edges == WLR_EDGE_TOP);
+    assert(server.snap_preview.box.width == 780);
+    assert(server.snap_preview.box.height == 580);
+
+    /* 释放松手铺满 */
+    server.grabbed_view = &preview_view;
+    preview_view.pending_snap_edges = WLR_EDGE_TOP;
+    shell_view_apply_snap(&preview_view);
+    assert(preview_view.snapped_edges == WLR_EDGE_TOP);
+    assert(preview_view.maximized);
+    assert(!server.snap_preview.edges);
+    assert(server.snap_preview.tree == NULL);
+
+    wlr_scene_node_destroy(&preview_view.scene_tree->node);
+    woodland_snap_preview_finish(&server);
 
     wlr_cursor_destroy(server.cursor);
     server.cursor = NULL;

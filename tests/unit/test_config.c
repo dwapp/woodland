@@ -21,6 +21,7 @@ static void test_default_config(void)
     assert(!cfg->general.focus_follows_mouse);
     assert(cfg->general.snap_distance == 20);
     assert(!cfg->general.allow_tearing);
+    assert(cfg->general.snap_preview);
 
     assert(cfg->ssd.enabled);
     assert(cfg->ssd.titlebar_height == 26);
@@ -68,6 +69,7 @@ static void test_parse_valid_toml(void)
                        "focus_policy = \"sloppy\"\n"
                        "snap_distance = 35\n"
                        "allow_tearing = true\n"
+                       "snap_preview = false\n"
                        "\n"
                        "[decorations]\n"
                        "enabled = false\n"
@@ -133,6 +135,7 @@ static void test_parse_valid_toml(void)
     assert(cfg->general.focus_follows_mouse);
     assert(cfg->general.snap_distance == 35);
     assert(cfg->general.allow_tearing);
+    assert(!cfg->general.snap_preview);
 
     assert(!cfg->ssd.enabled);
     assert(cfg->ssd.titlebar_height == 30);

@@ -97,6 +97,8 @@ echo "$TREE" | jq -e '.outputs[0].workarea[2] == 1280 and .outputs[0].workarea[3
     || smoke_fail "unexpected headless workarea"
 echo "$TREE" | jq -e '.placement_policy == "cascade"' >/dev/null \
     || smoke_fail "default placement policy should be cascade"
+echo "$TREE" | jq -e '.snap_preview.active == false' >/dev/null \
+    || smoke_fail "snap_preview should be inactive initially"
 
 echo "== get_focus =="
 "$WCTL" -s "$SOCK" get_focus | jq -e '.ok and .view == 1 and .recorded_view == 1' >/dev/null \
