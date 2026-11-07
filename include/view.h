@@ -150,6 +150,8 @@ struct woodland_view {
     struct wl_listener set_window_type;
     struct wl_listener request_skip_taskbar;
     struct wl_listener set_decorations;
+    bool focused_before_map;
+    struct wl_listener focus_in;
 };
 
 /* ==================== 双后端访问器 ==================== */

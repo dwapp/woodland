@@ -52,6 +52,7 @@ struct woodland_unmanaged {
     struct wl_listener set_geometry;
     struct wl_listener set_override_redirect;
     struct wl_listener request_configure;
+    struct wl_listener grab_focus;
 };
 
 static void unmanaged_set_geometry(struct woodland_unmanaged *unmanaged);
@@ -201,6 +202,7 @@ static void unmanaged_destroy(struct wl_listener *listener, void *data) {
     wl_list_remove(&unmanaged->destroy.link);
     wl_list_remove(&unmanaged->set_geometry.link);
     wl_list_remove(&unmanaged->request_configure.link);
+    wl_list_remove(&unmanaged->grab_focus.link);
     if (unmanaged->scene_surface) {
         wl_list_remove(&unmanaged->map.link);
         wl_list_remove(&unmanaged->unmap.link);
@@ -211,6 +213,15 @@ static void unmanaged_destroy(struct wl_listener *listener, void *data) {
     free(unmanaged);
     (void)data;
 }
+static void unmanaged_grab_focus(struct wl_listener *listener, void *data) {
+    struct woodland_unmanaged *unmanaged =
+        wl_container_of(listener, unmanaged, grab_focus);
+    (void)data;
+    if (unmanaged->xsurface && unmanaged->xsurface->surface) {
+        woodland_seat_focus_surface(unmanaged->server, unmanaged->xsurface->surface);
+    }
+}
+
 static void unmanaged_request_configure(struct wl_listener *listener, void *data) {
     struct woodland_unmanaged *unmanaged =
         wl_container_of(listener, unmanaged, request_configure);
@@ -264,6 +275,8 @@ static void xwl_new_unmanaged(struct woodland_server *server,
 
     woodland_listener_connect(&unmanaged->request_configure, &xsurface->events.request_configure,
                           unmanaged_request_configure, "xwayland.unmanaged_request_configure");
+    woodland_listener_connect(&unmanaged->grab_focus, &xsurface->events.grab_focus,
+                          unmanaged_grab_focus, "xwayland.unmanaged_grab_focus");
     wl_list_insert(&server->xwayland_unmanaged, &unmanaged->link);
 
     /* 多数情况下 surface 在 associate 里才出现；已存在时直接挂 */
@@ -305,6 +318,14 @@ static void xwl_map_request(struct wl_listener *listener, void *data) {
 
 static void xwl_map(struct wl_listener *listener, void *data) {
     struct woodland_view *view = wl_container_of(listener, view, map);
+    if (view->focused_before_map) {
+        view->focused_before_map = false;
+        struct wlr_surface *surface = woodland_view_surface(view);
+        if (surface && view->server) {
+            woodland_seat_focus_surface(view->server, surface);
+            view->server->focused_view = view;
+        }
+    }
     woodland_view_map(view);
     (void)data;
 }
@@ -403,6 +424,7 @@ static void xwl_destroy(struct wl_listener *listener, void *data) {
     wl_list_remove(&view->set_window_type.link);
     wl_list_remove(&view->request_skip_taskbar.link);
     wl_list_remove(&view->set_decorations.link);
+    wl_list_remove(&view->focus_in.link);
     if (view->xwayland_surface) {
         view->xwayland_surface->data = NULL;
     }
@@ -606,6 +628,25 @@ static void xwl_request_skip_taskbar(struct wl_listener *listener, void *data) {
     woodland_view_update_taskbar_presence(view);
 }
 
+static void xwl_focus_in(struct wl_listener *listener, void *data) {
+    struct woodland_view *view = wl_container_of(listener, view, focus_in);
+    (void)data;
+    struct wlr_surface *surface = woodland_view_surface(view);
+    if (!surface || !view->mapped) {
+        view->focused_before_map = true;
+        return;
+    }
+    struct woodland_server *server = view->server;
+    if (!server || !server->seat) {
+        return;
+    }
+    if (surface != server->seat->keyboard_state.focused_surface) {
+        woodland_seat_focus_surface(server, surface);
+        server->focused_view = view;
+        woodland_pointer_constraint_update(server);
+    }
+}
+
 static void xwl_new_view(struct woodland_server *server,
                          struct wlr_xwayland_surface *xsurface) {
     struct woodland_view *view = calloc(1, sizeof(*view));
@@ -667,6 +708,8 @@ static void xwl_new_view(struct woodland_server *server,
                           xwl_request_skip_taskbar, "xwayland.request_skip_taskbar");
     woodland_listener_connect(&view->set_decorations, &xsurface->events.set_decorations,
                           xwl_set_decorations, "xwayland.set_decorations");
+    woodland_listener_connect(&view->focus_in, &xsurface->events.focus_in,
+                          xwl_focus_in, "xwayland.focus_in");
 
     woodland_view_set_title(view, xsurface->title);
     woodland_view_set_app_id(view, xsurface->instance
