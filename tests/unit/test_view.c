@@ -422,27 +422,24 @@ int main(void)
     assert(server.snap_preview.tree == NULL);
 
     /*
-     * 判定语义钉死：**光标优先、外框兜底**（见 woodland_snap_determine_edges）。
-     * 兜底那条不是死代码——松手时 shell_view_apply_snap 用的就是这里的返回值，
-     * 外框贴住边就一定会铺满，所以那一刻预览必须亮。
+     * 判定语义钉死：**只看光标**（见 woodland_snap_determine_edges）。
+     * 窗口外框是否贴住工作区边不参与判定——"窗口正好被拖到贴边、光标还在
+     * 标题栏中间"只是在挪窗口，用户没表达要占半屏。松手路径
+     * （shell_view_apply_snap）用的就是这个返回值，两边一致，所以不会出现
+     * "预览没亮、窗口却跳了"。
      */
     struct woodland_view probe_view = {0};
     struct wlr_box probe_area = {.x = 10, .y = 10, .width = 780, .height = 580};
-    struct wlr_box probe_outer = {.x = 10, .y = 200, .width = 300, .height = 300};
-    /* 光标在中央、外框已经贴住左边：兜底判 LEFT */
-    assert(woodland_snap_determine_edges(&probe_view, &probe_outer, &probe_area, 400, 300, 20) ==
-           WLR_EDGE_LEFT);
-    /* 光标在中央、外框也不靠边：什么都不判 */
-    probe_outer.x = 300;
-    assert(woodland_snap_determine_edges(&probe_view, &probe_outer, &probe_area, 400, 300, 20) == 0);
-    /* 光标贴右边时优先于"外框贴左边" */
-    probe_outer.x = 10;
-    assert(woodland_snap_determine_edges(&probe_view, &probe_outer, &probe_area, 788, 300, 20) ==
+    /* 光标在屏幕中央：不判（哪怕外框正好贴住左边，也不再触发） */
+    assert(woodland_snap_determine_edges(&probe_view, &probe_area, 400, 300, 20) == 0);
+    /* 光标自己贴到左边才判左半屏 */
+    assert(woodland_snap_determine_edges(&probe_view, &probe_area, 12, 300, 20) == WLR_EDGE_LEFT);
+    /* 光标贴右边：与窗口几何无关，照样判 */
+    assert(woodland_snap_determine_edges(&probe_view, &probe_area, 788, 300, 20) ==
            WLR_EDGE_RIGHT);
     /* 全屏窗口不参与 */
     probe_view.fullscreen = true;
-    probe_outer.x = 10;
-    assert(woodland_snap_determine_edges(&probe_view, &probe_outer, &probe_area, 12, 300, 20) == 0);
+    assert(woodland_snap_determine_edges(&probe_view, &probe_area, 12, 300, 20) == 0);
     probe_view.fullscreen = false;
 
     /* [general] snap_preview = false：判定照旧（松手照样铺满），但不上屏 */

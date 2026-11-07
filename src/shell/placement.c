@@ -445,38 +445,6 @@ void woodland_placement_autoplace(const struct wlr_box *area, int content_w, int
 
 /* ==================== 贴边铺满 ==================== */
 
-uint32_t woodland_snap_edges_for(const struct wlr_box *outer, const struct wlr_box *area,
-                                 int threshold)
-{
-    uint32_t edges = 0;
-    if (!outer || !area) {
-        return 0;
-    }
-    int right = outer->x + outer->width;
-    int bottom = outer->y + outer->height;
-    int area_right = area->x + area->width;
-    int area_bottom = area->y + area->height;
-
-    /* 外框比工作区还大时，"贴住某条边"没有意义（另一条边必然溢出），
-     * 铺满也只会把窗口压得更怪，直接不判 */
-    if (outer->width <= area->width) {
-        if (abs(outer->x - area->x) <= threshold) {
-            edges |= WLR_EDGE_LEFT;
-        }
-        if (abs(right - area_right) <= threshold) {
-            edges |= WLR_EDGE_RIGHT;
-        }
-    }
-    if (outer->height <= area->height) {
-        if (abs(outer->y - area->y) <= threshold) {
-            edges |= WLR_EDGE_TOP;
-        }
-        if (abs(bottom - area_bottom) <= threshold) {
-            edges |= WLR_EDGE_BOTTOM;
-        }
-    }
-    return edges;
-}
 uint32_t woodland_snap_cursor_edges(const struct wlr_box *area, double cursor_x, double cursor_y,
                                     int threshold)
 {

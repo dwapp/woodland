@@ -89,22 +89,7 @@ int main(void) {
     /* 没有边：不铺满 */
     assert(!woodland_snap_tile_box(&area, 0, &tile));
 
-    /* ---------- 贴边判定（阈值 20） ---------- */
-    /* y 取中间，只贴左边（贴住底边会额外带上 BOTTOM） */
-    struct wlr_box outer = { .x = 5, .y = 150, .width = 300, .height = 300 };
-    assert(woodland_snap_edges_for(&outer, &area, 20) == WLR_EDGE_LEFT);
-    outer.x = 30;
-    assert(woodland_snap_edges_for(&outer, &area, 20) == 0);
-    /* 右下角同时贴住 */
-    outer = (struct wlr_box){ .x = 500, .y = 300, .width = 300, .height = 300 };
-    /* 500+300=800 贴右边、300+300=600 贴底边 */
-    assert(woodland_snap_edges_for(&outer, &area, 20)
-        == (WLR_EDGE_RIGHT | WLR_EDGE_BOTTOM));
-    /* 窗口比工作区还宽：左右都不该判为"贴住" */
-    outer = (struct wlr_box){ .x = 0, .y = 0, .width = 900, .height = 200 };
-    assert((woodland_snap_edges_for(&outer, &area, 20) & WLR_EDGE_RIGHT) == 0);
-
-    /* ---------- 光标贴边触发判定（gxde-wlcom 语义，阈值 20） ---------- */
+    /* ---------- 光标贴边触发判定（唯一触发条件，阈值 20） ---------- */
     /* 1. 左沿中间（height=600，角区域为 <150 和 >450，中间 150~450） */
     assert(woodland_snap_cursor_edges(&area, 5, 300, 20) == WLR_EDGE_LEFT);
     /* 2. 左沿上部（y=50 <= 150） -> 左上 1/4 屏 */

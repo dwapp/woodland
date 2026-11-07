@@ -153,13 +153,6 @@ void woodland_placement_autoplace(const struct wlr_box *area,
 /* ==================== 贴边铺满 ==================== */
 
 /**
- * 拖动中贴合的工作区边（bitmask，WLR_EDGE_* 语义）。
- *
- * 只有"外框已经贴住"（阈值内）才算；上下同时贴住返回 TOP|BOTTOM。
- */
-uint32_t woodland_snap_edges_for(const struct wlr_box *outer,
-                                 const struct wlr_box *area, int threshold);
-/**
  * 拖动中光标所处边缘触发的贴边模式（bitmask，WLR_EDGE_* 语义，纯函数）。
  *
  * 参照 gxde-wlcom 语义：
@@ -255,13 +248,11 @@ void shell_view_apply_snap(struct woodland_view *view);
 /**
  * "松手会铺满哪条边"的判定（纯函数，入参是几何量而非 server）。
  *
- * **光标优先，窗口外框兜底**：先看光标是否落进工作区边的阈值内；没落进
- * 才看外框是否已经贴住边。兜底路径与松手时的真实行为（shell_view_apply_snap
- * 用的就是同一个返回值）一致，所以预览不会出现"窗口跳了但预览没亮"。
+ * **只看光标**：光标落进工作区边的阈值内才算，跟窗口外框贴不贴边无关——
+ * 窗口被拖到贴边、光标还在标题栏中间时不算，那只是挪窗口。
  * 全屏、尺寸被客户端钉死这两种情况返回 0。
  */
 uint32_t woodland_snap_determine_edges(struct woodland_view *view,
-                                       const struct wlr_box *outer,
                                        const struct wlr_box *area,
                                        double cursor_x, double cursor_y,
                                        int threshold);
