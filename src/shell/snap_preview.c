@@ -416,7 +416,6 @@ void woodland_snap_preview_update(struct woodland_server *server, struct woodlan
 }
 
 uint32_t woodland_snap_determine_edges(struct woodland_view *view,
-                                       const struct wlr_box *outer,
                                        const struct wlr_box *area,
                                        double cursor_x, double cursor_y,
                                        int threshold)
@@ -435,20 +434,15 @@ uint32_t woodland_snap_determine_edges(struct woodland_view *view,
     }
 
     /*
-     * 判定顺序：**光标优先，窗口外框兜底**。
+     * 判定只看**光标**（gxde-wlcom 语义）：光标撞到工作区边才铺满。
      *
-     * 光标优先是 gxde-wlcom / 各家桌面的一致语义，也是"我要把这窗口放左半屏"
-     * 最直接的表达。外框兜底不是历史包袱而是必须保留的：松手时
-     * shell_view_apply_snap() 用的就是这里返回的 pending_snap_edges，只要
-     * 外框已经贴住工作区边（老行为，woodland_snap_edges_for），松手就真的
-     * 会铺满——那这一刻预览也必须跟着亮，否则"预览没亮、窗口却跳了"。
-     * 预览可以比用户预期早一点，但不能说谎。
+     * 曾经有一条"外框贴住工作区边"的兜底，已删除。它会让"窗口正好被拖到
+     * 贴边、光标还在标题栏中间"也触发铺满——用户只是在挪窗口，没表达要
+     * 占半屏。贴边铺满必须是光标这一下的动作，而不是窗口几何的副产物。
+     * 松手路径（shell_view_apply_snap）用的就是这个返回值，所以删掉兜底
+     * 不会出现"预览没亮、窗口却跳了"：两边都不再认为该铺满。
      */
-    uint32_t edges = woodland_snap_cursor_edges(area, cursor_x, cursor_y, threshold);
-    if (edges == 0 && outer) {
-        edges = woodland_snap_edges_for(outer, area, threshold);
-    }
-    return edges;
+    return woodland_snap_cursor_edges(area, cursor_x, cursor_y, threshold);
 }
 
 void woodland_snap_preview_status(struct woodland_server *server, struct woodland_json *out)

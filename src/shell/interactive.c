@@ -251,13 +251,13 @@ void shell_process_cursor_move(struct woodland_server *server)
         /*
          * 贴边铺满的判定：只有真的拖动了（超过阈值距离）才算，
          * 否则"按住标题栏不动就松手"会把刚开在角落的窗口变成半屏。
+         * 判定只看光标是否撞到工作区边，窗口外框贴不贴边不参与。
          */
         double dx = server->cursor->x - server->drag_start_x;
         double dy = server->cursor->y - server->drag_start_y;
         if ((dx < 0 ? -dx : dx) > snap_threshold || (dy < 0 ? -dy : dy) > snap_threshold) {
-            struct wlr_box outer = {x, y, outer_w, outer_h};
             view->pending_snap_edges = woodland_snap_determine_edges(
-                view, &outer, &area, server->cursor->x, server->cursor->y, snap_threshold);
+                view, &area, server->cursor->x, server->cursor->y, snap_threshold);
         }
     }
 
