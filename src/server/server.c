@@ -131,6 +131,12 @@ bool woodland_server_init(struct woodland_server *server)
         wlr_log(WLR_ERROR, "failed to create backend");
         return false;
     }
+    /*
+     * session 由 autocreate 创建（logind / direct 会话），backend 销毁时一并
+     * 释放，这里只记句柄：VT 切换键（seat.c）和 session inactive 时跳过
+     * 渲染（output.c）都要用它。headless 后端没有会话概念，保持 NULL。
+     */
+    server->session = session;
 
     /*
      * 有 effects 时必须用 scenefx 的 fx renderer：scenefx 的 scene 把

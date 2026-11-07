@@ -3,8 +3,10 @@
 #define WOODLAND_SEAT_H
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <wayland-server-core.h>
 #include <wlr/types/wlr_seat.h>
+#include <xkbcommon/xkbcommon.h>
 
 struct woodland_server;
 struct wlr_surface;
@@ -26,5 +28,11 @@ void woodland_seat_focus_surface(struct woodland_server *server, struct wlr_surf
 
 /** 为输入设备（含虚拟键盘）创建并接入键盘。 */
 void woodland_seat_new_keyboard(struct woodland_server *server, struct wlr_input_device *device);
+
+/**
+ * XF86Switch_VT_1..12 keysym → VT 号（1..12）；不是 VT 切换键则返回 0。
+ * 纯函数，单测见 tests/unit/test_seat.c。
+ */
+unsigned woodland_seat_vt_from_keysym(xkb_keysym_t sym);
 
 #endif

@@ -17,7 +17,7 @@ test_cursor = executable('test_cursor', 'test_cursor.c',
 test('cursor', test_cursor)
 
 test_seat = executable('test_seat', 'test_seat.c',
-  dependencies: [scene_deps, wayland_server],
+  dependencies: [scene_deps, wayland_server, xkbcommon],
   include_directories: woodland_inc,
   # seat.c 现在会调 protocol 层的 idle / 快捷键抑制钩子
   link_with: [cursor_lib, output_lib, shell_lib, seat_lib, session_lock_lib, ime_lib, workspace_lib, layer_lib, ssd_lib, effect_lib, protocol_lib, util_lib])

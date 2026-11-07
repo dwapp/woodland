@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <time.h>
 
+#include <wlr/backend/session.h>
 #include <wlr/types/wlr_layer_shell_v1.h>
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_output_layout.h>
@@ -76,6 +77,15 @@ bool woodland_output_commit(struct woodland_output *output)
 static void handle_frame(struct wl_listener *listener, void *data)
 {
     struct woodland_output *output = wl_container_of(listener, output, frame);
+    /*
+     * 切到其他 TTY（session inactive）时不渲染：设备暂停/恢复由 wlroots
+     * 后端自己处理，但 frame 事件照发，不拦着会把帧提交到已被内核收走的
+     * 输出上（labwc src/output.c 同款守卫）。headless 没有 session，照常。
+     */
+    struct wlr_session *session = output->server->session;
+    if (session && !session->active) {
+        return;
+    }
     if (!woodland_output_commit(output)) {
         return;
     }

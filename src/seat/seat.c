@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "util/listener.h"
+#include <stdint.h>
 #include <stdlib.h>
 
+#include <wlr/backend/session.h>
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_data_device.h>
 #include <wlr/types/wlr_input_device.h>
@@ -15,6 +17,7 @@
 #include "protocol.h"
 #include "seat.h"
 #include "session_lock.h"
+#include "trace.h"
 #include "view.h"
 #include "woodland.h"
 #include "woodland_config.h"
@@ -89,6 +92,34 @@ static bool handle_keybinding(struct woodland_server *server, xkb_keysym_t sym, 
     return true;
 }
 
+/*
+ * VT 切换键识别与执行（labwc src/input/keyboard.c 的 change_vt /
+ * handle_change_vt_key 同款语义）。
+ *
+ * 1. xkeyboard-config 的 compat 规则把 Ctrl+Alt+F1..F12 翻成
+ *    XF86Switch_VT_1..12 keysym，所以不用自己核对修饰键组合——能从
+ *    当前键盘状态翻出这个 keysym，组合就已经成立。
+ * 2. press 被合成器吃掉后不下传客户端；对应的 release 要么在切回本
+ *    VT 后才到、要么根本不来，晚到的孤儿 release 也一并丢弃——
+ *    没有 press 配对的 release 会让客户端按键状态错乱。
+ */
+unsigned woodland_seat_vt_from_keysym(xkb_keysym_t sym)
+{
+    unsigned vt = sym - XKB_KEY_XF86Switch_VT_1 + 1;
+    return (vt >= 1 && vt <= 12) ? vt : 0;
+}
+
+static void change_vt(struct woodland_server *server, unsigned vt)
+{
+    if (!server->session) {
+        /* headless 后端没有 wlr_session：键路是通的，但切换无处执行 */
+        woodland_trace_add("vt", 0, "no session, vt %u ignored", vt);
+        return;
+    }
+    woodland_trace_add("vt", 0, "session change_vt %u", vt);
+    wlr_session_change_vt(server->session, vt);
+}
+
 static void keyboard_handle_key(struct wl_listener *listener, void *data)
 {
     struct woodland_keyboard *keyboard = wl_container_of(listener, keyboard, key);
@@ -102,6 +133,33 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data)
 
     /* 任何按键都算"人还在"，idle 计时从这里续 */
     woodland_protocol_notify_activity(server);
+
+    /*
+     * VT 切换键（Ctrl+Alt+F1..F12）。排在锁屏与 shortcuts-inhibit 之前：
+     * 切走 TTY 是系统级逃生通道，锁屏和游戏的全键抓取都不该拦住它
+     * （labwc 同序：VT 键在 locked 判定之前处理）。
+     */
+    if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+        for (int i = 0; i < nsyms; i++) {
+            unsigned vt = woodland_seat_vt_from_keysym(syms[i]);
+            if (vt) {
+                if (event->keycode < sizeof(server->vt_swallowed_keys) * 8) {
+                    server->vt_swallowed_keys[event->keycode / 8] |=
+                        (uint8_t)(1u << (event->keycode % 8));
+                }
+                change_vt(server, vt);
+                return;
+            }
+        }
+    } else if (event->keycode < sizeof(server->vt_swallowed_keys) * 8 &&
+               (server->vt_swallowed_keys[event->keycode / 8] &
+                (uint8_t)(1u << (event->keycode % 8))) != 0) {
+        /* 孤儿 release：press 被 VT 切换吃掉的那颗键，release 不下传 */
+        server->vt_swallowed_keys[event->keycode / 8] &=
+            (uint8_t)~(1u << (event->keycode % 8));
+        return;
+    }
+
     /* 锁屏状态下：禁止所有快捷键，按键只能发给锁屏表面 */
     if (woodland_session_lock_is_locked(server)) {
         if (seat->keyboard_state.focused_surface &&

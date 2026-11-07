@@ -29,6 +29,8 @@
 
 struct wlr_xwayland;
 struct wlr_compositor;
+/* wlr_session 只在 server 里存指针，模块要用它的字段时再各自 include */
+struct wlr_session;
 /* 上游协议（src/protocol）：整体不透明，外部只经 protocol.h 的接口访问 */
 struct woodland_proto;
 struct woodland_config;
@@ -43,6 +45,12 @@ struct woodland_server {
     struct wl_event_source *sigterm_source;
     struct wl_event_source *sighup_source;
     struct wlr_backend *backend;
+    /*
+     * wlr_backend_autocreate 的回填：logind/direct 会话句柄，键盘上的
+     * VT 切换键（Ctrl+Alt+F1..F12）与"session inactive 时跳过渲染"都靠它。
+     * headless 后端没有 session，恒为 NULL——所有使用点都要判空。
+     */
+    struct wlr_session *session;
     struct wlr_renderer *renderer;
     struct wlr_allocator *allocator;
     struct wlr_scene *scene;
@@ -101,6 +109,14 @@ struct woodland_server {
     struct wl_listener request_cursor;          // seat->events.request_set_cursor
     struct wl_listener request_set_selection;   // seat->events.request_set_selection
     struct wl_listener pointer_focus_change;    // seat->pointer_state.events.focus_change
+    /*
+     * VT 切换键的吞键表：evdev keycode 位图（32 字节 = 256 个键位，超过
+     * 256 的 keycode 一律不记——F1..F12 远在界内）。VT 切换吃掉一个 press
+     * 后，对应的 release 要么在切回本 VT 后才到、要么根本不来；晚到的
+     * 孤儿 release 不能转发给客户端——没有 press 配对的 release 会让客户端
+     * 的按键状态错乱（labwc key-state 的同一套语义）。
+     */
+    uint8_t vt_swallowed_keys[32];
     struct woodland_ime_relay *ime;             // 输入法中继器与协议管理
     struct woodland_session_lock *session_lock; // 会话锁状态与锁屏管理
 
