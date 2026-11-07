@@ -2,6 +2,7 @@
 #include "icon.h"
 #include "output.h"
 #include "ssd.h"
+#include "text_buffer.h"
 #include "view.h"
 #include "woodland.h"
 #include <assert.h>
@@ -202,6 +203,19 @@ int main(void)
     view.maximized = false;
     view.ssd_overrides.titlebar_hidden = false;
     woodland_ssd_deco_changed(&view);
+
+    /* 按钮图标 buffer 物理尺寸验证：1x 为 size, 2x 为 size * 2，防止孤儿 px=1 回归 */
+    struct wlr_buffer *btn_1x = woodland_button_icon_buffer(WOODLAND_SSD_ICON_CLOSE, 26, false, 1.0f);
+    assert(btn_1x != NULL);
+    assert(btn_1x->width == 26);
+    assert(btn_1x->height == 26);
+    wlr_buffer_drop(btn_1x);
+
+    struct wlr_buffer *btn_2x = woodland_button_icon_buffer(WOODLAND_SSD_ICON_CLOSE, 26, false, 2.0f);
+    assert(btn_2x != NULL);
+    assert(btn_2x->width == 52);
+    assert(btn_2x->height == 52);
+    wlr_buffer_drop(btn_2x);
 
     /* destroy：view->ssd 置空，scene 树级联释放 */
     woodland_ssd_destroy(&view);

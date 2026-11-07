@@ -15,6 +15,12 @@ struct woodland_text_buffer {
     struct wlr_scene_buffer *scene_buffer;
     int width;
     int height;
+    char *cached_text;
+    char *cached_font;
+    float cached_color[4];
+    float cached_scale;
+    int cached_max_width;
+    int cached_height;
 };
 
 /*
@@ -175,6 +181,8 @@ void woodland_text_buffer_destroy(struct woodland_text_buffer *tb)
         return;
     }
     wlr_scene_node_destroy(&tb->scene_buffer->node);
+    free(tb->cached_text);
+    free(tb->cached_font);
     free(tb);
 }
 
@@ -205,22 +213,38 @@ void woodland_text_buffer_update(struct woodland_text_buffer *tb, const char *te
     if (!tb) {
         return;
     }
+    if (scale <= 0.0f) {
+        scale = 1.0f;
+    }
     if (!text || !*text) {
+        if (!tb->cached_text && tb->width == 1) {
+            return;
+        }
         /* 空文本：1x1 占位 */
         struct wlr_buffer *placeholder = text_create_placeholder();
         if (placeholder) {
             wlr_scene_buffer_set_buffer(tb->scene_buffer, placeholder);
+            wlr_scene_buffer_set_dest_size(tb->scene_buffer, 1, 1);
             wlr_buffer_drop(placeholder);
         }
         tb->width = 1;
         tb->height = 1;
+        free(tb->cached_text);
+        tb->cached_text = NULL;
+        free(tb->cached_font);
+        tb->cached_font = NULL;
         return;
     }
 
-    if (scale <= 0) {
-        scale = 1.0f;
+    const char *font_used = (font_desc && *font_desc) ? font_desc : WOODLAND_SSD_FONT;
+    if (tb->cached_text && strcmp(tb->cached_text, text) == 0 &&
+        tb->cached_max_width == max_width &&
+        tb->cached_height == height &&
+        tb->cached_scale == scale &&
+        memcmp(tb->cached_color, color, sizeof(float) * 4) == 0 &&
+        tb->cached_font && strcmp(tb->cached_font, font_used) == 0) {
+        return;
     }
-
     int natural_w = text_measure(text, font_desc);
     if (natural_w <= 0) {
         natural_w = 1;
@@ -276,6 +300,14 @@ void woodland_text_buffer_update(struct woodland_text_buffer *tb, const char *te
     wlr_scene_buffer_set_dest_size(tb->scene_buffer, logical_w, logical_h);
     wlr_buffer_drop(&b->base);
 
+    free(tb->cached_text);
+    tb->cached_text = strdup(text);
+    free(tb->cached_font);
+    tb->cached_font = strdup(font_used);
+    memcpy(tb->cached_color, color, sizeof(float) * 4);
+    tb->cached_scale = scale;
+    tb->cached_max_width = max_width;
+    tb->cached_height = height;
     tb->width = logical_w;
     tb->height = logical_h;
 }
@@ -313,7 +345,9 @@ struct wlr_buffer *woodland_button_icon_buffer(enum woodland_ssd_button_icon ico
         scale = 1.0f;
     }
     int px = (int)(size * scale);
+    if (px <= 0) {
         px = 1;
+    }
 
     cairo_surface_t *surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, px, px);
     cairo_surface_set_device_scale(surf, scale, scale);

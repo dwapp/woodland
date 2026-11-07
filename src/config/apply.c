@@ -216,6 +216,10 @@ void woodland_config_apply(struct woodland_server *server, struct woodland_confi
             }
         }
     }
+    /* override-redirect 窗口不在 server->views 里，上面的循环扫不到它 */
+    if (xwl_changed && server->xwayland_refresh_hook) {
+        server->xwayland_refresh_hook(server);
+    }
 
     /*
      * 10. 外观观测者补一次全量。
