@@ -38,6 +38,84 @@ static struct woodland_config_output_rule *find_output_rule(struct woodland_serv
     return wildcard;
 }
 
+/*
+ * 输出参数变了之后的统一收尾。
+ *
+ * 缩放影响的东西分散在四处：光标的 xcursor 主题、scenefx 的圆角/模糊缓存、
+ * SSD 的按钮与标题 buffer（缓存了渲染缩放）、X11 窗口的缩放滤波（按所在
+ * 输出的 scale 选 nearest/bilinear）。任一处漏刷的表现都是"改了缩放但只有
+ * 一部分跟着变"，而这种半生效状态最难查——所以只留一个入口。
+ *
+ * 调用点全在本文件：request_state（模式/位置请求）、commit（缩放变化）、
+ * 新输出接入。别的模块不要再自己拼一份"缩放后要刷什么"。
+ *
+ * 顺序：先按输出刷"与输出绑定"的东西，再刷"与视图绑定"的东西——后者的
+ * 位置判定（woodland_view_on_output）依赖前者已经落定。
+ */
+static void woodland_output_refresh_all(struct woodland_server *server)
+{
+    /* outputs.next 判空同时兜住"还没 init"：memset 出来的链表 next 是 NULL，
+     * wl_list_for_each 会从 NULL 开始翻 */
+    if (!server || !server->outputs.next) {
+        return;
+    }
+    struct woodland_output *output;
+    wl_list_for_each(output, &server->outputs, link)
+    {
+        if (!output->wlr_output) {
+            continue;
+        }
+        woodland_cursor_load_scale(server, output->wlr_output->scale);
+        woodland_effect_output_update(output);
+    }
+    woodland_session_lock_update_layout(server);
+    if (server->xwayland_refresh_hook) {
+        /* unmanaged 窗口不在 server->views 里，得单独走一遍滤波刷新 */
+        server->xwayland_refresh_hook(server);
+    }
+    if (!server->views.next) {
+        return;
+    }
+    struct woodland_view *view;
+    wl_list_for_each(view, &server->views, link)
+    {
+        woodland_view_update_outputs(view);
+    }
+}
+
+void woodland_output_apply_rules(struct woodland_server *server)
+{
+    if (!server || !server->config || !server->outputs.next) {
+        return;
+    }
+    struct woodland_output *output;
+    wl_list_for_each(output, &server->outputs, link)
+    {
+        struct wlr_output *wlr_output = output->wlr_output;
+        if (!wlr_output) {
+            continue;
+        }
+        struct woodland_config_output_rule *rule = find_output_rule(server, wlr_output->name);
+        if (!rule || rule->scale <= 0.0) {
+            continue;
+        }
+        if (wlr_output->scale == (float)rule->scale) {
+            continue;
+        }
+        struct wlr_output_state state;
+        wlr_output_state_init(&state);
+        wlr_output_state_set_scale(&state, rule->scale);
+        if (wlr_output_commit_state(wlr_output, &state)) {
+            wlr_log(WLR_INFO, "output %s: scale %.2f applied from config", wlr_output->name,
+                    rule->scale);
+        } else {
+            wlr_log(WLR_ERROR, "output %s: failed to apply scale %.2f from config",
+                    wlr_output->name, rule->scale);
+        }
+        wlr_output_state_finish(&state);
+    }
+}
+
 bool woodland_output_get_tearing_allowance(struct woodland_output *output)
 {
     if (!output || !output->server) {
@@ -104,21 +182,38 @@ static void handle_frame(struct wl_listener *listener, void *data)
     (void)data;
 }
 
+/*
+ * 缩放落地后重刷所有跟 scale 绑定的东西。
+ *
+ * 为什么挂在 commit 而不是逐个入口去调：改 scale 的路径有三条，只有
+ * backend 的 request_state 会发 request_state 事件；output-management 的
+ * apply 走 wlr_backend_commit()，配置重载走 wlr_output_commit_state()，两者
+ * 都不发。而三条最终都会以一次成功的 commit 收尾，所以这里才是唯一能覆盖
+ * 全部路径的点。
+ *
+ * commit 每帧都发，所以必须先比 last_scale——否则就是每帧重排全部窗口的
+ * SSD（pango + cairo）加重建 X11 滤波。
+ */
+static void handle_commit(struct wl_listener *listener, void *data)
+{
+    struct woodland_output *output = wl_container_of(listener, output, commit);
+    if (!output->wlr_output || output->wlr_output->scale == output->last_scale) {
+        return;
+    }
+    output->last_scale = output->wlr_output->scale;
+    woodland_output_refresh_all(output->server);
+    (void)data;
+}
+
 static void handle_request_state(struct wl_listener *listener, void *data)
 {
     struct woodland_output *output = wl_container_of(listener, output, request_state);
     const struct wlr_output_event_request_state *event = data;
     wlr_output_commit_state(output->wlr_output, event->state);
-    woodland_cursor_load_scale(output->server, output->wlr_output->scale);
-    woodland_effect_output_update(output);
-    woodland_session_lock_update_layout(output->server);
-    if (output->server->views.next) {
-        struct woodland_view *view;
-        wl_list_for_each(view, &output->server->views, link)
-        {
-            woodland_view_update_outputs(view);
-        }
-    }
+    /* 缩放可能变了：光标主题/SSD/滤波/所属输出一起按新参数重算 */
+    woodland_output_refresh_all(output->server);
+    /* 刚按当前缩放全量刷过，同步闸门，免得随后的 commit 再刷一遍 */
+    output->last_scale = output->wlr_output->scale;
 }
 
 static void handle_destroy(struct wl_listener *listener, void *data)
@@ -150,6 +245,7 @@ static void handle_destroy(struct wl_listener *listener, void *data)
     wl_list_remove(&output->destroy.link);
     wl_list_remove(&output->frame.link);
     wl_list_remove(&output->request_state.link);
+    wl_list_remove(&output->commit.link);
     wl_list_remove(&output->link);
 
     /*
@@ -197,6 +293,8 @@ static void handle_new_output(struct wl_listener *listener, void *data)
     }
     output->server = server;
     output->wlr_output = wlr_output;
+    /* 建的时候就是当前缩放，别让第一次 commit 白刷一遍全量 */
+    output->last_scale = wlr_output->scale;
     wlr_output->data = output;
 
     if (!wlr_output_init_render(wlr_output, server->allocator, server->renderer)) {
@@ -205,7 +303,7 @@ static void handle_new_output(struct wl_listener *listener, void *data)
         return;
     }
 
-    /* ---- 2. 挂监听：frame / request_state / destroy ---- */
+    /* ---- 2. 挂监听：frame / request_state / commit / destroy ---- */
     /* frame 不用 verbose：headless 静态场景没有帧事件（无 damage 不
      * commit），而且它是高频路径，每次 emit 都付一次账本线性查找不
      * 划算。verbose 的活体示例见 server.c 的 new_output_broadcast */
@@ -213,6 +311,8 @@ static void handle_new_output(struct wl_listener *listener, void *data)
                               "output.frame");
     woodland_listener_connect(&output->request_state, &wlr_output->events.request_state,
                               handle_request_state, "output.request_state");
+    woodland_listener_connect(&output->commit, &wlr_output->events.commit, handle_commit,
+                              "output.commit");
     woodland_listener_connect(&output->destroy, &wlr_output->events.destroy, handle_destroy,
                               "output.destroy");
 
@@ -283,15 +383,8 @@ static void handle_new_output(struct wl_listener *listener, void *data)
     woodland_trace_add("output_add", 0, "%s %dx%d heads=%d", wlr_output->name, wlr_output->width,
                        wlr_output->height, wl_list_length(&server->outputs));
     woodland_session_lock_add_output(server, output);
-    woodland_effect_output_update(output);
-    woodland_cursor_load_scale(server, wlr_output->scale);
-    if (server->views.next) {
-        struct woodland_view *view;
-        wl_list_for_each(view, &server->views, link)
-        {
-            woodland_view_update_outputs(view);
-        }
-    }
+    /* 新输出可能改变了既有窗口的所在输出（布局/缩放都可能不同） */
+    woodland_output_refresh_all(server);
     return;
 
 err_trees:
@@ -305,6 +398,7 @@ err_trees:
 err_listeners:
     wl_list_remove(&output->frame.link);
     wl_list_remove(&output->request_state.link);
+    wl_list_remove(&output->commit.link);
     wl_list_remove(&output->destroy.link);
     free(output);
 }
@@ -354,6 +448,7 @@ void woodland_output_finish(struct woodland_server *server)
     {
         wl_list_remove(&output->frame.link);
         wl_list_remove(&output->request_state.link);
+        wl_list_remove(&output->commit.link);
         wl_list_remove(&output->destroy.link);
         wl_list_remove(&output->link);
         free(output);

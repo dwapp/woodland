@@ -189,6 +189,7 @@ struct woodland_server {
     bool (*shortcut_pointer_hook)(struct woodland_server *server);
     void (*xwayland_cursor_hook)(struct woodland_server *server);
     void (*xwayland_scale_filter_hook)(struct woodland_view *view);
+    void (*xwayland_refresh_hook)(struct woodland_server *server);
 
     /* 截图/录屏（src/capture） */
     struct wlr_screencopy_manager_v1 *screencopy_manager;

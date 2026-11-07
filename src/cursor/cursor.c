@@ -80,7 +80,9 @@ void woodland_cursor_load_scale(struct woodland_server *server, float scale)
     if (!server || !server->xcursor_manager || scale <= 0.0f) {
         return;
     }
-    wlr_xcursor_manager_load(server->xcursor_manager, scale);
+    if (!wlr_xcursor_manager_load(server->xcursor_manager, scale)) {
+        wlr_log(WLR_ERROR, "cursor: failed to load theme for scale %.2f", scale);
+    }
     if (server->xwayland_cursor_hook) {
         server->xwayland_cursor_hook(server);
     }

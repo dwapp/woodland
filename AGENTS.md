@@ -160,6 +160,20 @@ test/commit、写布局时已放开，客户端就会先收到 configuration（w
 `wl_display_get_protocol_error()` 的返回值（`wl_display_get_error()` 给的是
 libwayland 的 errno，协议错误恒为 EPROTO=71）。见 `tests/smoke/deco_probe.c`。
 
+**7. 缩放改了，要刷的有四处，只留 `output.c` 里的 `woodland_output_refresh_all()` 一个入口。**
+光标主题的 scale（`wlr_xcursor_manager_load`）、scenefx 的圆角/模糊缓存、
+SSD 的按钮与标题 buffer（`ssd->scale` 决定 cairo 的 device scale 和 icon 缓存键）、
+X11 窗口的缩放滤波（按所在输出的 scale 选 nearest/bilinear）全都跟 scale 绑定。
+改 scale 有三条**互不相交**的路径：backend 的 `request_state`（VT 切换等）、
+`output-management` 的 apply（wlr-randr / kanshi，走 `wlr_backend_commit`，
+**不发** `request_state`）、SIGHUP 重载里的 `[[output]] scale`。唯一能覆盖全部三条的
+是个"事后"钩子：`wlr_output.events.commit`——三条路径都以一次成功 commit 收尾，
+所以 `handle_commit()` 拿 `output->last_scale` 做闸门，变了才刷。commit 每帧都发，
+**闸门不能省**，否则等于每帧重排所有窗口的 SSD。unmanaged（override-redirect）X11
+窗口不在 `server->views` 里，靠 `server->xwayland_refresh_hook` 补刷——**这个钩子
+唯一的调用点就在 refresh_all 里**，别只写函数和钩子不接线（本 PR 之前的版本就是
+这样：函数、钩子、赋值三样都在，没有一个调用方）。
+
 ## 项目规则
 
 - 只用 C（C11 起步）。不引入 C++/Qt/QML。

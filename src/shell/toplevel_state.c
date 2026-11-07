@@ -439,7 +439,19 @@ void woodland_view_update_outputs(struct woodland_view *view)
         }
 #endif
         if (view->ssd) {
-            woodland_ssd_update(view);
+            /*
+             * 只在缩放真的变了时才重刷 SSD。这个函数在拖拽/缩放的每个
+             * motion 事件上都会被调一次（interactive.c），无条件重刷就等于
+             * 每个 motion 做一遍 pango layout + cairo surface 分配。
+             */
+            struct woodland_output *wo = woodland_output_for_view(view);
+            float current_scale = 1.0f;
+            if (wo && wo->wlr_output && wo->wlr_output->scale > 0.0f) {
+                current_scale = wo->wlr_output->scale;
+            }
+            if (woodland_ssd_get_scale(view) != current_scale) {
+                woodland_ssd_update(view);
+            }
         }
     }
     if (!view || !view->server || !view->toplevel_handle) {

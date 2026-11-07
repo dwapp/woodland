@@ -25,6 +25,9 @@ void woodland_xwayland_finish(struct woodland_server *server);
 /** 更新 X11 窗口的缩放滤波模式（nearest / bilinear / smart） */
 void woodland_xwayland_view_update_scale_filter(struct woodland_view *view);
 
+/** 刷新全部 unmanaged 窗口的缩放滤波模式（输出缩放改变时） */
+void woodland_xwayland_refresh_unmanaged_filters(struct woodland_server *server);
+
 /** 设置/刷新 Xwayland 根光标（按当前主题与尺寸） */
 void woodland_xwayland_update_cursor(struct woodland_server *server);
 

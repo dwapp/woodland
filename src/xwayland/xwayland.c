@@ -16,6 +16,7 @@
 #include <string.h>
 #include <math.h>
 #include <sys/types.h>
+#include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <wlr/types/wlr_xcursor_manager.h>
@@ -96,7 +97,6 @@ static void unmanaged_update_filter_mode(struct woodland_unmanaged *unmanaged) {
     }
 }
 
-
 /* 挂上 wlr_surface：建 scene surface + 接 map/unmap */
 static void unmanaged_attach_surface(struct woodland_unmanaged *unmanaged,
                                      struct wlr_surface *surface) {
@@ -109,8 +109,9 @@ static void unmanaged_attach_surface(struct woodland_unmanaged *unmanaged,
                           unmanaged_map, "xwayland.map");
     woodland_listener_connect(&unmanaged->unmap, &surface->events.unmap,
                           unmanaged_unmap, "xwayland.unmap");
+    /* set_geometry 里已经会刷一次滤波（buffer 这时通常还没有，是空操作），
+     * 真正的第一次生效在 map 之后 */
     unmanaged_set_geometry(unmanaged);
-    unmanaged_update_filter_mode(unmanaged);
 }
 
 static void unmanaged_associate(struct wl_listener *listener, void *data) {
@@ -481,8 +482,18 @@ void woodland_xwayland_view_update_scale_filter(struct woodland_view *view) {
     struct woodland_output *wo = woodland_output_for_view(view);
     float scale = (wo && wo->wlr_output && wo->wlr_output->scale > 0.0f) ? wo->wlr_output->scale : 1.0f;
     enum wlr_scale_filter_mode mode = xwl_get_scale_filter_mode(view->server, scale);
-    if (view->scene_surface->buffer) {
+    if (view->scene_surface->buffer && view->scene_surface->buffer->filter_mode != mode) {
         wlr_scene_buffer_set_filter_mode(view->scene_surface->buffer, mode);
+    }
+}
+
+void woodland_xwayland_refresh_unmanaged_filters(struct woodland_server *server) {
+    if (!server || !server->xwayland_unmanaged.next) {
+        return;
+    }
+    struct woodland_unmanaged *u;
+    wl_list_for_each(u, &server->xwayland_unmanaged, link) {
+        unmanaged_update_filter_mode(u);
     }
 }
 
@@ -513,6 +524,12 @@ static void spawn_script_async(const char *path) {
         return;
     }
     if (pid == 0) {
+        sigset_t set;
+        sigemptyset(&set);
+        sigprocmask(SIG_SETMASK, &set, NULL);
+        signal(SIGPIPE, SIG_DFL);
+        setsid();
+
         pid_t grand_pid = fork();
         if (grand_pid < 0) {
             _exit(1);
@@ -581,9 +598,7 @@ static void run_xinitrc(void) {
     }
 }
 
-
 /* ==================== 模块入口 ==================== */
-
 static void xwl_ready(struct wl_listener *listener, void *data) {
     struct woodland_server *server =
         wl_container_of(listener, server, xwayland_ready);
@@ -617,6 +632,7 @@ bool woodland_xwayland_init(struct woodland_server *server) {
                           xwl_ready, "xwayland.ready");
     server->xwayland_cursor_hook = woodland_xwayland_update_cursor;
     server->xwayland_scale_filter_hook = woodland_xwayland_view_update_scale_filter;
+    server->xwayland_refresh_hook = woodland_xwayland_refresh_unmanaged_filters;
 
     wlr_log(WLR_INFO, "xwayland initialised, DISPLAY=%s",
             server->xwayland->display_name);
@@ -631,6 +647,7 @@ void woodland_xwayland_finish(struct woodland_server *server) {
     wl_list_remove(&server->xwayland_ready.link);
     server->xwayland_cursor_hook = NULL;
     server->xwayland_scale_filter_hook = NULL;
+    server->xwayland_refresh_hook = NULL;
     wlr_xwayland_destroy(server->xwayland);
     server->xwayland = NULL;
 }

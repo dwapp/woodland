@@ -101,12 +101,12 @@ static int ssd_titlebar_height(const struct woodland_view *view)
     return WOODLAND_SSD_TITLEBAR_H;
 }
 
-static float ssd_view_scale(const struct woodland_view *view)
+static float ssd_view_scale(struct woodland_view *view)
 {
     if (!view || !view->server) {
         return 1.0f;
     }
-    struct woodland_output *wo = woodland_output_for_view((struct woodland_view *)view);
+    struct woodland_output *wo = woodland_output_for_view(view);
     return (wo && wo->wlr_output && wo->wlr_output->scale > 0.0f) ? wo->wlr_output->scale : 1.0f;
 }
 
@@ -751,6 +751,13 @@ void woodland_ssd_update(struct woodland_view *view)
             wlr_buffer_drop(buf);
         }
         if (scale_changed) {
+            /*
+             * 关闭按钮的反色图标取决于悬停/按下态。重建时一律用非反色版本，
+             * 会让"正亮着的关闭键"在缩放变化后突然变回深灰（红底深灰图标），
+             * 直到指针再动一次才恢复——所以这里按当前态决定。
+             */
+            bool close_active = (ssd->hover_part == WOODLAND_SSD_BUTTON_CLOSE ||
+                                 ssd->pressed_part == WOODLAND_SSD_BUTTON_CLOSE);
             struct wlr_buffer *min_buf =
                 woodland_button_icon_buffer(WOODLAND_SSD_ICON_ICONIFY, bwn, false, ssd->scale);
             if (min_buf) {
@@ -758,8 +765,8 @@ void woodland_ssd_update(struct woodland_view *view)
                 wlr_scene_buffer_set_dest_size(ssd->button[BUTTON_MINIMIZE], bwn, bh);
                 wlr_buffer_drop(min_buf);
             }
-            struct wlr_buffer *close_buf =
-                woodland_button_icon_buffer(WOODLAND_SSD_ICON_CLOSE, bwn, false, ssd->scale);
+            struct wlr_buffer *close_buf = woodland_button_icon_buffer(
+                WOODLAND_SSD_ICON_CLOSE, bwn, close_active, ssd->scale);
             if (close_buf) {
                 wlr_scene_buffer_set_buffer(ssd->button[BUTTON_CLOSE], close_buf);
                 wlr_scene_buffer_set_dest_size(ssd->button[BUTTON_CLOSE], bwn, bh);
@@ -955,11 +962,11 @@ bool woodland_ssd_content_size(const struct woodland_view *view, int *width, int
     }
     return true;
 }
+
 float woodland_ssd_get_scale(const struct woodland_view *view)
 {
     return (view && view->ssd) ? view->ssd->scale : 1.0f;
 }
-
 
 bool woodland_ssd_titlebar_visible(const struct woodland_view *view)
 {
