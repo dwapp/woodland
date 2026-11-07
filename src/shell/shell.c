@@ -31,6 +31,7 @@
 #endif
 
 #include "capture.h"
+#include "cursor.h"
 #include "effect.h"
 #include "layer.h"
 #include "output.h"
@@ -624,54 +625,40 @@ static bool shell_pointer_constraint_is_focused(struct woodland_server *server,
         return false;
     }
 
-    struct wl_client *client = NULL;
-    if (constraint->resource) {
-        client = wl_resource_get_client(constraint->resource);
-    } else if (constraint->surface->resource) {
-        client = wl_resource_get_client(constraint->surface->resource);
-    }
+    struct wl_client *client = woodland_pointer_constraint_get_client(constraint);
 
-    /* 1. 检查当前持有键盘焦点的 surface */
+    /* 1. 键盘焦点：同一 surface 用指针相等判（不依赖 resource 还在），
+     *    否则比到 client 一级——popup / subsurface 拿焦点时约束仍该有效 */
     struct wlr_surface *kb_surface = server->seat ?
         server->seat->keyboard_state.focused_surface : NULL;
-    if (kb_surface) {
-        if (kb_surface == constraint->surface) {
-            return true;
-        }
-        if (client && kb_surface->resource &&
-            wl_resource_get_client(kb_surface->resource) == client) {
+    if (kb_surface == constraint->surface) {
+        return true;
+    }
+    if (woodland_pointer_constraint_matches_keyboard_focus(server, client)) {
+        return true;
+    }
+
+    /* 2. 没有键盘焦点可用时（headless / 会话里没有键盘设备——此时
+     *    woodland_seat_focus_surface() 什么都不发，focused_surface 恒为 NULL），
+     *    只能看"谁是焦点视图"。有键盘焦点时上面两条已经覆盖了它的 popup /
+     *    subsurface，这条只会重复判断。
+     *    只用 woodland_focus_current()：它先看 focused_view 再反查键盘表面，
+     *    再叠一层 focused_view 回退就是第三份真值了（见 focus.c 的 focus_recorded） */
+    if (!kb_surface) {
+        struct woodland_view *view = woodland_focus_current(server);
+        if (view && woodland_view_from_surface(constraint->surface) == view) {
             return true;
         }
     }
 
-    /* 2. 检查当前聚焦视图（含 popups / subsurfaces） */
-    struct woodland_view *view = woodland_focus_current(server);
-    if (!view) {
-        view = server->focused_view;
-    }
-    if (view) {
-        if (woodland_view_from_surface(constraint->surface) == view) {
+    /* 3. 焦点 layer surface */
+    struct wlr_layer_surface_v1 *layer = server->focused_layer;
+    if (layer && layer->surface) {
+        if (layer->surface == constraint->surface) {
             return true;
         }
-        struct wlr_surface *view_surf = woodland_view_surface(view);
-        if (view_surf) {
-            if (view_surf == constraint->surface) {
-                return true;
-            }
-            if (client && view_surf->resource &&
-                wl_resource_get_client(view_surf->resource) == client) {
-                return true;
-            }
-        }
-    }
-
-    /* 3. 检查当前聚焦 layer surface */
-    if (server->focused_layer) {
-        if (server->focused_layer->surface == constraint->surface) {
-            return true;
-        }
-        if (client && server->focused_layer->surface && server->focused_layer->surface->resource &&
-            wl_resource_get_client(server->focused_layer->surface->resource) == client) {
+        if (client && layer->surface->resource &&
+            wl_resource_get_client(layer->surface->resource) == client) {
             return true;
         }
     }
@@ -718,7 +705,6 @@ bool woodland_shell_init(struct woodland_server *server)
     }
     woodland_snap_preview_init(server);
     server->pointer_constraint_is_focused_hook = shell_pointer_constraint_is_focused;
-
 
     return true;
 }

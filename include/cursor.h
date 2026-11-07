@@ -8,6 +8,7 @@
 struct woodland_server;
 struct wlr_surface;
 struct wlr_pointer_constraint_v1;
+struct wl_client;
 
 bool woodland_cursor_init(struct woodland_server *server);
 void woodland_cursor_finish(struct woodland_server *server);
@@ -49,7 +50,32 @@ void woodland_pointer_constraint_set(struct woodland_server *server,
                                      struct wlr_pointer_constraint_v1 *constraint);
 void woodland_pointer_constraint_apply(struct woodland_server *server,
                                        double *dx, double *dy);
+
+/**
+ * 约束的申请者现在是否持有焦点。走 shell 挂的钩子（视图 / layer / 锁屏都在那一层
+ * 才有答案）；没有钩子时退到"键盘焦点表面同 client"这条最粗的判定。
+ */
 bool woodland_pointer_constraint_is_focused(struct woodland_server *server,
                                             struct wlr_pointer_constraint_v1 *constraint);
+
+/** 申请约束的 wl_client（先看约束的 resource，再退到 surface 的）。拿不到返回 NULL。 */
+struct wl_client *woodland_pointer_constraint_get_client(
+    const struct wlr_pointer_constraint_v1 *constraint);
+
+/**
+ * 键盘焦点表面是否与 client 同属一个 wl_client（**不含**"同一 surface"这层判断：
+ * 调用方自己有 surface 指针，用指针相等判更稳，resource 不一定还在）。
+ *
+ * 约束按 surface 申请，但 popup / subsurface 拿到键盘焦点时它也应当继续有效，
+ * 所以比到 client 一级。shell 层的 `shell_pointer_constraint_is_focused()` 与
+ * cursor 层没有钩子时的兜底共用这**一条**判定，别各写一份。
+ */
+bool woodland_pointer_constraint_matches_keyboard_focus(struct woodland_server *server,
+                                                        struct wl_client *client);
+
+/**
+ * 按当前指针焦点表面重算一次约束状态（键盘焦点 / 视图焦点变化后调用）。
+ * 内部就是 `woodland_pointer_constraint_recheck(server, 指针焦点表面)`。
+ */
 void woodland_pointer_constraint_update(struct woodland_server *server);
 #endif
