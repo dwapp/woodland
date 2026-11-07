@@ -117,15 +117,32 @@ bool woodland_dnd_node_is_icon(const struct woodland_dnd *dnd, struct wlr_scene_
  * 不复用 woodland_view_at()：那条路只认 toplevel 视图，而拖到 panel
  * （layer-shell）、Dock、X11 override-redirect 窗口上都该有 enter。这里
  * 直接问场景，surface 是谁就交给 wlroots——它自己会按 seat client 查表。
+ *
+ * 图标要"透明"：hit-test 前把 icons 树临时关掉，返回前恢复。只靠下面的
+ * 祖先检查不够——wlr_scene_node_at() 给的是**最上面**那个节点，光标落在
+ * 图标覆盖区时下面的窗口根本没机会成为目标，等于拖到那儿就没有投放目标。
+ * 关掉再问才是"穿透"语义。labwc 同一个做法（desktop.c:get_cursor_context，
+ * 注释 Prevent drag icons to be on top of the hitbox detection）。
+ *
+ * 单线程、同步恢复，中间不渲染，所以图标不会闪。
  */
 static struct wlr_surface *dnd_surface_at(struct woodland_server *server, double lx, double ly,
                                           double *sx, double *sy)
 {
+    struct woodland_dnd *dnd = &server->dnd;
+    bool icon_enabled = dnd->icons && dnd->icons->node.enabled;
+    if (icon_enabled) {
+        wlr_scene_node_set_enabled(&dnd->icons->node, false);
+    }
     struct wlr_scene_node *node = wlr_scene_node_at(&server->scene->tree.node, lx, ly, sx, sy);
+    if (icon_enabled) {
+        wlr_scene_node_set_enabled(&dnd->icons->node, true);
+    }
     if (node == NULL || node->type != WLR_SCENE_NODE_BUFFER) {
         return NULL;
     }
-    if (woodland_dnd_node_is_icon(&server->dnd, node)) {
+    /* 兜底：万一哪天不关树了（或 helper 换了实现），祖先检查还挡得住 */
+    if (woodland_dnd_node_is_icon(dnd, node)) {
         return NULL;
     }
     struct wlr_scene_surface *scene_surface =
@@ -147,7 +164,7 @@ static void dnd_position_icon(struct woodland_server *server)
 static void dnd_update_target(struct woodland_server *server, uint32_t time)
 {
     struct woodland_dnd *dnd = &server->dnd;
-    if (!server->seat || !server->cursor) {
+    if (!server->seat || !server->cursor || !dnd->drag) {
         return;
     }
     double sx = 0, sy = 0;
@@ -157,9 +174,10 @@ static void dnd_update_target(struct woodland_server *server, uint32_t time)
     /*
      * 只在目标变化时 enter：drag_set_focus 现在有早退，重复 enter 是无谓开销，
      * 而且一旦 wlroots 改了早退条件就会变成"每帧重建一次 offer"。
+     * 目标状态以 wlroots 自身管理的 drag->focus 为权威事实源（自带 surface
+     * 销毁监听器，不会因客户端突然退出变成悬垂指针）。
      */
-    if (surface != dnd->last_surface) {
-        dnd->last_surface = surface;
+    if (surface != dnd->drag->focus) {
         if (surface) {
             wlr_seat_pointer_notify_enter(server->seat, surface, sx, sy);
         } else {
@@ -260,7 +278,6 @@ void woodland_dnd_handle_destroy(struct woodland_server *server, struct wlr_drag
         wl_list_remove(&dnd->events.destroy.link);
     }
     dnd->drag = NULL;
-    dnd->last_surface = NULL;
     dnd_icon_release(dnd);
     if (dnd->icons) {
         wlr_scene_node_set_enabled(&dnd->icons->node, false);
@@ -304,6 +321,22 @@ void woodland_dnd_cancel(struct woodland_server *server)
 }
 
 /* ==================== seat 事件 ==================== */
+/*
+ * 拒绝一次未通过校验的拖拽请求并彻底销毁未启动的 drag 对象。
+ *
+ * 当客户端给了 data_source 时，销毁数据源会给客户端发 cancelled，
+ * 同时由 source->events.destroy 级联触发 drag_destroy()；
+ * 当 source 为 NULL 时（协议允许 source=NULL），必须走 grab cancel，
+ * 否则在 wlr_drag_create() 里 calloc 出来的 drag 对象将发生内存泄漏。
+ */
+static void dnd_reject_drag(struct wlr_drag *drag)
+{
+    if (drag->source) {
+        wlr_data_source_destroy(drag->source);
+    } else if (drag->pointer_grab.interface && drag->pointer_grab.interface->cancel) {
+        drag->pointer_grab.interface->cancel(&drag->pointer_grab);
+    }
+}
 
 static void dnd_handle_request_start(struct wl_listener *listener, void *data)
 {
@@ -315,9 +348,7 @@ static void dnd_handle_request_start(struct wl_listener *listener, void *data)
     if (seat->drag != NULL) {
         /* wlroots 自己也会挡，这里只是不让源码存在"两个 drag"的可能 */
         woodland_trace_add("dnd", 0, "reject: another drag is active");
-        if (event->drag->source) {
-            wlr_data_source_destroy(event->drag->source);
-        }
+        dnd_reject_drag(event->drag);
         return;
     }
 
@@ -331,9 +362,7 @@ static void dnd_handle_request_start(struct wl_listener *listener, void *data)
 
     /* 校验没过：拖拽源必须销毁，否则客户端会一直挂在那里等 start_drag */
     woodland_trace_add("dnd", 0, "reject: serial %u is not a pointer grab", event->serial);
-    if (event->drag->source) {
-        wlr_data_source_destroy(event->drag->source);
-    }
+    dnd_reject_drag(event->drag);
 }
 
 static void dnd_handle_start(struct wl_listener *listener, void *data)

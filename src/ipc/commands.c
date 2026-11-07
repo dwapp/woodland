@@ -547,12 +547,13 @@ static void append_dnd(struct woodland_server *server, struct woodland_json *out
      * （拖到 panel/Dock 上时没有 app_id，用 namespace 认人）。
      */
     const char *target = NULL;
-    struct woodland_view *view = woodland_view_from_surface(dnd->last_surface);
+    struct wlr_surface *target_surface = (active && dnd->drag) ? dnd->drag->focus : NULL;
+    struct woodland_view *view = woodland_view_from_surface(target_surface);
     if (view) {
         target = (view->app_id && view->app_id[0]) ? view->app_id : view->title;
-    } else if (dnd->last_surface) {
+    } else if (target_surface) {
         struct wlr_layer_surface_v1 *layer =
-            wlr_layer_surface_v1_try_from_wlr_surface(dnd->last_surface);
+            wlr_layer_surface_v1_try_from_wlr_surface(target_surface);
         if (layer) {
             target = layer->namespace;
         }
