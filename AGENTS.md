@@ -254,3 +254,12 @@ libwayland 的 errno，协议错误恒为 EPROTO=71）。见 `tests/smoke/deco_p
   `protocols/treeland/` 下的只读副本（MIT，上游 `dde/`）；档位详见 `include/protocol.h`
   头部注释，状态在 `wctl get_tree` 的 `toplevel_manager` 与每个 view 的 `foreign_toplevel` 里，
   轨迹标签 `ftl`，探针 `tests/smoke/ftl_probe.c`。
+- **VT 切换已实现**（`feature/vt-switch`）：Ctrl+Alt+F1..F12 经 XKB compat 翻成
+  `XF86Switch_VT_1..12`，`src/seat/seat.c` 识别后调 `wlr_session_change_vt()`
+  （`server->session` 是 `wlr_backend_autocreate` 的回填，headless 下为 NULL——判空后记
+  `vt` 轨迹、不切换）。三条语义与 labwc 对齐，别当成 bug：① VT 键排在锁屏与
+  shortcuts-inhibit **之前**——切走 TTY 是系统级逃生通道；② press 被合成器吃掉后，
+  对应的孤儿 release 也丢弃（`server->vt_swallowed_keys` 位图），否则客户端会收到
+  没有 press 配对的 release；③ session inactive 时 `handle_frame` 直接跳过渲染
+  （labwc 同款守卫），设备暂停/恢复由 wlroots 后端自己处理，**不要**去监听
+  session_active 信号。回归：`tests/unit/test_seat.c` 的 `test_vt_from_keysym`。
