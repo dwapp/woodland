@@ -45,9 +45,6 @@ enum woodland_view_wants_focus woodland_view_wants_focus(const struct woodland_v
     }
 #if WOODLAND_HAVE_XWAYLAND
     if (view->type == WOODLAND_VIEW_XWAYLAND && view->xwayland_surface) {
-        if (!woodland_view_wants_foreign_toplevel(view)) {
-            return WOODLAND_VIEW_WANTS_FOCUS_NEVER;
-        }
         if (!view->xwayland_surface->xwm) {
             return WOODLAND_VIEW_WANTS_FOCUS_ALWAYS;
         }
@@ -217,6 +214,9 @@ struct woodland_view *woodland_focus_modal_dialog(struct woodland_view *view)
 
 static void view_raise_node(struct woodland_view *view)
 {
+    if (!view || !view->mapped) {
+        return;
+    }
     wlr_scene_node_raise_to_top(&view->scene_tree->node);
     wl_list_remove(&view->link);
     wl_list_insert(&view->server->views, &view->link);
@@ -237,7 +237,7 @@ static void view_raise(struct woodland_view *view)
         root = root->parent;
     }
 
-    if (root != view) {
+    if (root != view && root->mapped) {
         view_raise_node(root);
     }
 
@@ -249,9 +249,15 @@ static void view_raise(struct woodland_view *view)
         }
     }
 
-    /* 最后将当前操作/聚焦的目标窗口提升至最顶层 */
-    view_raise_node(view);
+    /* 若当前聚焦的目标窗口不是 root，将其提升至最顶层（保持在所有兄弟子窗口之上） */
+    if (root != view) {
+        view_raise_node(view);
+    }
     woodland_layer_update_top_layer_visibility(view->server);
+
+    if (view->server && view->server->xwayland_flush_hook) {
+        view->server->xwayland_flush_hook(view->server);
+    }
 }
 
 void woodland_focus_view(struct woodland_view *view, bool raise)

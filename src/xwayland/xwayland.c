@@ -227,8 +227,12 @@ static void unmanaged_request_configure(struct wl_listener *listener, void *data
         wl_container_of(listener, unmanaged, request_configure);
     struct wlr_xwayland_surface *xsurface = unmanaged->xsurface;
     struct wlr_xwayland_surface_configure_event *ev = data;
-    wlr_xwayland_surface_configure(xsurface, ev->x, ev->y, ev->width, ev->height);
-    wlr_scene_node_set_position(&unmanaged->scene_tree->node, ev->x, ev->y);
+    int16_t x = (ev->mask & XCB_CONFIG_WINDOW_X) ? ev->x : xsurface->x;
+    int16_t y = (ev->mask & XCB_CONFIG_WINDOW_Y) ? ev->y : xsurface->y;
+    uint16_t width = (ev->mask & XCB_CONFIG_WINDOW_WIDTH) ? ev->width : xsurface->width;
+    uint16_t height = (ev->mask & XCB_CONFIG_WINDOW_HEIGHT) ? ev->height : xsurface->height;
+    wlr_xwayland_surface_configure(xsurface, x, y, width, height);
+    wlr_scene_node_set_position(&unmanaged->scene_tree->node, x, y);
     unmanaged_update_filter_mode(unmanaged);
 }
 
@@ -282,6 +286,19 @@ static void xwl_new_unmanaged(struct woodland_server *server,
     /* 多数情况下 surface 在 associate 里才出现；已存在时直接挂 */
     unmanaged_attach_surface(unmanaged, xsurface->surface);
 }
+bool woodland_xwayland_initial_position_hint(const struct wlr_xwayland_surface *xsurface,
+                                            int16_t *x, int16_t *y) {
+    if (!xsurface || !xsurface->size_hints) {
+        return false;
+    }
+    if (!(xsurface->size_hints->flags & (XCB_ICCCM_SIZE_HINT_US_POSITION | XCB_ICCCM_SIZE_HINT_P_POSITION))) {
+        return false;
+    }
+    if (x) *x = xsurface->x;
+    if (y) *y = xsurface->y;
+    return true;
+}
+
 
 /* ==================== managed 顶层窗口 ==================== */
 
@@ -293,11 +310,9 @@ static void xwl_new_unmanaged(struct woodland_server *server,
  */
 static void xwl_place_and_configure(struct woodland_view *view) {
     if (!view->placed) {
-        struct wlr_xwayland_surface *xsurface = view->xwayland_surface;
-        bool has_pos = xsurface && xsurface->size_hints &&
-            (xsurface->size_hints->flags & (XCB_ICCCM_SIZE_HINT_US_POSITION | XCB_ICCCM_SIZE_HINT_P_POSITION));
-        if (has_pos) {
-            wlr_scene_node_set_position(&view->scene_tree->node, xsurface->x, xsurface->y);
+        int16_t x, y;
+        if (woodland_xwayland_initial_position_hint(view->xwayland_surface, &x, &y)) {
+            wlr_scene_node_set_position(&view->scene_tree->node, x, y);
             view->placed = true;
             woodland_view_update_outputs(view);
         } else {
@@ -318,15 +333,18 @@ static void xwl_map_request(struct wl_listener *listener, void *data) {
 
 static void xwl_map(struct wl_listener *listener, void *data) {
     struct woodland_view *view = wl_container_of(listener, view, map);
-    if (view->focused_before_map) {
-        view->focused_before_map = false;
+    bool take_focus = view->focused_before_map;
+    view->focused_before_map = false;
+    woodland_view_map(view);
+    if (take_focus) {
+        struct woodland_server *server = view->server;
         struct wlr_surface *surface = woodland_view_surface(view);
-        if (surface && view->server) {
-            woodland_seat_focus_surface(view->server, surface);
-            view->server->focused_view = view;
+        if (server && server->seat && surface && server->focused_view == view) {
+            if (server->seat->keyboard_state.focused_surface != surface) {
+                woodland_seat_focus_surface(server, surface);
+            }
         }
     }
-    woodland_view_map(view);
     (void)data;
 }
 
@@ -344,6 +362,8 @@ static void xwl_commit(struct wl_listener *listener, void *data) {
     }
     (void)data;
 }
+static void xwl_update_deco(struct woodland_view *view);
+
 
 static void xwl_associate(struct wl_listener *listener, void *data) {
     struct woodland_view *view = wl_container_of(listener, view, associate);
@@ -375,15 +395,7 @@ static void xwl_associate(struct wl_listener *listener, void *data) {
 
     /* 属性在 map_request 之后才读完，这里定下装饰策略：
      * _MOTIF_WM_HINTS 请求无边框的窗口不画 SSD（同 labwc want_deco） */
-    bool borderless =
-        (xsurface->decorations != WLR_XWAYLAND_SURFACE_DECORATIONS_ALL) ||
-        !woodland_view_wants_foreign_toplevel(view);
-    if (borderless != view->deco_csd) {
-        view->deco_csd = borderless;
-        /* SSD 边距变了（27px 标题栏 vs 0）：按新边距重算内容原点并重新 configure */
-        view->placed = false;
-        xwl_place_and_configure(view);
-    }
+    xwl_update_deco(view);
 
     /* map_request 里还不知道父窗口，这里补上（供后续 remap 居中用） */
     if (!view->parent && xsurface->parent && xsurface->parent->data) {
@@ -394,17 +406,57 @@ static void xwl_associate(struct wl_listener *listener, void *data) {
 
 static void xwl_dissociate(struct wl_listener *listener, void *data) {
     struct woodland_view *view = wl_container_of(listener, view, dissociate);
-    /* surface 正在销毁：先摘监听（节点还活着，摘完才失效） */
-    wl_list_remove(&view->map.link);
-    wl_list_remove(&view->unmap.link);
-    wl_list_remove(&view->commit.link);
-    view->scene_surface = NULL;
+    /* surface 正在销毁或解绑：先摘监听（幂等保护） */
+    if (view->scene_surface) {
+        wl_list_remove(&view->map.link);
+        wl_list_remove(&view->unmap.link);
+        wl_list_remove(&view->commit.link);
+        view->scene_surface = NULL;
+    }
     (void)data;
+}
+
+static void xwl_update_deco(struct woodland_view *view) {
+    struct wlr_xwayland_surface *xsurface = view->xwayland_surface;
+    if (!xsurface) {
+        return;
+    }
+    bool borderless =
+        xsurface->decorations != WLR_XWAYLAND_SURFACE_DECORATIONS_ALL;
+    if (borderless == view->deco_csd) {
+        return;
+    }
+
+    struct woodland_ssd_margins old_m, new_m;
+    woodland_ssd_get_margins(view, &old_m);
+
+    view->deco_csd = borderless;
+    if (view->mapped) {
+        if (borderless) {
+            woodland_ssd_destroy(view);
+            woodland_effect_update(view);
+        } else {
+            woodland_ssd_create(view);
+            woodland_effect_update(view);
+        }
+    }
+
+    woodland_ssd_get_margins(view, &new_m);
+
+    /* 外框左上角不动：平移内容原点补偿边距变化 */
+    wlr_scene_node_set_position(&view->scene_tree->node,
+                                view->scene_tree->node.x + (old_m.left - new_m.left),
+                                view->scene_tree->node.y + (old_m.top - new_m.top));
+
+    struct wlr_box content;
+    woodland_view_content_box(view, &content);
+    woodland_view_request_size(view, content.width, content.height);
 }
 
 static void xwl_destroy(struct wl_listener *listener, void *data) {
     struct woodland_view *view = wl_container_of(listener, view, destroy);
     wl_list_remove(&view->associate.link);
+    xwl_dissociate(&view->dissociate, NULL);
     wl_list_remove(&view->dissociate.link);
     wl_list_remove(&view->destroy.link);
     wl_list_remove(&view->map_request.link);
@@ -440,13 +492,16 @@ static void xwl_request_configure(struct wl_listener *listener, void *data) {
         return;
     }
 
-    /* 最大化/全屏下由 WM 决定几何，ICCCM 规范要求回传带有当前锁定的几何通知 */
+    /* 最大化/全屏下由 WM 决定几何；仅当客户端请求了几何时才回发 ConfigureNotify 驳回请求 */
     if (view->maximized || view->fullscreen) {
-        wlr_xwayland_surface_configure(view->xwayland_surface,
-                                       (int16_t)view->scene_tree->node.x,
-                                       (int16_t)view->scene_tree->node.y,
-                                       view->xwayland_surface->width,
-                                       view->xwayland_surface->height);
+        if (event->mask & (XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y |
+                           XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT)) {
+            wlr_xwayland_surface_configure(view->xwayland_surface,
+                                           (int16_t)view->scene_tree->node.x,
+                                           (int16_t)view->scene_tree->node.y,
+                                           view->xwayland_surface->width,
+                                           view->xwayland_surface->height);
+        }
         return;
     }
 
@@ -463,13 +518,7 @@ static void xwl_request_configure(struct wl_listener *listener, void *data) {
     int width = (event->mask & XCB_CONFIG_WINDOW_WIDTH) ? event->width : view->xwayland_surface->width;
     int height = (event->mask & XCB_CONFIG_WINDOW_HEIGHT) ? event->height : view->xwayland_surface->height;
     woodland_view_request_size(view, width, height);
-
-    /* 处理 Z 轴堆叠模式（Stack Mode）请求 */
-    if (event->mask & XCB_CONFIG_WINDOW_STACK_MODE) {
-        woodland_focus_view(view, true);
-    }
 }
-
 static void xwl_request_move(struct wl_listener *listener, void *data) {
     struct woodland_view *view = wl_container_of(listener, view, request_move);
     woodland_view_begin_interactive(view, WOODLAND_CURSOR_MOVE, 0);
@@ -564,57 +613,26 @@ static void xwl_set_override_redirect(struct wl_listener *listener, void *data) 
     if (mapped) {
         woodland_view_unmap(view);
     }
+    /*
+     * surface 还活着，之后不会再有 dissociate 事件：手动摘掉挂在 wlr_surface
+     * 上的 map/unmap/commit，否则 free(view) 之后它们仍会被回调（UAF）。
+     */
+    xwl_dissociate(&view->dissociate, NULL);
     xwl_destroy(&view->destroy, xsurface);
     xwl_new_unmanaged(server, xsurface);
 }
 
 static void xwl_set_window_type(struct wl_listener *listener, void *data) {
     struct woodland_view *view = wl_container_of(listener, view, set_window_type);
-    struct wlr_xwayland_surface *xsurface = view->xwayland_surface;
     (void)data;
-    if (!xsurface) {
-        return;
-    }
-    bool borderless = (xsurface->decorations != WLR_XWAYLAND_SURFACE_DECORATIONS_ALL) ||
-                      !woodland_view_wants_foreign_toplevel(view);
-    if (borderless != view->deco_csd) {
-        view->deco_csd = borderless;
-        if (view->mapped) {
-            if (borderless && view->ssd) {
-                woodland_ssd_destroy(view);
-                woodland_effect_update(view);
-            } else if (!borderless && !view->ssd) {
-                woodland_ssd_create(view);
-            }
-        }
-        view->placed = false;
-        xwl_place_and_configure(view);
-    }
+    xwl_update_deco(view);
     woodland_view_update_taskbar_presence(view);
 }
 
 static void xwl_set_decorations(struct wl_listener *listener, void *data) {
     struct woodland_view *view = wl_container_of(listener, view, set_decorations);
-    struct wlr_xwayland_surface *xsurface = view->xwayland_surface;
     (void)data;
-    if (!xsurface) {
-        return;
-    }
-    bool borderless = (xsurface->decorations != WLR_XWAYLAND_SURFACE_DECORATIONS_ALL) ||
-                      !woodland_view_wants_foreign_toplevel(view);
-    if (borderless != view->deco_csd) {
-        view->deco_csd = borderless;
-        if (view->mapped) {
-            if (borderless && view->ssd) {
-                woodland_ssd_destroy(view);
-                woodland_effect_update(view);
-            } else if (!borderless && !view->ssd) {
-                woodland_ssd_create(view);
-            }
-        }
-        view->placed = false;
-        xwl_place_and_configure(view);
-    }
+    xwl_update_deco(view);
 }
 
 static void xwl_request_skip_taskbar(struct wl_listener *listener, void *data) {
@@ -624,7 +642,6 @@ static void xwl_request_skip_taskbar(struct wl_listener *listener, void *data) {
     if (!xsurface) {
         return;
     }
-    wlr_xwayland_surface_set_skip_taskbar(xsurface, xsurface->skip_taskbar);
     woodland_view_update_taskbar_presence(view);
 }
 
@@ -632,7 +649,7 @@ static void xwl_focus_in(struct wl_listener *listener, void *data) {
     struct woodland_view *view = wl_container_of(listener, view, focus_in);
     (void)data;
     struct wlr_surface *surface = woodland_view_surface(view);
-    if (!surface || !view->mapped) {
+    if (!surface) {
         view->focused_before_map = true;
         return;
     }
@@ -640,9 +657,16 @@ static void xwl_focus_in(struct wl_listener *listener, void *data) {
     if (!server || !server->seat) {
         return;
     }
-    if (surface != server->seat->keyboard_state.focused_surface) {
+
+    /* 先走完整聚焦链记账（工作区 / 模态重定向 / activated / trace） */
+    woodland_focus_view(view, false);
+    if (server->focused_view != view) {
+        return; /* 被拒绝：别的工作区、模态重定向拦截、不可聚焦 */
+    }
+
+    /* GLOBAL 输入模型客户端自己 SetInputFocus 上来，在此认账并更新键盘表面 */
+    if (server->seat->keyboard_state.focused_surface != surface) {
         woodland_seat_focus_surface(server, surface);
-        server->focused_view = view;
         woodland_pointer_constraint_update(server);
     }
 }
@@ -895,6 +919,7 @@ bool woodland_xwayland_init(struct woodland_server *server) {
     server->xwayland_scale_filter_hook = woodland_xwayland_view_update_scale_filter;
     server->xwayland_refresh_hook = woodland_xwayland_refresh_unmanaged_filters;
     server->xwayland_restack_hook = woodland_xwayland_restack_view;
+    server->xwayland_flush_hook = woodland_xwayland_flush;
 
     wlr_log(WLR_INFO, "xwayland initialised, DISPLAY=%s",
             server->xwayland->display_name);
@@ -911,6 +936,7 @@ void woodland_xwayland_finish(struct woodland_server *server) {
     server->xwayland_scale_filter_hook = NULL;
     server->xwayland_refresh_hook = NULL;
     server->xwayland_restack_hook = NULL;
+    server->xwayland_flush_hook = NULL;
     wlr_xwayland_destroy(server->xwayland);
     server->xwayland = NULL;
 }
@@ -933,5 +959,4 @@ void woodland_xwayland_restack_view(struct woodland_view *view) {
         return;
     }
     wlr_xwayland_surface_restack(xsurface, NULL, XCB_STACK_MODE_ABOVE);
-    woodland_xwayland_flush(view->server);
 }

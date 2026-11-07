@@ -7,8 +7,10 @@
  *
  * 用法: xoverride [x] [y] [w] [h]，窗口底色为纯红，map 后打印 READY 并阻塞。
  */
+#define _DEFAULT_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 #include <xcb/xcb.h>
@@ -44,17 +46,44 @@ int main(int argc, char *argv[]) {
 
     xcb_window_t win = xcb_generate_id(conn);
     uint32_t mask = XCB_CW_BACK_PIXEL | XCB_CW_OVERRIDE_REDIRECT;
-    uint32_t values[] = {red, 1};
-    xcb_create_window(conn, XCB_COPY_FROM_PARENT, win, screen->root,
-                      (int16_t)x, (int16_t)y, (uint16_t)w, (uint16_t)h, 0,
-                      XCB_WINDOW_CLASS_INPUT_OUTPUT, screen->root_visual,
-                      mask, values);
-    xcb_map_window(conn, win);
-    xcb_flush(conn);
 
-    printf("override-redirect window 0x%x at %d,%d %dx%d\n", win, x, y, w, h);
-    fflush(stdout);
+    if (argc > 1 && strcmp(argv[1], "--test-toggle") == 0) {
+        /* 先以 managed (override_redirect = 0) 创建并 map */
+        uint32_t val_managed[] = {red, 0};
+        xcb_create_window(conn, XCB_COPY_FROM_PARENT, win, screen->root,
+                          (int16_t)x, (int16_t)y, (uint16_t)w, (uint16_t)h, 0,
+                          XCB_WINDOW_CLASS_INPUT_OUTPUT, screen->root_visual,
+                          mask, val_managed);
+        xcb_map_window(conn, win);
+        xcb_flush(conn);
+        usleep(50000);
 
+        /* 动态切成 override-redirect = 1（触发 xwl_set_override_redirect 迁移） */
+        uint32_t val_or[] = {1};
+        xcb_change_window_attributes(conn, win, XCB_CW_OVERRIDE_REDIRECT, val_or);
+        xcb_flush(conn);
+        usleep(50000);
+
+        /* 再切回 managed = 0（触发 unmanaged_set_override_redirect 迁移） */
+        uint32_t val_back[] = {0};
+        xcb_change_window_attributes(conn, win, XCB_CW_OVERRIDE_REDIRECT, val_back);
+        xcb_flush(conn);
+        usleep(50000);
+
+        printf("TOGGLE_OK\n");
+        fflush(stdout);
+    } else {
+        uint32_t values[] = {red, 1};
+        xcb_create_window(conn, XCB_COPY_FROM_PARENT, win, screen->root,
+                          (int16_t)x, (int16_t)y, (uint16_t)w, (uint16_t)h, 0,
+                          XCB_WINDOW_CLASS_INPUT_OUTPUT, screen->root_visual,
+                          mask, values);
+        xcb_map_window(conn, win);
+        xcb_flush(conn);
+
+        printf("override-redirect window 0x%x at %d,%d %dx%d\n", win, x, y, w, h);
+        fflush(stdout);
+    }
     /* 挂住等 SIGTERM（冒烟脚本负责收尾） */
     pause();
     xcb_disconnect(conn);

@@ -25,6 +25,12 @@
 #if WOODLAND_HAVE_XWAYLAND
 #include <wlr/xwayland.h>
 #endif
+static int mock_restack_calls = 0;
+static void mock_test_restack_hook(struct woodland_view *v) {
+    (void)v;
+    mock_restack_calls++;
+}
+
 
 int main(void)
 {
@@ -590,59 +596,73 @@ int main(void)
 
     wlr_scene_node_destroy(&xv.scene_tree->node);
     /* ==================== X11 位置与 Z 轴同步测试 ==================== */
-    /* 1. 验证位置提示（USPosition / PPosition） */
+    /* 1. 真实调用生产函数 woodland_xwayland_initial_position_hint 验证位置提示解析 */
     xs_normal.x = 250;
     xs_normal.y = 180;
-    xs_normal.width = 300;
-    xs_normal.height = 200;
-    xcb_size_hints_t size_hints = {
-        .flags = XCB_ICCCM_SIZE_HINT_US_POSITION,
-    };
+    int16_t hx = 0, hy = 0;
+    /* 无 hints 时应返回 false */
+    xs_normal.size_hints = NULL;
+    assert(!woodland_xwayland_initial_position_hint(&xs_normal, &hx, &hy));
+
+    /* flags 没有 US/P 标志时应返回 false */
+    xcb_size_hints_t size_hints = {0};
     xs_normal.size_hints = &size_hints;
-    struct woodland_view pos_view = {
-        .server = &server,
-        .type = WOODLAND_VIEW_XWAYLAND,
-        .xwayland_surface = &xs_normal,
-        .scene_tree = wlr_scene_tree_create(&server.scene->tree),
-    };
-    assert(!pos_view.placed);
-    if (xs_normal.size_hints && (xs_normal.size_hints->flags & (XCB_ICCCM_SIZE_HINT_US_POSITION | XCB_ICCCM_SIZE_HINT_P_POSITION))) {
-        wlr_scene_node_set_position(&pos_view.scene_tree->node, xs_normal.x, xs_normal.y);
-        pos_view.placed = true;
-    }
-    assert(pos_view.placed);
-    assert(pos_view.scene_tree->node.x == 250);
-    assert(pos_view.scene_tree->node.y == 180);
-    wlr_scene_node_destroy(&pos_view.scene_tree->node);
+    assert(!woodland_xwayland_initial_position_hint(&xs_normal, &hx, &hy));
+
+    /* 设置 US_POSITION：返回 true 且坐标匹配 */
+    size_hints.flags = XCB_ICCCM_SIZE_HINT_US_POSITION;
+    assert(woodland_xwayland_initial_position_hint(&xs_normal, &hx, &hy));
+    assert(hx == 250 && hy == 180);
+
+    /* 设置 P_POSITION：返回 true 且坐标匹配 */
+    size_hints.flags = XCB_ICCCM_SIZE_HINT_P_POSITION;
+    hx = hy = 0;
+    assert(woodland_xwayland_initial_position_hint(&xs_normal, &hx, &hy));
+    assert(hx == 250 && hy == 180);
     xs_normal.size_hints = NULL;
 
-    /* 2. 验证父子窗口提升时，联动 restack 与 Z 轴顺序 */
-    woodland_xwayland_flush(&server); // 判空安全
+    /* 2. 真实执行 view_raise：有真实 surface 的父子窗口联动提升测试 */
+    server.xwayland_restack_hook = mock_test_restack_hook;
 
     struct woodland_workspace ws_test = {.server = &server, .name = "test"};
     server.active_workspace = &ws_test;
+
+    struct wlr_surface parent_surf = {0};
+    struct wlr_xwayland_surface parent_xs = {.surface = &parent_surf};
     struct woodland_view parent_v = {
         .server = &server,
         .type = WOODLAND_VIEW_XWAYLAND,
+        .xwayland_surface = &parent_xs,
         .mapped = true,
         .workspace = &ws_test,
         .scene_tree = wlr_scene_tree_create(&server.scene->tree),
     };
+
+    struct wlr_surface child_surf = {0};
+    struct wlr_xwayland_surface child_xs = {.surface = &child_surf};
     struct woodland_view child_v = {
         .server = &server,
         .type = WOODLAND_VIEW_XWAYLAND,
+        .xwayland_surface = &child_xs,
         .mapped = true,
         .parent = &parent_v,
         .workspace = &ws_test,
         .scene_tree = wlr_scene_tree_create(&server.scene->tree),
     };
-    wl_list_insert(&server.views, &parent_v.link);
-    wl_list_insert(&server.views, &child_v.link);
 
-    /* 聚焦父窗口并提升：子窗口联动提升，仍保持在父窗口上方 */
+    /* 初始顺序：parent_v 在前 (链表头)，child_v 在后 */
+    wl_list_insert(&server.views, &child_v.link);
+    wl_list_insert(&server.views, &parent_v.link);
+    assert(server.views.next == &parent_v.link);
+
+    /* 聚焦父窗口并提升：联动提升后，子窗口必须保持在父窗口上方 (靠近链表头) */
+    mock_restack_calls = 0;
     woodland_focus_view(&parent_v, true);
+    assert(mock_restack_calls > 0);
+    /* child_v 必须在 parent_v 之前（child_v 是 parent_v 的 prev 方向） */
     assert(child_v.link.next == &parent_v.link);
 
+    server.xwayland_restack_hook = NULL;
     wl_list_remove(&child_v.link);
     wl_list_remove(&parent_v.link);
     wlr_scene_node_destroy(&child_v.scene_tree->node);

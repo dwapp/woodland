@@ -171,6 +171,25 @@ count_after="$(echo "$toplevels_after" | grep -c '"app_id"' || true)"
     exit 1
 }
 
+# ---- 3.1) override-redirect 动态双向迁移验证（managed <-> unmanaged 无 UAF） ----
+"$XOVERRIDE" --test-toggle >"$WORK/xtoggle.log" 2>&1 &
+toggle_pid=$!
+client_pids="$client_pids $toggle_pid"
+i=0
+while [ "$i" -lt 30 ]; do
+    if grep -q "TOGGLE_OK" "$WORK/xtoggle.log" 2>/dev/null; then
+        break
+    fi
+    sleep 0.1
+    i=$((i+1))
+done
+grep -q "TOGGLE_OK" "$WORK/xtoggle.log" || {
+    echo "xoverride dynamic toggle failed or crashed (UAF)" >&2
+    cat "$WORK/xtoggle.log" >&2 || true
+    exit 1
+}
+kill -TERM "$toggle_pid" 2>/dev/null || true
+
 # ---- 4) 焦点唯一 + 关闭后焦点回退 ----
 # 同一个工作区里只能有一个窗口是"激活态"：第二个窗口拿到焦点后，
 # 第一个的标题栏必须变暗；关掉焦点窗口后，剩下的窗口要重新变亮。

@@ -128,7 +128,7 @@ void woodland_view_set_activated(struct woodland_view *view, bool activated)
     woodland_signal_emit(&view->server->view_changed, view);
 #if WOODLAND_HAVE_XWAYLAND
     if (view->type == WOODLAND_VIEW_XWAYLAND) {
-        if (view->xwayland_surface) {
+        if (view->xwayland_surface && view->xwayland_surface->xwm) {
             wlr_xwayland_surface_activate(view->xwayland_surface, activated);
         }
         return;
@@ -146,7 +146,7 @@ void woodland_view_close(struct woodland_view *view)
     }
 #if WOODLAND_HAVE_XWAYLAND
     if (view->type == WOODLAND_VIEW_XWAYLAND) {
-        if (view->xwayland_surface) {
+        if (view->xwayland_surface && view->xwayland_surface->xwm) {
             wlr_xwayland_surface_close(view->xwayland_surface);
         }
         return;
@@ -251,7 +251,6 @@ void woodland_view_map(struct woodland_view *view)
     /* 若尚未创建 handles 且属于 toplevel，按需初始化任务栏句柄（针对 Xwayland 视图） */
     if (!view->toplevel_handle && woodland_view_wants_foreign_toplevel(view)) {
         woodland_view_init_handles(view);
-        woodland_view_update_outputs(view);
     }
     /* 协议层在这里拿"窗口出现了"的第一手通知（foreign-toplevel 类） */
     woodland_signal_emit(&server->view_mapped, view);
@@ -352,6 +351,10 @@ void woodland_view_destroy(struct woodland_view *view)
     }
     if (was_focused) {
         woodland_focus_fallback(view->server);
+    }
+    if (view->type == WOODLAND_VIEW_XWAYLAND && view->scene_tree) {
+        wlr_scene_node_destroy(&view->scene_tree->node);
+        view->scene_tree = NULL;
     }
     woodland_selfcheck_schedule(view->server, "destroy");
     free(view->title);
