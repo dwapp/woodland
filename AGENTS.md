@@ -10,7 +10,7 @@
 ## 代码在哪里
 
 - `include/`：公开头（模块间接口），`include/woodland.h` 是全局状态 `struct woodland_server`。
-- `src/`：按模块子目录分层（`server/`、`util/`，后续 milestone 增加 `seat/`、`scene/`、`shell/` 等）。
+- `src/`：按模块子目录分层（`server/`、`util/`、`seat/`、`shell/`、`cursor/`、`dnd/`（拖拽）、`ipc/`、`protocol/` 等）。
 - `tests/unit/`：单元测试；`tests/smoke/`：冒烟测试脚本。
 - `protocols/treeland/`：从 treeland 生态抄来的协议 XML **只读副本**（MIT），
   由 `src/protocol/meson.build` 用 `wayland-scanner` 生成服务端头/接口表。
@@ -48,6 +48,7 @@ meson test -C build --print-errorlogs  # 跑全部测试
 5. **别在 1px 细条上设圆角。** `corner_radii` 按 rect 自身尺寸裁剪，1px 宽/高的边框条会把半径 clamp 掉，角上不是没线就是留直角尖角。圆角描边在 effects 构建下用覆盖整个外框的 rect + `clipped_region` 挖空内框：外半径 `R+b`、内半径 `R`，见 `src/ssd/ssd.c:ssd_apply_frame_corners()`。
 6. **scenefx 0.5 的 blur 节点渲染不使用 clipped_region。** 局部模糊（ext-background-effect 非全屏区域）要把 blur 节点自身摆在 region 矩形上，且此时不能挂内容 buffer 作为 transparency mask（mask 会被拉伸挤压）；只有盖满全 surface 时才按全窗口尺寸摆节点并挂 mask。
 7. **预模糊缓存节点（optimized blur）置于 background 层与 bottom 层之间。** 每个输出一个 `wlr_scene_optimized_blur`，缓存壁纸/桌面底图的模糊；贴在壁纸上的 bottom 层（Dock）以及开启 `[effects] blur_optimized` 时的普通窗口只采样此缓存，大幅降低多窗口重采样开销。底层壁纸 commit 或可见性切换时需调用 `woodland_effect_mark_blur_dirty()`。
+8. **不要用 `wlr_scene_drag_icon_create()`。** scenefx 0.5 在头文件里声明了它，但 `.so` 里**没有这个符号**（`nm -D` 的 82 个 `wlr_scene_*` 导出里查不到），链接会静默落到 `libwlroots` 的实现上；而那个实现是按**它自己的** `wlr_scene_node` / `wlr_scene_tree` 布局去访问 scenefx 建的树。两份结构体目前逐字段相同所以能跑，但这是跨库结构体布局的隐式依赖——scenefx 哪天加个字段就是随机内存破坏，而且只在默认的 effects 构建里出现。拖拽图标自己搭（见 `src/dnd/dnd.c`：`wlr_scene_subsurface_tree_create` + commit 里跟 `surface->current.dx/dy`）。
 
 ## 调试接口（wctl）
 
@@ -58,6 +59,7 @@ wctl get_tree   | jq '.views[] | {id,title,focused,activated,outer,snapped}'
 wctl get_tree   | jq '.views[] | {id, margins: .ssd.margins, deco}'
 wctl get_focus  | jq .        # 焦点在谁身上（recorded_view vs keyboard_view）
 wctl get_tree   | jq '.snap_preview'   # 贴边预览：active / edges / box / output
+wctl get_tree   | jq '.dnd'            # 拖拽：active / dropped / icon{w,h,visible} / target
 wctl get_trace  | jq '.entries[] | "\(.seq) \(.what) \(.obj) \(.detail)"'
 wctl self_check | jq .        # 不变量断言；失败项带 expected / actual
 wctl dump_scene | jq '.nodes' # wlr_scene 树，排查「画了但看不见」
@@ -78,7 +80,7 @@ wctl --help
             {"seq":3,"ms":31,"obj":1,"what":"focus","detail":"prev=0 raise=1"}]}
 ```
 
-- `what` 是**稳定标签**（脚本会 grep），权威清单在 `include/trace.h`：`map` / `unmap` / `destroy` / `focus` / `focus_none` / `layer_focus` / `place` / `workspace` / `output_add` / `output_remove` / `cfg_apply` / `deco` / `bg_effect` / `action` / `shortcut` / `appearance` / `ftl` / `tearing`。加新标签先改 trace.h 的清单，再发第一条轨迹。
+- `what` 是**稳定标签**（脚本会 grep），权威清单在 `include/trace.h`：`map` / `unmap` / `destroy` / `focus` / `focus_none` / `layer_focus` / `place` / `workspace` / `output_add` / `output_remove` / `cfg_apply` / `deco` / `bg_effect` / `action` / `shortcut` / `appearance` / `ftl` / `tearing` / `vt` / `snap` / `dnd`。加新标签先改 trace.h 的清单，再发第一条轨迹。
 - `detail` 只写**决策依据**（走了哪个分支、策略名、抑制窗口），不要抄 `get_tree` 已有的数值。
 - 关闭时零分配零格式化；打开后也不分配（一次 calloc）。**它只依赖 `util/json`，不许反向依赖任何业务模块**——否则会成为依赖环的入口。
 - 环的语义：`seq` 全局单调，`total` 是累计条数，`dropped = total - count` 就是被覆盖掉的条数。第一个 entry 的 `seq` 一定等于 `dropped`。

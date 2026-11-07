@@ -705,6 +705,8 @@ bool woodland_shell_init(struct woodland_server *server)
     }
     woodland_snap_preview_init(server);
     server->pointer_constraint_is_focused_hook = shell_pointer_constraint_is_focused;
+    /* dnd 是 shell 的下游，不能反过来调 selfcheck（会成环），走钩子 */
+    server->selfcheck_schedule_hook = woodland_selfcheck_schedule;
 
     return true;
 }
@@ -720,4 +722,5 @@ void woodland_shell_finish(struct woodland_server *server)
     }
     woodland_snap_preview_finish(server);
     server->pointer_constraint_is_focused_hook = NULL;
+    server->selfcheck_schedule_hook = NULL;
 }

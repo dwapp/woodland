@@ -13,6 +13,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <wlr/types/wlr_data_device.h>
 #include <wlr/types/wlr_layer_shell_v1.h>
 #include <wlr/types/wlr_output_layout.h>
 #include "scene.h"
@@ -110,6 +111,10 @@ static const struct ipc_field_doc get_tree_fields[] = {
     {"focus", "obj", "same fields as get_focus"},
     {"snap_preview", "obj",
      "snap preview overlay: active, edges[], box[x,y,w,h], output"},
+    {"dnd", "obj",
+     "wl_data_device drag: active (bool), dropped (bool), "
+     "icon{w,h,visible}, target (str|null: app_id, else title, else layer "
+     "namespace — the surface under the cursor)"},
     {"views", "obj[]",
      "per view: id, kind, z, title, app_id, tag, workspace, "
      "output, mapped, placed, minimized, maximized, "
@@ -509,6 +514,53 @@ static void append_view_details(struct woodland_server *server, struct woodland_
     woodland_json_obj_close(&obj);
 }
 
+/*
+ * 拖拽状态。
+ *
+ * 为什么值得进 get_tree：拖拽的 bug 全是"掉错了窗口""图标没跟手"这类
+ * 时序问题，录屏数像素既慢又说不清。一行 JSON 直接给出 active / 图标
+ * 尺寸 / 光标下是谁，够定位九成问题。
+ */
+static void append_dnd(struct woodland_server *server, struct woodland_json *out)
+{
+    const struct woodland_dnd *dnd = &server->dnd;
+    bool active = dnd->drag != NULL;
+
+    struct woodland_json_obj obj;
+    woodland_json_obj_open(&obj, out);
+    woodland_json_obj_bool(&obj, "active", active);
+    woodland_json_obj_bool(&obj, "dropped", active && dnd->drag->dropped);
+
+    /* 图标尺寸取 surface 当前状态：客户端还没贴 buffer 时是 0x0 */
+    const struct wlr_surface *icon_surface =
+        (active && dnd->icon.icon) ? dnd->icon.icon->surface : NULL;
+    woodland_json_obj_key(&obj, "icon");
+    struct woodland_json_obj icon;
+    woodland_json_obj_open(&icon, out);
+    woodland_json_obj_int(&icon, "width", icon_surface ? icon_surface->current.width : 0);
+    woodland_json_obj_int(&icon, "height", icon_surface ? icon_surface->current.height : 0);
+    woodland_json_obj_bool(&icon, "visible", dnd->icon.tree && dnd->icon.tree->node.enabled);
+    woodland_json_obj_close(&icon);
+
+    /*
+     * 投放目标：先看 toplevel（app_id 比标题稳定），再看 layer surface
+     * （拖到 panel/Dock 上时没有 app_id，用 namespace 认人）。
+     */
+    const char *target = NULL;
+    struct woodland_view *view = woodland_view_from_surface(dnd->last_surface);
+    if (view) {
+        target = (view->app_id && view->app_id[0]) ? view->app_id : view->title;
+    } else if (dnd->last_surface) {
+        struct wlr_layer_surface_v1 *layer =
+            wlr_layer_surface_v1_try_from_wlr_surface(dnd->last_surface);
+        if (layer) {
+            target = layer->namespace;
+        }
+    }
+    woodland_json_obj_str(&obj, "target", target);
+    woodland_json_obj_close(&obj);
+}
+
 static void ipc_get_tree(struct woodland_server *server, struct woodland_json *out)
 {
     /* first=false：ok/cmd 前缀已经手写，后面的字段自动带前置逗号 */
@@ -570,6 +622,8 @@ static void ipc_get_tree(struct woodland_server *server, struct woodland_json *o
     woodland_json_obj_close(&focus_obj);
     woodland_json_obj_key(&obj, "snap_preview");
     woodland_snap_preview_status(server, out);
+    woodland_json_obj_key(&obj, "dnd");
+    append_dnd(server, out);
 
 
     woodland_json_obj_key(&obj, "views");

@@ -3,6 +3,9 @@ subdir('util')
 subdir('trace')
 subdir('output')
 subdir('cursor')
+# dnd 排在 seat / shell 之前：那两个都要反着调它（seat 起监听器，
+# shell 的光标层拿 active 做守卫），而它只依赖 scene 与 trace。
+subdir('dnd')
 subdir('capture')
 subdir('shell')
 subdir('seat')
@@ -32,4 +35,4 @@ woodland_bin = executable('woodland',
   dependencies: [scene_deps, wayland_server],
   install: true,
   install_rpath: get_option('prefix') / get_option('libdir'),
-  link_with: [server_lib, config_lib, ime_lib, session_lock_lib, util_lib, trace_lib, output_lib, cursor_lib, shell_lib, seat_lib, workspace_lib, layer_lib, ssd_lib, effect_lib, capture_lib, ipc_lib, protocol_lib] + xwayland_libs)
+  link_with: [server_lib, config_lib, ime_lib, session_lock_lib, util_lib, trace_lib, output_lib, cursor_lib, dnd_lib, shell_lib, seat_lib, workspace_lib, layer_lib, ssd_lib, effect_lib, capture_lib, ipc_lib, protocol_lib] + xwayland_libs)

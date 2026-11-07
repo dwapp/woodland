@@ -24,6 +24,7 @@
 #include <wlr/types/wlr_xdg_dialog_v1.h>
 #include <wlr/types/wlr_xdg_shell.h>
 
+#include "dnd.h"
 #include "ssd.h"
 #include "view.h"
 
@@ -185,6 +186,15 @@ struct woodland_server {
     struct woodland_view *pressed_view;
     enum woodland_ssd_part pressed_part;
 
+    /*
+     * 拖拽（DnD）。
+     *
+     * 内联而不是指针：它和 hover_view / pressed_view 同层，都是"指针此刻在
+     * 干什么"的状态，生命周期跟 server 一致。光标层的 motion/button 与 wctl
+     * 都要读它，指针会多一次判空和一次间接。
+     */
+    struct woodland_dnd dnd;
+
     /* shell 与视图 */
     struct wlr_xdg_shell *xdg_shell;
     struct wl_list views; // struct woodland_view.link 链表头（z 序，最上在前）
@@ -249,6 +259,14 @@ struct woodland_server {
      */
     bool (*pointer_constraint_is_focused_hook)(struct woodland_server *server,
                                                struct wlr_pointer_constraint_v1 *constraint);
+    /*
+     * 状态变化后调度一次不变量自检。
+     *
+     * 和上面同一个理由的镜像：selfcheck.c 在 shell 库里，而 dnd 是 shell 的
+     * **下游**（光标层要调 dnd），dnd 直接调它的调度函数就成环了。由 shell
+     * 在 init / finish 挂上、摘掉；NULL 表示 shell 没建起来（单测里就是）。
+     */
+    void (*selfcheck_schedule_hook)(struct woodland_server *server, const char *reason);
 
     /* 截图/录屏（src/capture） */
     struct wlr_screencopy_manager_v1 *screencopy_manager;
