@@ -39,7 +39,7 @@ meson test -C build --print-errorlogs  # 跑全部测试
 
 ### scenefx 必读（随 -Deffects=enabled 编译期启用，现为默认）
 
-启用特效构建（`-Deffects=enabled`，默认）时使用 scenefx 0.5，它**自带一套同名 `wlr_scene_*`** 符号（链接顺序 `scene_deps = [scenefx, wlroots]`），带来 blur / 圆角 / 阴影节点。运行期还可通过 `[effects] enabled=false` 动态关闭效果（CI 无 GPU 时用 `-Deffects=disabled` 整体退回 pixman 直出）。五条硬约束：
+启用特效构建（`-Deffects=enabled`，默认）时使用 scenefx 0.5，它**自带一套同名 `wlr_scene_*`** 符号（链接顺序 `scene_deps = [scenefx, wlroots]`），带来 blur / 圆角 / 阴影节点。运行期还可通过 `[effects] enabled=false` 动态关闭效果（CI 无 GPU 时用 `-Deffects=disabled` 整体退回 pixman 直出）。八条硬约束：
 
 1. **`.c` 里只 `#include "scene.h"`，不要直接 include `wlr/types/wlr_scene.h` 或 `scenefx/...`。** `include/scene.h` 是唯一入口，按 `WOODLAND_HAVE_EFFECTS` 宏切入正确的场景头文件。
 2. **宏判断必须在 `#include "config.h"` 之后。** 避免未定义宏直接参与 `#if` 判断被当作 0 处理。
@@ -48,7 +48,7 @@ meson test -C build --print-errorlogs  # 跑全部测试
 5. **别在 1px 细条上设圆角。** `corner_radii` 按 rect 自身尺寸裁剪，1px 宽/高的边框条会把半径 clamp 掉，角上不是没线就是留直角尖角。圆角描边在 effects 构建下用覆盖整个外框的 rect + `clipped_region` 挖空内框：外半径 `R+b`、内半径 `R`，见 `src/ssd/ssd.c:ssd_apply_frame_corners()`。
 6. **scenefx 0.5 的 blur 节点渲染不使用 clipped_region。** 局部模糊（ext-background-effect 非全屏区域）要把 blur 节点自身摆在 region 矩形上，且此时不能挂内容 buffer 作为 transparency mask（mask 会被拉伸挤压）；只有盖满全 surface 时才按全窗口尺寸摆节点并挂 mask。
 7. **预模糊缓存节点（optimized blur）置于 background 层与 bottom 层之间。** 每个输出一个 `wlr_scene_optimized_blur`，缓存壁纸/桌面底图的模糊；贴在壁纸上的 bottom 层（Dock）以及开启 `[effects] blur_optimized` 时的普通窗口只采样此缓存，大幅降低多窗口重采样开销。底层壁纸 commit 或可见性切换时需调用 `woodland_effect_mark_blur_dirty()`。
-8. **不要用 `wlr_scene_drag_icon_create()`。** scenefx 0.5 在头文件里声明了它，但 `.so` 里**没有这个符号**（`nm -D` 的 82 个 `wlr_scene_*` 导出里查不到），链接会静默落到 `libwlroots` 的实现上；而那个实现是按**它自己的** `wlr_scene_node` / `wlr_scene_tree` 布局去访问 scenefx 建的树。两份结构体目前逐字段相同所以能跑，但这是跨库结构体布局的隐式依赖——scenefx 哪天加个字段就是随机内存破坏，而且只在默认的 effects 构建里出现。拖拽图标自己搭（见 `src/dnd/dnd.c`：`wlr_scene_subsurface_tree_create` + commit 里跟 `surface->current.dx/dy`）。
+8. **`wlr_scene_*` 符号分属两个库，这个分法是有意的。** scenefx 只替换 buffer / rect / blur / shadow / node / tree / output 那一层；`wlr_scene_subsurface_tree_create`、`wlr_scene_surface_create`、`wlr_scene_xdg_surface_create`、`wlr_scene_layer_surface_v1_create`、`wlr_scene_drag_icon_create` 都是**头里声明、`.so` 里没有实现**，链接落到 libwlroots 那份。这是这个混合栈的正常状态——woodland 每个窗口的表面子树走的都是 libwlroots 这份。别把它们当"缺符号"去绕：自己重搭只会把同一段逻辑抄一遍。两个头里的 `struct wlr_scene_node` / `wlr_scene_tree` 逐字段相同，这一层也只调公开 API，混用是安全的。参照实现：mango（`dependency('scenefx-0.5')`）在 `handle_start_drag` 里直接 `wlr_scene_drag_icon_create`。
 
 ## 调试接口（wctl）
 

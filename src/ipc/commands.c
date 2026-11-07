@@ -533,7 +533,7 @@ static void append_dnd(struct woodland_server *server, struct woodland_json *out
 
     /* 图标尺寸取 surface 当前状态：客户端还没贴 buffer 时是 0x0 */
     const struct wlr_surface *icon_surface =
-        (active && dnd->icon.icon) ? dnd->icon.icon->surface : NULL;
+        (active && dnd->drag->icon) ? dnd->drag->icon->surface : NULL;
     woodland_json_obj_key(&obj, "icon");
     struct woodland_json_obj icon;
     woodland_json_obj_open(&icon, out);

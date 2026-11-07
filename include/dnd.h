@@ -32,14 +32,12 @@ struct wlr_surface;
  *
  * tree 是 icons 的子节点（不是 icons 本身）：icons 跟着光标走，tree 只承担
  * hotspot 增量（surface->current.dx/dy），两者相加才是图标的屏幕位置。
+ * 子树本身由 wlr_scene_drag_icon_create() 建，它自己管 dx/dy 和销毁，
+ * 这里只留一个指针 + 一条"子树没了"的监听器把它清空。
  */
 struct woodland_dnd_icon {
     struct wlr_scene_tree *tree; /* NULL = 本次拖拽没有图标（客户端可以不设） */
-    struct wlr_drag_icon *icon;
-    /* commit / destroy 两条监听器同生同灭，一个标志够 */
-    bool armed;
-    struct wl_listener commit;
-    struct wl_listener destroy;
+    struct wl_listener tree_destroy;
 };
 
 struct woodland_dnd {
