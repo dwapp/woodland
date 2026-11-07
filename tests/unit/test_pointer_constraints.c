@@ -16,6 +16,7 @@
 #include "output.h"
 #include "protocol.h"
 #include "seat.h"
+#include "view.h"
 #include "woodland.h"
 #include "workspace.h"
 
@@ -163,7 +164,9 @@ int main(void)
     woodland_pointer_constraint_update(&server);
     assert(server.current_constraint == NULL);
 
-    /* 测试基于客户端 (wl_client) 的焦点校验：同客户端的子表面持焦点时允许限制 */
+    /* 测试基于客户端 (wl_client) 的焦点校验：同客户端的子表面持焦点时允许限制。
+     * `mock_client_a/b` 是**假 client**：只有一个地址，从不被解引用——成立的前提
+     * 是 wl_resource_get_client() 只读 resource->client 这个字段。 */
     int dummy_a = 0, dummy_b = 0;
     struct wl_client *mock_client_a = (struct wl_client *)&dummy_a;
     struct wl_client *mock_client_b = (struct wl_client *)&dummy_b;
@@ -190,6 +193,31 @@ int main(void)
     woodland_pointer_constraint_set(&server, &constraint);
     assert(server.current_constraint == &constraint);
 
+    /* 测试 6: shell 钩子路径。上面全是"没有钩子时的兜底"，产品上跑的是
+     * shell_pointer_constraint_is_focused()（会话锁 / 焦点视图 / 焦点 layer 都在那一层） */
+    assert(woodland_shell_init(&server));
+    assert(server.pointer_constraint_is_focused_hook != NULL);
+
+    /* 同一 surface 持键盘焦点 */
+    server.seat->keyboard_state.focused_surface = &surface;
+    assert(woodland_pointer_constraint_is_focused(&server, &constraint));
+    woodland_pointer_constraint_set(&server, &constraint);
+    assert(server.current_constraint == &constraint);
+
+    /* 焦点在别的 client 上：钩子同样拒绝，update 顺带把当前约束摘掉 */
+    server.seat->keyboard_state.focused_surface = &other_surface;
+    assert(!woodland_pointer_constraint_is_focused(&server, &constraint));
+    woodland_pointer_constraint_update(&server);
+    assert(server.current_constraint == NULL);
+
+    /* 同 client 的 popup 持焦点：钩子放行 */
+    server.seat->keyboard_state.focused_surface = &popup_surface;
+    assert(woodland_pointer_constraint_is_focused(&server, &constraint));
+
+    /* 摘掉钩子（shell_finish 的效果）后回到兜底判定，结论不变 */
+    server.pointer_constraint_is_focused_hook = NULL;
+    assert(woodland_pointer_constraint_is_focused(&server, &constraint));
+
     /* 清理测试资源引用与约束 */
     surface.resource = NULL;
     other_surface.resource = NULL;
@@ -201,6 +229,7 @@ int main(void)
 
     /* 逆序释放子系统 */
     woodland_protocol_finish(&server);
+    woodland_shell_finish(&server);
     woodland_workspace_finish(&server);
     woodland_seat_finish(&server);
     woodland_cursor_finish(&server);

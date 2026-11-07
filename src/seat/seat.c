@@ -307,13 +307,13 @@ static void seat_pointer_focus_change(struct wl_listener *listener, void *data)
     }
     woodland_pointer_constraint_recheck(server, event->new_surface);
 }
+
 static void seat_keyboard_focus_change(struct wl_listener *listener, void *data)
 {
     struct woodland_server *server = wl_container_of(listener, server, keyboard_focus_change);
     (void)data;
     woodland_pointer_constraint_update(server);
 }
-
 
 static void seat_request_set_selection(struct wl_listener *listener, void *data)
 {

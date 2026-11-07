@@ -241,6 +241,12 @@ struct woodland_server {
     void (*xwayland_cursor_hook)(struct woodland_server *server);
     void (*xwayland_scale_filter_hook)(struct woodland_view *view);
     void (*xwayland_refresh_hook)(struct woodland_server *server);
+    /*
+     * 指针约束的"申请者是否持有焦点"：视图 / layer / 锁屏状态只有 shell 层
+     * 知道，而 cursor_lib 不能反向依赖 shell_lib（只链 cursor_lib 的单测会缺
+     * 符号）。由 shell 在 init / finish 挂上、摘掉；NULL 表示 shell 没建起来，
+     * 此时 cursor 层退到"键盘焦点表面同 client"这条最粗的判定。
+     */
     bool (*pointer_constraint_is_focused_hook)(struct woodland_server *server,
                                                struct wlr_pointer_constraint_v1 *constraint);
 

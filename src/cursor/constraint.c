@@ -60,6 +60,36 @@ static void handle_constraint_destroy(struct wl_listener *listener, void *data)
     }
 }
 
+struct wl_client *woodland_pointer_constraint_get_client(
+        const struct wlr_pointer_constraint_v1 *constraint)
+{
+    if (!constraint) {
+        return NULL;
+    }
+    /* 约束的 resource 一定在；surface 的 resource 只是兜底（销毁中途 resource
+     * 可能已经被置空，但那之后也不该有人再问这个问题） */
+    if (constraint->resource) {
+        return wl_resource_get_client(constraint->resource);
+    }
+    if (constraint->surface && constraint->surface->resource) {
+        return wl_resource_get_client(constraint->surface->resource);
+    }
+    return NULL;
+}
+
+bool woodland_pointer_constraint_matches_keyboard_focus(struct woodland_server *server,
+                                                        struct wl_client *client)
+{
+    if (!server || !server->seat || !client) {
+        return false;
+    }
+    struct wlr_surface *kb_surface = server->seat->keyboard_state.focused_surface;
+    if (!kb_surface || !kb_surface->resource) {
+        return false;
+    }
+    return wl_resource_get_client(kb_surface->resource) == client;
+}
+
 bool woodland_pointer_constraint_is_focused(struct woodland_server *server,
                                             struct wlr_pointer_constraint_v1 *constraint)
 {
@@ -70,19 +100,16 @@ bool woodland_pointer_constraint_is_focused(struct woodland_server *server,
         return server->pointer_constraint_is_focused_hook(server, constraint);
     }
 
-    if (server->seat && server->seat->keyboard_state.focused_surface) {
-        if (server->seat->keyboard_state.focused_surface == constraint->surface) {
-            return true;
-        }
-        struct wl_client *client = constraint->resource ? wl_resource_get_client(constraint->resource) :
-            (constraint->surface->resource ? wl_resource_get_client(constraint->surface->resource) : NULL);
-        if (client && server->seat->keyboard_state.focused_surface->resource &&
-            wl_resource_get_client(server->seat->keyboard_state.focused_surface->resource) == client) {
-            return true;
-        }
+    /* 没有 shell 钩子（例如只链 cursor_lib 的单测）时的兜底：只认键盘焦点表面。
+     * 同一 surface 用指针相等判，因为此时 resource 未必还在（假 surface 没 resource） */
+    if (!server->seat) {
+        return false;
     }
-
-    return false;
+    if (server->seat->keyboard_state.focused_surface == constraint->surface) {
+        return true;
+    }
+    return woodland_pointer_constraint_matches_keyboard_focus(
+        server, woodland_pointer_constraint_get_client(constraint));
 }
 
 void woodland_pointer_constraint_set(struct woodland_server *server,
@@ -162,18 +189,16 @@ void woodland_pointer_constraint_recheck(struct woodland_server *server,
     }
     woodland_pointer_constraint_set(server, constraint);
 }
+
 void woodland_pointer_constraint_update(struct woodland_server *server)
 {
-    if (!server || !server->pointer_constraints || !server->seat) {
+    if (!server || !server->seat) {
         return;
     }
-    struct wlr_surface *surface = server->seat->pointer_state.focused_surface;
-    struct wlr_pointer_constraint_v1 *constraint = NULL;
-    if (surface) {
-        constraint = wlr_pointer_constraints_v1_constraint_for_surface(
-            server->pointer_constraints, surface, server->seat);
-    }
-    woodland_pointer_constraint_set(server, constraint);
+    /* 约束挂在"指针焦点表面"上；键盘焦点只决定它有效与否，不改变它挂在哪。
+     * 所以这里就是 recheck 的一次转发——别在这儿写第二份 surface 查询。 */
+    woodland_pointer_constraint_recheck(server,
+                                        server->seat->pointer_state.focused_surface);
 }
 
 void woodland_pointer_constraint_apply(struct woodland_server *server,
