@@ -3,8 +3,7 @@
  * treeland 壁纸协议族：wallpaper_manager（设置面板 → 合成器）+
  * wallpaper_shell / wallpaper_notifier（壁纸客户端 ⇐ 合成器）。
  *
- * 职责边界（对齐 treeland 的现状，见 docs/superpowers/specs/
- * 2026-11-05-wallpaper-protocols-design.md）：
+ * 职责边界（对齐 treeland 的现状，见 docs/wallpaper-protocols.md）：
  *
  *   - manager 只做**路径级**校验 + 记配置 + 回 changed/failed。合成器不解码
  *     任何图片/视频——解码在 treeland-wallpaper-factory 里（图片用 Qt、
