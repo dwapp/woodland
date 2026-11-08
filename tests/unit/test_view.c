@@ -650,21 +650,69 @@ int main(void)
         .scene_tree = wlr_scene_tree_create(&server.scene->tree),
     };
 
-    /* 初始顺序：parent_v 在前 (链表头)，child_v 在后 */
-    wl_list_insert(&server.views, &child_v.link);
+    struct wlr_surface other_surf = {0};
+    struct wlr_xwayland_surface other_xs = {.surface = &other_surf};
+    struct woodland_view other_v = {
+        .server = &server,
+        .type = WOODLAND_VIEW_XWAYLAND,
+        .xwayland_surface = &other_xs,
+        .mapped = true,
+        .workspace = &ws_test,
+        .scene_tree = wlr_scene_tree_create(&server.scene->tree),
+    };
+
+    /* 2.1 基础功能验证：两个独立无关联窗口，点击/聚焦下层窗口必须提升至 Z 轴最顶层 */
+    wl_list_insert(&server.views, &other_v.link);
     wl_list_insert(&server.views, &parent_v.link);
     assert(server.views.next == &parent_v.link);
+    assert(parent_v.link.next == &other_v.link);
 
-    /* 聚焦父窗口并提升：联动提升后，子窗口必须保持在父窗口上方 (靠近链表头) */
+    /* 聚焦下层的 other_v：必须提升到链表头且高于 parent_v */
+    woodland_focus_view(&other_v, true);
+    assert(server.views.next == &other_v.link);
+    assert(other_v.link.next == &parent_v.link);
+
+    /* 再聚焦 parent_v：必须重新回到最顶层 */
+    woodland_focus_view(&parent_v, true);
+    assert(server.views.next == &parent_v.link);
+    assert(parent_v.link.next == &other_v.link);
+
+    wl_list_remove(&other_v.link);
+    wl_list_remove(&parent_v.link);
+
+    /* 2.2 父子联动提升与层叠层级验证：
+     * 初始顺序：other_v (最上) -> parent_v -> child_v (最下) */
+    wl_list_insert(&server.views, &child_v.link);
+    wl_list_insert(&server.views, &parent_v.link);
+    wl_list_insert(&server.views, &other_v.link);
+    assert(server.views.next == &other_v.link);
+
+    /* 聚焦父窗口 parent_v 并提升：
+     * parent_v 与 child_v 必须联动提升到 other_v 之上，且 child_v 必须保持在 parent_v 上方 */
     mock_restack_calls = 0;
     woodland_focus_view(&parent_v, true);
     assert(mock_restack_calls > 0);
-    /* child_v 必须在 parent_v 之前（child_v 是 parent_v 的 prev 方向） */
+    assert(server.views.next == &child_v.link);
+    assert(child_v.link.next == &parent_v.link);
+    assert(parent_v.link.next == &other_v.link);
+
+    /* 聚焦外部 unrelated 窗口 other_v：other_v 提升到最顶层 */
+    woodland_focus_view(&other_v, true);
+    assert(server.views.next == &other_v.link);
+    assert(other_v.link.next == &child_v.link);
     assert(child_v.link.next == &parent_v.link);
 
+    /* 聚焦子窗口 child_v：child_v 提升到最顶层，parent_v 仍在 other_v 之上 */
+    woodland_focus_view(&child_v, true);
+    assert(server.views.next == &child_v.link);
+    assert(child_v.link.next == &parent_v.link);
+    assert(parent_v.link.next == &other_v.link);
+
     server.xwayland_restack_hook = NULL;
+    wl_list_remove(&other_v.link);
     wl_list_remove(&child_v.link);
     wl_list_remove(&parent_v.link);
+    wlr_scene_node_destroy(&other_v.scene_tree->node);
     wlr_scene_node_destroy(&child_v.scene_tree->node);
     wlr_scene_node_destroy(&parent_v.scene_tree->node);
 #endif

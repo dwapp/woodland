@@ -212,12 +212,30 @@ struct woodland_view *woodland_focus_modal_dialog(struct woodland_view *view)
 
 /* ==================== 聚焦入口 ==================== */
 
+static bool view_is_descendant_of(const struct woodland_view *view,
+                                  const struct woodland_view *ancestor)
+{
+    if (!view || !ancestor) {
+        return false;
+    }
+    const struct woodland_view *p = view->parent;
+    for (int i = 0; i < FOCUS_CHAIN_MAX && p; i++) {
+        if (p == ancestor) {
+            return true;
+        }
+        p = p->parent;
+    }
+    return false;
+}
+
 static void view_raise_node(struct woodland_view *view)
 {
     if (!view || !view->mapped) {
         return;
     }
-    wlr_scene_node_raise_to_top(&view->scene_tree->node);
+    if (view->scene_tree) {
+        wlr_scene_node_raise_to_top(&view->scene_tree->node);
+    }
     wl_list_remove(&view->link);
     wl_list_insert(&view->server->views, &view->link);
     if (view->server && view->server->xwayland_restack_hook) {
@@ -237,17 +255,29 @@ static void view_raise(struct woodland_view *view)
         root = root->parent;
     }
 
-    if (root != view && root->mapped) {
+    if (root->mapped) {
         view_raise_node(root);
     }
 
-    /* 将 root 的全部关联子窗口一并提升（保持在父窗口之上） */
-    struct woodland_view *it, *tmp;
-    wl_list_for_each_reverse_safe(it, tmp, &view->server->views, link) {
-        if (it != root && it != view && it->parent == root && it->mapped && !it->minimized) {
-            view_raise_node(it);
+    /* 将 root 的全部关联子窗口一并提升（保持在父窗口之上）。
+     * 先快照收集到数组，避免边逆序遍历 views 链表边头部插入导致死循环。 */
+    struct wl_array children;
+    wl_array_init(&children);
+    struct woodland_view *it;
+    wl_list_for_each_reverse(it, &view->server->views, link) {
+        if (it != root && it != view && view_is_descendant_of(it, root) && it->mapped && !it->minimized) {
+            struct woodland_view **entry = wl_array_add(&children, sizeof(*entry));
+            if (entry) {
+                *entry = it;
+            }
         }
     }
+
+    struct woodland_view **child;
+    wl_array_for_each(child, &children) {
+        view_raise_node(*child);
+    }
+    wl_array_release(&children);
 
     /* 若当前聚焦的目标窗口不是 root，将其提升至最顶层（保持在所有兄弟子窗口之上） */
     if (root != view) {
@@ -298,7 +328,7 @@ void woodland_focus_view(struct woodland_view *view, bool raise)
 
     struct wlr_seat *seat = server->seat;
     struct woodland_view *prev = focus_recorded(server);
-    bool already = (prev == view) && (seat->keyboard_state.focused_surface == surface);
+    bool already = (prev == view) && seat && (seat->keyboard_state.focused_surface == surface);
 
     /* toplevel 拿到焦点即 layer 失焦 */
     server->focused_layer = NULL;
