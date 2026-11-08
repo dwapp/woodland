@@ -13,7 +13,7 @@
  * seat->pointer_state 里的 grab serial），headless 后端不产生指针事件。
  * reject 与 accept 只差那一行校验结果，所以这里覆盖到的是"接线通了"+
  * "拒绝时源被销毁"，accept 之后的图标/投放走真机手测清单
- * （docs/superpowers/specs/2026-11-08-clipboard-dnd-design.md §8.3）。
+ * （docs/clipboard-dnd.md §8.3）。
  */
 #include <stdio.h>
 #include <stdlib.h>

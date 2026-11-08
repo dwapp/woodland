@@ -49,7 +49,7 @@ struct woodland_ime_relay {
  * 安全特权策略说明 (Security Policy):
  *
  * Woodland 为单用户 Wayland 会话合成器，依照全局协议规划（见 include/protocol.h 及
- * docs/superpowers/2026-10-22-woodland-skeleton.md），security-context-v1 暂未接线。
+ * docs/architecture.md），security-context-v1 暂未接线。
  * zwp_input_method_manager_v2 与 zwp_virtual_keyboard_manager_v1 暴露在当前会话的全局接口列表中，
  * 供用户环境下的输入法引擎（如 Fcitx5、IBus）绑定使用。
  *

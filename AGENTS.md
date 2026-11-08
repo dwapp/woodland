@@ -16,9 +16,9 @@
   由 `src/protocol/meson.build` 用 `wayland-scanner` 生成服务端头/接口表。
   不放代码、不改内容；同步办法见该目录的 `README.md`。CI 里没有
   `treeland-protocols` 包，所以**不要**改成从 `/usr/share` 取。
-- `docs/superpowers/specs/`：设计规格；`docs/superpowers/plans/`：实现计划；`docs/superpowers/`：里程碑骨架规划。
+- `docs/`：各协议与子系统的设计规格说明（`docs/architecture.md`、`docs/wallpaper-protocols.md` 等，清单见 `docs/README.md`）。
 
-模块职责划分以规格文档 §5 为准：`server`（backend/renderer/allocator/scene + 事件循环 + 渲染循环 + 输出热插拔）、`seat`（输入设备/光标/焦点）、`scene`（图层树）、`layout`（布局几何计算）等。
+模块职责划分以架构文档（`docs/architecture.md` §5）为准：`server`（backend/renderer/allocator/scene + 事件循环 + 渲染循环 + 输出热插拔）、`seat`（输入设备/光标/焦点）、`scene`（图层树）、`layout`（布局几何计算）等。
 
 ## 构建与测试
 
@@ -190,13 +190,13 @@ X11 窗口的缩放滤波（按所在输出的 scale 选 nearest/bilinear）全�
 
 ## 里程碑
 
-进度见 `docs/superpowers/2026-10-22-woodland-skeleton.md`：
+进度记录：
 
 - **M0（已完成，已合入 main）**：可编译骨架（meson + wrap、util/log、server 生命周期、headless 冒烟）。
 - **M1（进行中，feature/m1-output-render 分支）**：输出与渲染循环（输出热插拔、`wlr_output_layout`、`wlr_scene_output` 渲染、光标 + cursor-shape）。
 - **M2~M6**：窗口管理、SSD/特效、私有协议、IME/壁纸/屏保、wine 协议。
 - **壁纸协议（treeland-wallpaper-shell / -manager / -notifier）已实现**（`feature/wallpaper`）：
-  设计规格见 `docs/superpowers/specs/2026-11-05-wallpaper-protocols-design.md`。
+  设计规格见 `docs/wallpaper-protocols.md`。
   woodland 只做路径校验、配置持久化（`$XDG_CONFIG_HOME/woodland/wallpaper.json`）与
   播放控制，解码交给 `treeland-wallpaper-factory`；壁纸 surface 画在 layer-shell 的
   background 之下。改这块要留意两件事：一是**可见性裁决**（一个源一个 surface、全堆在

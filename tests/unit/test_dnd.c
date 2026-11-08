@@ -6,7 +6,7 @@
  * **真实的** pointer button press（wlr_seat_validate_pointer_grab_serial 查的
  * 是 seat->pointer_state 里的 grab serial），headless 后端不产生指针事件，
  * 客户端也就拿不到可用 serial。真拖拽只能真机手测（清单见
- * docs/superpowers/specs/2026-11-08-clipboard-dnd-design.md §8.3）。
+ * docs/clipboard-dnd.md §8.3）。
  *
  * 这里覆盖状态机本身：图标树的开关与置顶、客户端不给图标、未 start 就
  * destroy、重复 destroy、以及"命中图标自己"的判定。
