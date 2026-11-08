@@ -18,7 +18,7 @@ woodland 当前（M3 后）的 scene 树结构为：`根 → 10 个工作区树 
 
 ## 2. 非目标（显式砍掉）
 
-- layer-shell popup 的 bottom→top 层重定位（labwc `move_popup_to_top_layer`，针对 lxqt-panel 类客户端）。popup 直接挂在其 layer surface 的 tree 下。
+- layer-shell popup 的 bottom→top 层重定位（labwc `move_popup_to_top_layer`；当前 popup 直接挂在其 layer surface 的 tree 下，满足大部分需求；后续随 LXQt 支持深入可按需补强重定位）。
 - fractional-scale 通知（`wlr_fractional_scale_v1_notify_scale`）。
 - `usable_area_override` 配置（rc.xml 定制边距）。
 - 显示桌面（show-desktop）、cycle OSD 树、session-lock 树。
