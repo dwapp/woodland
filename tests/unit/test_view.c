@@ -128,6 +128,29 @@ int main(void)
 
     /* 外框比工作区还大：不吸附 */
     assert(woodland_snap_axis(700, 800, 10, 790, NULL, 0, 20) == 700);
+    /* 边缘阻尼（labwc resistance 核心原则：仅在试图穿透边界时拦截，内部移动绝不拉扯，脱离边界绝不阻拦） */
+    /* 内部向左移动但未穿透：从 50 移到 15 (lo=10, 阈值 20) -> 保持 15，完全跟随光标 */
+    assert(woodland_snap_axis_motion(50, 15, 200, 10, 790, NULL, 0, 20) == 15);
+    /* 试图向左穿出左边界：从 15 移到 5 (试图穿过 lo=10) -> 拦截在 lo=10 */
+    assert(woodland_snap_axis_motion(15, 5, 200, 10, 790, NULL, 0, 20) == 10);
+    /* 穿透力量超过阻尼阈值：从 10 移到 -15 (< 10-20=-10) -> 允许穿透，到达 -15 */
+    assert(woodland_snap_axis_motion(10, -15, 200, 10, 790, NULL, 0, 20) == -15);
+    /* 离开左边界向内移动：从 10 移到 15 -> 绝不往回拉扯，到达 15 */
+    assert(woodland_snap_axis_motion(10, 15, 200, 10, 790, NULL, 0, 20) == 15);
+
+    /* 内部向右移动但未穿透：从 550 移到 580 (hi - size = 590) -> 保持 580，完全跟随光标 */
+    assert(woodland_snap_axis_motion(550, 580, 200, 10, 790, NULL, 0, 20) == 580);
+    /* 试图向右穿出右边界：从 580 移到 595 (试图穿过 590) -> 拦截在 590 */
+    assert(woodland_snap_axis_motion(580, 595, 200, 10, 790, NULL, 0, 20) == 590);
+    /* 离开右边界向内移动：从 590 移到 580 -> 绝不往回拉扯，到达 580 */
+    assert(woodland_snap_axis_motion(590, 580, 200, 10, 790, NULL, 0, 20) == 580);
+
+    /* 邻窗阻尼：邻窗右边缘位于 400，从 420 向左试图穿入 395 -> 拦截在 400 */
+    assert(woodland_snap_axis_motion(420, 395, 200, 10, 790, edges, 2, 20) == 400);
+    /* 离开邻窗右边缘向右移动：从 400 移到 405 -> 绝不往回拉扯，到达 405 */
+    assert(woodland_snap_axis_motion(400, 405, 200, 10, 790, edges, 2, 20) == 405);
+    /* 阈值 <= 0：关闭阻尼，原样返回 */
+    assert(woodland_snap_axis_motion(15, 5, 200, 10, 790, NULL, 0, 0) == 5);
 
     /*
      * transient 居中：外框（内容 + margins）以父窗口内容框为中心，
@@ -175,28 +198,30 @@ int main(void)
     server.grab_x = 0;
     server.grab_y = 0;
 
-    /* 左上角附近：外框 (12,15) 距工作区边缘 2/5px → 吸附到 (10,10) */
-    server.cursor->x = 13;
-    server.cursor->y = 42;
+    /* 窗口在 (50, 50)，向左上拖动试图穿出左边界 (lo=10) 与顶边界 (lo=10)：
+     * cursor=(5, 30) -> desired_outer=(4, 3)，在阻尼阈值内分别拦截在 (10, 10) */
+    wlr_scene_node_set_position(&drag_view.scene_tree->node, 50 + margins.left, 50 + margins.top);
+    server.cursor->x = 5;
+    server.cursor->y = 30;
     woodland_cursor_process_motion(&server, 0);
     assert(drag_view.scene_tree->node.x == 10 + margins.left); /* 11 */
     assert(drag_view.scene_tree->node.y == 10 + margins.top);  /* 37 */
 
-    /* 中间空地：x/y 都离候选线 > 阈值 → 不吸附，内容原点=光标位置 */
+    /* 中间空地：不穿透边界 -> 完全跟随光标，内容原点=光标位置 */
     server.cursor->x = 300;
     server.cursor->y = 200;
     woodland_cursor_process_motion(&server, 0);
     assert(drag_view.scene_tree->node.x == 300);
     assert(drag_view.scene_tree->node.y == 200);
 
-    /* 右边框附近：外框右边贴住工作区右边界（790 - 402 = 388） */
-    server.cursor->x = 386;
+    /* 右边框阻尼：试图向右穿出工作区右边界（790 - 402 = 388），cursor=392 -> 拦截在 388 */
+    server.cursor->x = 392;
     server.cursor->y = 200;
     woodland_cursor_process_motion(&server, 0);
     assert(drag_view.scene_tree->node.x == 388 + margins.left); /* 389 */
 
     /* 贴邻窗：第二个窗口内容 (500,100) 200x200，左外边缘 499；
-     * 我们的外框 x 拖到 494（差 5px）→ 吸附到 499 */
+     * 我们的外框向右试图穿入邻窗左边缘 (cursor=502 -> desired_x=501 > 499) -> 拦截在 499 */
     struct wlr_xdg_surface peer_base = {0};
     peer_base.geometry = (struct wlr_box){.width = 200, .height = 200};
     struct wlr_xdg_toplevel peer_toplevel = {.base = &peer_base};
@@ -208,7 +233,7 @@ int main(void)
     wlr_scene_node_set_position(&peer_view.scene_tree->node, 500, 100);
     wl_list_insert(&server.views, &peer_view.link);
 
-    server.cursor->x = 495;
+    server.cursor->x = 502;
     server.cursor->y = 200;
     woodland_cursor_process_motion(&server, 0);
     assert(drag_view.scene_tree->node.x == 500);
@@ -250,6 +275,31 @@ int main(void)
     struct wlr_foreign_toplevel_handle_v1_output *tlo =
         wl_container_of(ft_view.toplevel_handle->outputs.next, tlo, link);
     assert(tlo->output == out);
+    assert(ft_view.outputs_initialized && ft_view.outputs != 0);
+    uint64_t old_outputs = ft_view.outputs;
+    /* 同一屏幕内平移 (150, 100) -> outputs 掩码保持不变 */
+    wlr_scene_node_set_position(&ft_view.scene_tree->node, 150, 100);
+    woodland_view_update_outputs(&ft_view);
+    assert(ft_view.outputs == old_outputs);
+
+    /* 测试 grab_context 前置记录与复用 */
+    server.grab_context.active = true;
+    server.grab_context.view = &ft_view;
+    server.grab_context.cursor_x = 200;
+    server.grab_context.cursor_y = 150;
+    server.grab_context.node_x = 150;
+    server.grab_context.node_y = 100;
+    /* 模拟客户端 request_move 延迟到达期间光标移动到 (220, 160) */
+    server.cursor->x = 220;
+    server.cursor->y = 160;
+    woodland_view_begin_interactive(&ft_view, WOODLAND_CURSOR_MOVE, 0);
+    /* 抓取偏移量使用按下时的精准坐标 (200 - 150 = 50, 150 - 100 = 50) */
+    assert(server.grab_x == 50);
+    assert(server.grab_y == 50);
+    assert(server.drag_start_x == 200);
+    assert(server.drag_start_y == 150);
+    assert(!server.grab_context.active);
+    woodland_cursor_reset_mode(&server);
 
     /* 移到输出 2 内部 (900, 100) -> 离开输出 1，进入输出 2 */
     wlr_scene_node_set_position(&ft_view.scene_tree->node, 900, 100);
@@ -355,8 +405,12 @@ int main(void)
     woodland_json_finish(&json);
 
     /* 创建测试 view 并展示左半屏贴边预览 */
+    struct wlr_xdg_surface preview_base = {0};
+    preview_base.geometry = (struct wlr_box){.width = 400, .height = 300};
+    struct wlr_xdg_toplevel preview_toplevel = {.base = &preview_base};
     struct woodland_view preview_view = {0};
     preview_view.server = &server;
+    preview_view.xdg_toplevel = &preview_toplevel;
     preview_view.mapped = true;
     preview_view.scene_tree = wlr_scene_tree_create(&server.scene->tree);
     assert(preview_view.scene_tree);
@@ -398,6 +452,30 @@ int main(void)
     assert(!server.snap_preview.edges);
     assert(server.snap_preview.tree == NULL);
 
+    /* 拖拽最大化窗口恢复：按光标水平比例锚定（labwc max_move_scale 同款） */
+    preview_base.geometry = (struct wlr_box){.width = 780, .height = 580};
+    server.cursor->x = 10 + 0.75 * 780; /* 595 */
+    server.cursor->y = 15;
+    preview_view.saved_geometry = (struct wlr_box){.x = 50, .y = 50, .width = 400, .height = 300};
+    woodland_view_begin_interactive(&preview_view, WOODLAND_CURSOR_MOVE, 0);
+    /* 抖动在防抖阈值内：保持最大化状态（防抖误触） */
+    server.cursor->x = 597;
+    woodland_cursor_process_motion(&server, 0);
+    assert(preview_view.maximized);
+
+    /* 真正拖动超过阈值：触发 unsnap 并按比例锚定 */
+    server.cursor->x = 625;
+    woodland_cursor_process_motion(&server, 0);
+    assert(!preview_view.maximized);
+    assert(server.cursor_mode == WOODLAND_CURSOR_MOVE);
+    /* 模拟客户端处理 configure(400, 300) 后提交新尺寸 */
+    preview_base.geometry = (struct wlr_box){.width = 400, .height = 300};
+    struct wlr_box unsnapped_outer;
+    woodland_view_outer_box(&preview_view, &unsnapped_outer);
+    assert(unsnapped_outer.x != (int)(server.cursor->x - unsnapped_outer.width / 2));
+    double frac = (server.cursor->x - unsnapped_outer.x) / (double)unsnapped_outer.width;
+    assert(frac >= 0.70 && frac <= 0.85);
+    woodland_cursor_reset_mode(&server);
     wlr_scene_node_destroy(&preview_view.scene_tree->node);
 
     /*

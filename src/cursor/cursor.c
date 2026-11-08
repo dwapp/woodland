@@ -71,8 +71,13 @@ void woodland_cursor_finish(struct woodland_server *server)
 
 void woodland_cursor_set(struct woodland_server *server, const char *name)
 {
+    if (!server || !server->cursor) {
+        return;
+    }
     wlr_cursor_unset_image(server->cursor);
-    wlr_cursor_set_xcursor(server->cursor, server->xcursor_manager, name);
+    if (server->xcursor_manager) {
+        wlr_cursor_set_xcursor(server->cursor, server->xcursor_manager, name);
+    }
 }
 
 void woodland_cursor_load_scale(struct woodland_server *server, float scale)

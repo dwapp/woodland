@@ -77,17 +77,30 @@ static int collect_snap_edges(struct woodland_server *server, struct woodland_vi
 /* ==================== 拖动前恢复尺寸 ==================== */
 
 /*
- * 拖动已最大化/已贴边的窗口：先恢复原尺寸，再把标题栏摆到光标下方。
- *
- * 直接把窗口平移到光标处是错的——最大化窗口一旦被拖，用户期望它缩回
- * 原来的大小并"挂在"光标上（labwc / 多数桌面的行为）。
+ * 按光标相对原窗口外框的水平比例锚定新外框，避免硬编码居中导致的跳变（labwc max_move_scale 同款）。
  */
-static void view_unsnap_for_drag(struct woodland_view *view)
+static int max_move_scale(double pos_cursor, double pos_old, double size_old, double size_new)
+{
+    if (size_old <= 0.0) {
+        return (int)(pos_cursor - size_new / 2.0);
+    }
+    double anchor_frac = (pos_cursor - pos_old) / size_old;
+    if (anchor_frac < 0.0) {
+        anchor_frac = 0.0;
+    } else if (anchor_frac > 1.0) {
+        anchor_frac = 1.0;
+    }
+    return (int)(pos_cursor - anchor_frac * size_new);
+}
+
+/*
+ * 拖动已最大化/已贴边的窗口：先恢复原尺寸，再把标题栏按比例锚定到光标下方。
+ */
+static void view_unsnap_for_drag(struct woodland_view *view, double cur_x, double cur_y)
 {
     if (!view->maximized && view->snapped_edges == 0) {
         return;
     }
-    struct woodland_server *server = view->server;
 
     struct wlr_box restore; /* 内容框 */
     if (view->maximized) {
@@ -113,16 +126,42 @@ static void view_unsnap_for_drag(struct woodland_view *view)
     view->pending_snap_edges = 0;
     woodland_view_set_tiled(view, 0);
 
+    if (restore.width <= 0 || restore.height <= 0) {
+        restore.width = 640;
+        restore.height = 480;
+    }
+
     struct woodland_ssd_margins m;
     woodland_ssd_get_margins(view, &m);
+
+    /* 获取旧外框，按光标相对旧外框的水平比例锚定新外框，使用传入的精确光标坐标 */
+    struct wlr_box old_outer;
+    woodland_view_outer_box(view, &old_outer);
+    int new_outer_w = restore.width + m.left + m.right;
+    int new_outer_h = restore.height + m.top + m.bottom;
+    int target_outer_x = max_move_scale(cur_x, old_outer.x, old_outer.width, new_outer_w);
+    int target_outer_y = (int)(cur_y - m.top / 2.0) - m.top;
+
+    struct wlr_box new_outer = {
+        .x = target_outer_x,
+        .y = target_outer_y,
+        .width = new_outer_w,
+        .height = new_outer_h,
+    };
+    struct woodland_output *wo = woodland_output_for_view(view);
+    if (wo) {
+        struct wlr_box area;
+        woodland_output_workarea(wo, &area);
+        woodland_box_constrain(&new_outer, &area);
+    }
+
     struct wlr_box target = {
-        .x = (int)(server->cursor->x - restore.width / 2.0),
-        .y = (int)(server->cursor->y - m.top / 2.0),
+        .x = new_outer.x + m.left,
+        .y = new_outer.y + m.top,
         .width = restore.width,
         .height = restore.height,
     };
     shell_view_apply_geometry(view, &target);
-    woodland_view_constrain(view);
     shell_view_schedule_configure(view);
 }
 
@@ -155,15 +194,41 @@ void woodland_view_begin_interactive(struct woodland_view *view, enum woodland_c
     struct woodland_server *server = view->server;
     server->grabbed_view = view;
     server->cursor_mode = mode;
-    server->drag_start_x = server->cursor->x;
-    server->drag_start_y = server->cursor->y;
+
+    double cur_x = server->cursor->x;
+    double cur_y = server->cursor->y;
+    int node_x = view->scene_tree ? view->scene_tree->node.x : 0;
+    int node_y = view->scene_tree ? view->scene_tree->node.y : 0;
+
+    /* 若存在按下时记录的前置抓取上下文且匹配本视图，复用它以消除 RPC 往返延迟带来的漂移 */
+    if (server->grab_context.active && server->grab_context.view == view) {
+        cur_x = server->grab_context.cursor_x;
+        cur_y = server->grab_context.cursor_y;
+        node_x = server->grab_context.node_x;
+        node_y = server->grab_context.node_y;
+        server->grab_context.active = false;
+    }
+
+    server->drag_start_x = cur_x;
+    server->drag_start_y = cur_y;
 
     if (mode == WOODLAND_CURSOR_MOVE) {
-        /* 拖动最大化/贴边的窗口：先恢复原尺寸再跟随光标（labwc 同款），
-         * 否则窗口只能被整体平移，用户没法把它"拉下来" */
-        view_unsnap_for_drag(view);
-        server->grab_x = server->cursor->x - view->scene_tree->node.x;
-        server->grab_y = server->cursor->y - view->scene_tree->node.y;
+        /*
+         * 若配置将 snap_distance 设为 0，则立即恢复尺寸；
+         * 否则延迟到 shell_process_cursor_move 超过防抖阈值才恢复，
+         * 避免双击最大化或点击标题栏按钮时的微小抖动误触解绑（labwc unmaximize_threshold 同款）。
+         */
+        int unmax_threshold =
+            server->config ? server->config->general.snap_distance : WOODLAND_SNAP_DISTANCE;
+        if (unmax_threshold <= 0) {
+            view_unsnap_for_drag(view, cur_x, cur_y);
+            if (view->scene_tree) {
+                node_x = view->scene_tree->node.x;
+                node_y = view->scene_tree->node.y;
+            }
+        }
+        server->grab_x = cur_x - node_x;
+        server->grab_y = cur_y - node_y;
         woodland_cursor_set(server, "grabbing");
     } else {
         /* 手动缩放即放弃贴边状态（尺寸由用户接管） */
@@ -172,15 +237,15 @@ void woodland_view_begin_interactive(struct woodland_view *view, enum woodland_c
         struct wlr_box geo_box;
         woodland_view_content_box(view, &geo_box);
         double border_x =
-            (view->scene_tree->node.x + geo_box.x) + ((edges & WLR_EDGE_RIGHT) ? geo_box.width : 0);
-        double border_y = (view->scene_tree->node.y + geo_box.y) +
+            (node_x + geo_box.x) + ((edges & WLR_EDGE_RIGHT) ? geo_box.width : 0);
+        double border_y = (node_y + geo_box.y) +
                           ((edges & WLR_EDGE_BOTTOM) ? geo_box.height : 0);
-        server->grab_x = server->cursor->x - border_x;
-        server->grab_y = server->cursor->y - border_y;
+        server->grab_x = cur_x - border_x;
+        server->grab_y = cur_y - border_y;
 
         server->grab_geobox = geo_box;
-        server->grab_geobox.x += view->scene_tree->node.x;
-        server->grab_geobox.y += view->scene_tree->node.y;
+        server->grab_geobox.x += node_x;
+        server->grab_geobox.y += node_y;
 
         server->resize_edges = edges;
         woodland_cursor_set_resize(server, edges);
@@ -214,11 +279,33 @@ static void xdg_toplevel_request_resize(struct wl_listener *listener, void *data
 void shell_process_cursor_move(struct woodland_server *server)
 {
     struct woodland_view *view = server->grabbed_view;
+    if (!view) {
+        return;
+    }
+
+    /* 拖动已最大化/已贴边的窗口：在防抖阈值内保持原状态，超过阈值才真正恢复（labwc unmaximize_threshold 同款） */
+    if (view->maximized || view->snapped_edges != 0) {
+        double dx = server->cursor->x - server->drag_start_x;
+        double dy = server->cursor->y - server->drag_start_y;
+        int unmax_threshold =
+            server->config ? server->config->general.snap_distance : WOODLAND_SNAP_DISTANCE;
+        if (unmax_threshold <= 0) {
+            unmax_threshold = WOODLAND_SNAP_DISTANCE;
+        }
+        if ((dx < 0 ? -dx : dx) < unmax_threshold && (dy < 0 ? -dy : dy) < unmax_threshold) {
+            return;
+        }
+        view_unsnap_for_drag(view, server->cursor->x, server->cursor->y);
+        if (view->scene_tree) {
+            server->grab_x = server->cursor->x - view->scene_tree->node.x;
+            server->grab_y = server->cursor->y - view->scene_tree->node.y;
+        }
+    }
+
     struct woodland_ssd_margins margins;
     woodland_ssd_get_margins(view, &margins);
     struct wlr_box geo;
     woodland_view_content_box(view, &geo);
-
     /* grab_x/y 是光标相对内容原点的偏移，换算成外框原点 */
     int x = (int)(server->cursor->x - server->grab_x) - margins.left;
     int y = (int)(server->cursor->y - server->grab_y) - margins.top;
@@ -241,12 +328,15 @@ void shell_process_cursor_move(struct woodland_server *server)
         int snap_threshold =
             server->config ? server->config->general.snap_distance : WOODLAND_SNAP_DISTANCE;
 
+        int cur_x = (view->scene_tree ? (int)view->scene_tree->node.x : (x + margins.left)) - margins.left;
+        int cur_y = (view->scene_tree ? (int)view->scene_tree->node.y : (y + margins.top)) - margins.top;
+
         int edges[WOODLAND_SNAP_MAX_EDGES];
         int n = collect_snap_edges(server, view, true, y, outer_h, edges, WOODLAND_SNAP_MAX_EDGES);
-        x = woodland_snap_axis(x, outer_w, area.x, area.x + area.width, edges, n, snap_threshold);
+        x = woodland_snap_axis_motion(cur_x, x, outer_w, area.x, area.x + area.width, edges, n, snap_threshold);
 
         n = collect_snap_edges(server, view, false, x, outer_w, edges, WOODLAND_SNAP_MAX_EDGES);
-        y = woodland_snap_axis(y, outer_h, area.y, area.y + area.height, edges, n, snap_threshold);
+        y = woodland_snap_axis_motion(cur_y, y, outer_h, area.y, area.y + area.height, edges, n, snap_threshold);
 
         /*
          * 贴边铺满的判定：只有真的拖动了（超过阈值距离）才算，
@@ -345,6 +435,8 @@ void woodland_cursor_reset_mode(struct woodland_server *server)
     server->grabbed_view = NULL;
     server->resize_edges = 0;
     woodland_cursor_set(server, "default");
+    server->grab_context.active = false;
+    server->grab_context.view = NULL;
 }
 
 void shell_interactive_attach(struct woodland_view *view)

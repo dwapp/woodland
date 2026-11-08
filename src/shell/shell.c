@@ -111,7 +111,7 @@ void woodland_view_request_size(struct woodland_view *view, int width, int heigh
         return;
     }
 #endif
-    if (view->xdg_toplevel) {
+    if (view->xdg_toplevel && view->xdg_toplevel->base && view->xdg_toplevel->base->client) {
         wlr_xdg_toplevel_set_size(view->xdg_toplevel, width, height);
     }
 }
@@ -266,6 +266,10 @@ void woodland_view_unmap(struct woodland_view *view)
     if (view == view->server->grabbed_view) {
         woodland_cursor_reset_mode(view->server);
     }
+    if (view == view->server->grab_context.view) {
+        view->server->grab_context.active = false;
+        view->server->grab_context.view = NULL;
+    }
     /* SSD 即将销毁：清掉指向它的指针状态，避免悬空 */
     if (view->server->hover_view == view) {
         view->server->hover_view = NULL;
@@ -322,6 +326,13 @@ void woodland_view_destroy(struct woodland_view *view)
     /* 销毁中的视图不能作为回退目标，也不能被 focus_current 反查到：
      * 先清焦点（只改状态，不挑新目标），等视图摘出链表后再回退 */
     woodland_session_lock_handle_view_destroy(view->server, view);
+    if (view == view->server->grabbed_view) {
+        woodland_cursor_reset_mode(view->server);
+    }
+    if (view == view->server->grab_context.view) {
+        view->server->grab_context.active = false;
+        view->server->grab_context.view = NULL;
+    }
     bool was_focused = (view->server->focused_view == view);
     if (was_focused) {
         woodland_focus_none(view->server);

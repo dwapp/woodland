@@ -257,6 +257,12 @@ static void handle_destroy(struct wl_listener *listener, void *data)
     wl_list_remove(&output->request_state.link);
     wl_list_remove(&output->commit.link);
     wl_list_remove(&output->link);
+    if (output->server && output->server->views.next) {
+        struct woodland_view *v;
+        wl_list_for_each(v, &output->server->views, link) {
+            v->outputs &= ~output->id_bit;
+        }
+    }
 
     /*
      * 摘链之后才通知：协议层的广播会遍历 server->outputs，这里必须已经
@@ -306,6 +312,19 @@ static void handle_new_output(struct wl_listener *listener, void *data)
     /* 建的时候就是当前缩放，别让第一次 commit 白刷一遍全量 */
     output->last_scale = wlr_output->scale;
     wlr_output->data = output;
+    uint64_t used_bits = 0;
+    struct woodland_output *it;
+    wl_list_for_each(it, &server->outputs, link) {
+        used_bits |= it->id_bit;
+    }
+    output->id_bit = 1;
+    for (int i = 0; i < 64; i++) {
+        uint64_t bit = 1ULL << i;
+        if (!(used_bits & bit)) {
+            output->id_bit = bit;
+            break;
+        }
+    }
 
     if (!wlr_output_init_render(wlr_output, server->allocator, server->renderer)) {
         wlr_log(WLR_ERROR, "failed to init output render");

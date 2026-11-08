@@ -310,6 +310,8 @@ static void server_cursor_button(struct wl_listener *listener, void *data)
     }
 
     if (event->state == WL_POINTER_BUTTON_STATE_RELEASED) {
+        server->grab_context.active = false;
+        server->grab_context.view = NULL;
         /* 拖动结束：先决定是否贴边铺满，再清抓取状态（铺满要用 grabbed_view） */
         if (server->cursor_mode == WOODLAND_CURSOR_MOVE && server->grabbed_view) {
             shell_view_apply_snap(server->grabbed_view);
@@ -325,6 +327,12 @@ static void server_cursor_button(struct wl_listener *listener, void *data)
             woodland_view_at(server, server->cursor->x, server->cursor->y, &surface, &sx, &sy);
         if (view) {
             woodland_focus_view(view, true);
+            server->grab_context.view = view;
+            server->grab_context.cursor_x = server->cursor->x;
+            server->grab_context.cursor_y = server->cursor->y;
+            server->grab_context.node_x = view->scene_tree ? view->scene_tree->node.x : 0;
+            server->grab_context.node_y = view->scene_tree ? view->scene_tree->node.y : 0;
+            server->grab_context.active = true;
         } else {
 #if WOODLAND_HAVE_XWAYLAND
             if (surface) {
@@ -353,6 +361,12 @@ static void server_cursor_button(struct wl_listener *listener, void *data)
             }
             if (ssd_view) {
                 woodland_focus_view(ssd_view, true);
+                server->grab_context.view = ssd_view;
+                server->grab_context.cursor_x = server->cursor->x;
+                server->grab_context.cursor_y = server->cursor->y;
+                server->grab_context.node_x = ssd_view->scene_tree ? ssd_view->scene_tree->node.x : 0;
+                server->grab_context.node_y = ssd_view->scene_tree ? ssd_view->scene_tree->node.y : 0;
+                server->grab_context.active = true;
                 switch (ssd_part) {
                 case WOODLAND_SSD_BUTTON_CLOSE:
                 case WOODLAND_SSD_BUTTON_MAXIMIZE:

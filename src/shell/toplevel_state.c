@@ -61,7 +61,7 @@ void shell_view_schedule_configure(struct woodland_view *view)
     if (view->type == WOODLAND_VIEW_XWAYLAND) {
         return;
     }
-    if (view->xdg_toplevel && view->xdg_toplevel->base) {
+    if (view->xdg_toplevel && view->xdg_toplevel->base && view->xdg_toplevel->base->client) {
         wlr_xdg_surface_schedule_configure(view->xdg_toplevel->base);
     }
 }
@@ -78,7 +78,7 @@ void shell_view_apply_maximized_state(struct woodland_view *view, bool maximized
         return;
     }
 #endif
-    if (view->xdg_toplevel) {
+    if (view->xdg_toplevel && view->xdg_toplevel->base && view->xdg_toplevel->base->client) {
         wlr_xdg_toplevel_set_maximized(view->xdg_toplevel, maximized);
     }
 }
@@ -93,7 +93,9 @@ static void view_apply_fullscreen_state(struct woodland_view *view, bool fullscr
         return;
     }
 #endif
-    wlr_xdg_toplevel_set_fullscreen(view->xdg_toplevel, fullscreen);
+    if (view->xdg_toplevel && view->xdg_toplevel->base && view->xdg_toplevel->base->client) {
+        wlr_xdg_toplevel_set_fullscreen(view->xdg_toplevel, fullscreen);
+    }
 }
 
 /* ==================== 最大化 / 全屏 / 最小化 ==================== */
@@ -539,56 +541,76 @@ void woodland_view_update_taskbar_presence(struct woodland_view *view)
 
 void woodland_view_update_outputs(struct woodland_view *view)
 {
-    /*
-     * 先广播"窗口状态变了"：所属输出是 foreign-toplevel 的属性之一，而这里
-     * 是它唯一会变的地方。放在最前面，下面的早退路径（没有 toplevel 句柄、
-     * 没有布局）也不会漏掉通知——协议层自己会重新算它需要的那份。
-     */
-    if (view && view->server) {
-        woodland_signal_emit(&view->server->view_changed, view);
-        if (view->fullscreen) {
-            woodland_layer_update_top_layer_visibility(view->server);
-        }
-#if WOODLAND_HAVE_XWAYLAND
-        if (view->type == WOODLAND_VIEW_XWAYLAND && view->server->xwayland_scale_filter_hook) {
-            view->server->xwayland_scale_filter_hook(view);
-        }
-#endif
-        if (view->ssd) {
-            /*
-             * 只在缩放真的变了时才重刷 SSD。这个函数在拖拽/缩放的每个
-             * motion 事件上都会被调一次（interactive.c），无条件重刷就等于
-             * 每个 motion 做一遍 pango layout + cairo surface 分配。
-             */
-            struct woodland_output *wo = woodland_output_for_view(view);
-            float current_scale = 1.0f;
-            if (wo && wo->wlr_output && wo->wlr_output->scale > 0.0f) {
-                current_scale = wo->wlr_output->scale;
-            }
-            if (woodland_ssd_get_scale(view) != current_scale) {
-                woodland_ssd_update(view);
-            }
-        }
-    }
-    if (!view || !view->server || !view->toplevel_handle) {
+    if (!view || !view->server) {
         return;
     }
-
     struct woodland_server *server = view->server;
-    if (!server->output_layout) {
-        return;
+
+    /*
+     * 1. 计算窗口当前相交的 outputs 位掩码（labwc 同款差量闸门）
+     */
+    uint64_t new_outputs = 0;
+    if (view->mapped && server->output_layout) {
+        struct woodland_output *wo;
+        int idx = 0;
+        wl_list_for_each(wo, &server->outputs, link)
+        {
+            if (!wo->wlr_output) {
+                continue;
+            }
+            if (wo->id_bit == 0) {
+                wo->id_bit = (idx < 64) ? (1ULL << idx) : 1ULL;
+            }
+            idx++;
+            if (woodland_view_on_output(view, wo->wlr_output)) {
+                new_outputs |= wo->id_bit;
+            }
+        }
     }
 
-    struct woodland_output *wo;
-    wl_list_for_each(wo, &server->outputs, link)
-    {
-        if (!wo->wlr_output) {
-            continue;
+    bool outputs_changed = (new_outputs != view->outputs) || !view->outputs_initialized;
+    view->outputs = new_outputs;
+    view->outputs_initialized = true;
+
+    /*
+     * 2. 只有当所属输出真正发生变动时，才广播状态并更新 foreign-toplevel output 列表。
+     * 同屏内微小平移跳过无谓的协议广播与几何求交，彻底消除高频拖动下的事件循环阻塞。
+     */
+    if (outputs_changed) {
+        woodland_signal_emit(&server->view_changed, view);
+        if (view->fullscreen) {
+            woodland_layer_update_top_layer_visibility(server);
         }
-        if (woodland_view_on_output(view, wo->wlr_output)) {
-            wlr_foreign_toplevel_handle_v1_output_enter(view->toplevel_handle, wo->wlr_output);
-        } else {
-            wlr_foreign_toplevel_handle_v1_output_leave(view->toplevel_handle, wo->wlr_output);
+        if (view->toplevel_handle && server->output_layout) {
+            struct woodland_output *wo;
+            wl_list_for_each(wo, &server->outputs, link)
+            {
+                if (!wo->wlr_output) {
+                    continue;
+                }
+                if (new_outputs & wo->id_bit) {
+                    wlr_foreign_toplevel_handle_v1_output_enter(view->toplevel_handle, wo->wlr_output);
+                } else {
+                    wlr_foreign_toplevel_handle_v1_output_leave(view->toplevel_handle, wo->wlr_output);
+                }
+            }
+        }
+    }
+
+    /* 3. X11 滤波与 SSD 缩放：内部自带有 scale 比对闸门 */
+#if WOODLAND_HAVE_XWAYLAND
+    if (view->type == WOODLAND_VIEW_XWAYLAND && server->xwayland_scale_filter_hook) {
+        server->xwayland_scale_filter_hook(view);
+    }
+#endif
+    if (view->ssd) {
+        struct woodland_output *wo = woodland_output_for_view(view);
+        float current_scale = 1.0f;
+        if (wo && wo->wlr_output && wo->wlr_output->scale > 0.0f) {
+            current_scale = wo->wlr_output->scale;
+        }
+        if (woodland_ssd_get_scale(view) != current_scale) {
+            woodland_ssd_update(view);
         }
     }
 }

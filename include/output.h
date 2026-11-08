@@ -3,6 +3,7 @@
 #define WOODLAND_OUTPUT_H
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <wayland-server-core.h>
 #include <wlr/types/wlr_output.h>
 #include "scene.h"
@@ -13,6 +14,7 @@ struct wlr_scene_optimized_blur;
 struct woodland_output {
     struct wl_list link;               // woodland_server.outputs
     struct woodland_server *server;
+    uint64_t id_bit;                   // 输出唯一位标识（1ULL << n，用于视图输出缓存闸门）
     struct wlr_output *wlr_output;
     struct wlr_scene_output *scene_output;
     struct wlr_scene_tree *layer_tree[4]; // 下标 = zwlr_layer_shell_v1_layer 枚举

@@ -114,6 +114,9 @@ struct woodland_view {
     uint32_t snapped_edges;
     uint32_t pending_snap_edges;
     struct wlr_box snap_saved_geometry;
+    /* 所属输出位掩码（labwc 同款差量闸门，只有跨屏才触发 view_changed 与 enter/leave） */
+    uint64_t outputs;
+    bool outputs_initialized;
     struct wlr_foreign_toplevel_handle_v1 *toplevel_handle;
     /* ext-foreign-toplevel-list-v1 的句柄（截图/任务栏客户端用） */
     struct wlr_ext_foreign_toplevel_handle_v1 *ext_toplevel_handle;

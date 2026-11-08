@@ -642,6 +642,74 @@ int woodland_snap_axis(int desired, int size, int lo, int hi, const int *edges, 
 
     return best;
 }
+int woodland_snap_axis_motion(int cur, int desired, int size, int lo, int hi,
+                              const int *edges, int n_edges, int threshold)
+{
+    if (threshold <= 0 || size > hi - lo || cur == desired) {
+        return desired;
+    }
+
+    bool decreasing = (desired < cur);
+    int best = desired;
+
+    if (decreasing) {
+        /*
+         * 向左 / 向上移动：
+         * 1. 屏幕左/顶边界 (lo)：从边界内侧跨向边界外侧 (cur > lo && desired <= lo)
+         */
+        if (cur > lo && desired <= lo && desired >= lo - threshold) {
+            best = lo;
+        }
+
+        /*
+         * 2. 邻窗边缘阻尼：跨越邻窗边缘时拦截
+         */
+        for (int i = 0; i < n_edges; i++) {
+            int edge = edges[i];
+            if (cur > edge && desired <= edge && desired >= edge - threshold) {
+                if (best == desired || edge > best) {
+                    best = edge;
+                }
+            }
+            int cand = edge - size;
+            if (cur > cand && desired <= cand && desired >= cand - threshold) {
+                if (best == desired || cand > best) {
+                    best = cand;
+                }
+            }
+        }
+    } else {
+        /*
+         * 向右 / 向下移动：
+         * 1. 屏幕右/底边界 (hi - size)：从边界内侧跨向边界外侧 (cur < hi - size && desired >= hi - size)
+         */
+        int r_cand = hi - size;
+        if (cur < r_cand && desired >= r_cand && desired <= r_cand + threshold) {
+            best = r_cand;
+        }
+
+        /*
+         * 2. 邻窗边缘阻尼：跨越邻窗边缘时拦截
+         */
+        for (int i = 0; i < n_edges; i++) {
+            int edge = edges[i];
+            int cand = edge - size;
+            if (cur < cand && desired >= cand && desired <= cand + threshold) {
+                if (best == desired || cand < best) {
+                    best = cand;
+                }
+            }
+            if (cur < edge && desired >= edge && desired <= edge + threshold) {
+                if (best == desired || edge < best) {
+                    best = edge;
+                }
+            }
+        }
+    }
+
+    return best;
+}
+
 
 /* ==================== 首次放置 ==================== */
 
@@ -823,7 +891,7 @@ void woodland_view_set_tiled(struct woodland_view *view, uint32_t edges)
         return;
     }
 #endif
-    if (view->xdg_toplevel) {
+    if (view->xdg_toplevel && view->xdg_toplevel->base && view->xdg_toplevel->base->client) {
         wlr_xdg_toplevel_set_tiled(view->xdg_toplevel, edges);
     }
 }
