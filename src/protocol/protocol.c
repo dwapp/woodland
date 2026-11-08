@@ -144,6 +144,10 @@ bool woodland_protocol_init(struct woodland_server *server) {
     if (!woodland_proto_wallpaper_init(proto)) {
         return false;
     }
+    /* security-context：wp_security_context_manager_v1 并在 display 上挂全局过滤器 */
+    if (!woodland_proto_security_context_init(proto)) {
+        return false;
+    }
 
     /* 已有输出可能早于本模块建好，补一次广播让客户端看到初始状态 */
     woodland_proto_output_broadcast(proto);
@@ -172,6 +176,7 @@ void woodland_protocol_finish(struct woodland_server *server)
     }
 
     /* 逆序拆：与 init 对称，后建的先摘 */
+    woodland_proto_security_context_finish(proto);
     woodland_proto_wallpaper_finish(proto);
     woodland_proto_bg_effect_finish(proto);
     woodland_proto_decoration_finish(proto);

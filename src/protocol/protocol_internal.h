@@ -19,6 +19,8 @@ struct woodland_proto_appearance;
 struct woodland_proto_shortcut;
 struct woodland_proto_toplevel;
 struct woodland_proto_tearing;
+struct woodland_proto_security_context;
+struct wl_client;
 struct woodland_tearing_controller;
 
 struct woodland_proto_tearing {
@@ -78,6 +80,7 @@ struct woodland_proto {
     struct woodland_proto_shortcut *shortcut; /* shortcut.c */
     struct woodland_proto_toplevel *toplevel; /* foreign_toplevel.c */
     struct woodland_proto_tearing *tearing;   /* tearing.c */
+    struct woodland_proto_security_context *security_context; /* security_context.c */
 };
 
 /* 空闲与抑制族（idle.c）：idle-notify / idle-inhibit / keyboard-shortcuts-inhibit */
@@ -159,5 +162,12 @@ void woodland_proto_toplevel_finish(struct woodland_proto *proto);
 /* 撕裂控制族（tearing.c）：wp_tearing_control_manager_v1 */
 bool woodland_proto_tearing_init(struct woodland_proto *proto);
 void woodland_proto_tearing_finish(struct woodland_proto *proto);
+
+/* 沙箱安全上下文族（security_context.c）：wp_security_context_manager_v1 */
+bool woodland_proto_security_context_init(struct woodland_proto *proto);
+void woodland_proto_security_context_finish(struct woodland_proto *proto);
+const struct wlr_security_context_v1_state *
+woodland_proto_security_context_lookup_client(struct woodland_proto *proto,
+                                              const struct wl_client *client);
 
 #endif

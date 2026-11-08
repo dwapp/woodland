@@ -167,7 +167,8 @@ for iface in zwlr_screencopy_manager_v1 \
              zwlr_gamma_control_manager_v1 \
              xdg_activation_v1 \
              xdg_toplevel_tag_manager_v1 \
-             wp_tearing_control_manager_v1; do
+             wp_tearing_control_manager_v1 \
+             wp_security_context_manager_v1; do
     echo "$output" | grep -q "$iface" || {
         echo "$iface global missing from output:" >&2
         echo "$output" >&2
