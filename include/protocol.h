@@ -11,6 +11,8 @@ struct woodland_workspace;
 struct woodland_view;
 struct woodland_json;
 struct wlr_input_device;
+struct wl_client;
+struct wlr_security_context_v1_state;
 struct wlr_output;
 
 /*
@@ -31,6 +33,7 @@ struct wlr_output;
  *   appearance.c 用户级外观：treeland-appearance（观测）/ -manager（特权配置）
  *   shortcut.c 全局快捷键与一次性捕获：treeland-shortcut-manager-v3
  *   foreign_toplevel.c 窗口列表：treeland-foreign-toplevel-manager-v3
+ *   security_context.c 沙箱隔离与特权过滤：wp-security-context-v1（对齐 labwc）
  *   protocol.c 只管按序建立、逆序回收，以及下面这几个转发入口。
  *
  * 按语义完备程度分档，档位决定了它是否真的改变行为：
@@ -43,7 +46,8 @@ struct wlr_output;
  *             treeland-decoration 的边框/标题栏/圆角、
  *             treeland-appearance（bind 即推送 + 变化广播，9 项真生效）、
  *             treeland-appearance-manager 的 9 条 set_*（同上一一对应）、
- *             ext-background-effect（capability 随 [effects] 运行期变化）
+ *             ext-background-effect（capability 随 [effects] 运行期变化）、
+ *             wp-security-context-v1（白名单过滤特权协议，禁止嵌套沙箱）
  *             —— 客户端请求会真的影响合成器行为。
  *   委派实现：treeland-wallpaper-shell / -manager / -notifier
  *             —— 配置、场景托管、播放控制都在合成器里，但**解码不在**：
@@ -74,8 +78,7 @@ struct wlr_output;
  *             消费方）与 window_opacity（要逐窗口 alpha，属单独一版）；
  *             treeland-foreign-toplevel-manager-v3 的 set_icon_geometry
  *             （最小化动画的提示，woodland 没有动画）。
- *   暂不接线：security-context（无沙箱校验时声明"我是沙箱"反而是假安全）、
- *             content-type（scene 不消费）、session-lock / xdg-foreign
+ *   暂不接线：content-type（scene 不消费）、session-lock / xdg-foreign
  *             （各自需要一套独立状态机，见里程碑文档）。
  */
 bool woodland_protocol_init(struct woodland_server *server);
@@ -344,4 +347,36 @@ void woodland_protocol_toplevel_status(struct woodland_server *server,
 void woodland_protocol_toplevel_view_status(struct woodland_view *view,
                                             struct woodland_json *out);
 
+
+/* ==================== wp-security-context-v1 ==================== */
+
+/**
+ * 纯函数：协议接口是否允许沙箱客户端访问（白名单机制，对齐 labwc）。
+ */
+bool woodland_security_context_is_allowed(const char *interface_name);
+
+/**
+ * 纯函数：协议接口是否属于特权协议（黑名单，用于诊断和安全断言）。
+ */
+bool woodland_security_context_is_privileged(const char *interface_name);
+
+/**
+ * 查询指定客户端的 security context 状态（未关联或未沙箱化返回 NULL）。
+ */
+const struct wlr_security_context_v1_state *
+woodland_protocol_client_security_context(struct woodland_server *server,
+                                          const struct wl_client *client);
+
+/**
+ * 查询指定视图所属客户端的 security context 状态。
+ */
+const struct wlr_security_context_v1_state *
+woodland_protocol_view_security_context(struct woodland_server *server,
+                                        const struct woodland_view *view);
+
+/**
+ * security context 协议状态与诊断信息，供 wctl get_tree 使用。
+ */
+void woodland_protocol_security_context_status(struct woodland_server *server,
+                                               struct woodland_json *out);
 #endif

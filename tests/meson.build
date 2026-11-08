@@ -235,6 +235,42 @@ if get_option('test').enabled()
          is_parallel: false,
          timeout: 150)
   endif
+  # wp-security-context-v1：沙箱注册、特权过滤与上下文属性注入冒烟。
+  sec_ctx_xml = wp_datadir / 'staging' / 'security-context' / 'security-context-v1.xml'
+  sec_ctx_xdg_xml = wp_datadir / 'stable' / 'xdg-shell' / 'xdg-shell.xml'
+  if wayland_client_dep.found() and wp_dep.found() and wayland_scanner.found() and fs.exists(sec_ctx_xml) and fs.exists(sec_ctx_xdg_xml)
+    sec_ctx_probe_srcs = [
+      'smoke/sec_ctx_probe.c',
+      custom_target('sec-ctx-probe-header',
+        input: sec_ctx_xml,
+        output: 'sec-ctx-client-protocol.h',
+        command: [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@']),
+      custom_target('sec-ctx-probe-code',
+        input: sec_ctx_xml,
+        output: 'sec-ctx-protocol.c',
+        command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@']),
+      custom_target('sec-ctx-xdg-shell-client-header',
+        input: sec_ctx_xdg_xml,
+        output: 'sec-ctx-xdg-shell-client-protocol.h',
+        command: [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@']),
+      custom_target('sec-ctx-xdg-shell-client-code',
+        input: sec_ctx_xdg_xml,
+        output: 'sec-ctx-xdg-shell-protocol.c',
+        command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@']),
+    ]
+
+    sec_ctx_probe = executable('sec_ctx_probe', sec_ctx_probe_srcs,
+                               dependencies: [wayland_client_dep])
+    test('smoke-security-context',
+         find_program('sh'),
+         args: [meson.current_source_dir() / 'smoke' / 'run_sec_ctx_smoke.sh',
+                woodland_bin.full_path(),
+                sec_ctx_probe.full_path(),
+                wctl_bin.full_path()],
+         is_parallel: false,
+         timeout: 60)
+  endif
+
 
   # output-management 的事件顺序回归（apply 的 succeeded 必须先于新一轮
   # configuration + done）。协议 xml 属于 wlr-protocols（不在

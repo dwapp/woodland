@@ -18,6 +18,7 @@
 #include <wlr/types/wlr_output_layout.h>
 #include "scene.h"
 #include <wlr/types/wlr_seat.h>
+#include <wlr/types/wlr_security_context_v1.h>
 #include <wlr/util/box.h>
 #include <wlr/util/edges.h>
 
@@ -108,6 +109,10 @@ static const struct ipc_field_doc get_tree_fields[] = {
      "last_outcome (str|null), dock_request_count (int), "
      "last_dock_request (str|null), dock_preview (str: always \"recorded\", "
      "the popover itself is not rendered)"},
+    {"security_context", "obj",
+     "wp-security-context-v1: available (bool), commit_count (int), "
+     "last_engine (str|null), last_app_id (str|null), "
+     "last_instance_id (str|null)"},
     {"focus", "obj", "same fields as get_focus"},
     {"snap_preview", "obj",
      "snap preview overlay: active, edges[], box[x,y,w,h], output"},
@@ -126,7 +131,8 @@ static const struct ipc_field_doc get_tree_fields[] = {
      "deco{managed,titlebar,border_width,border_rgba,"
      "corner_radius,shadow_radius,shadow_offset,"
      "shadow_rgba,rendered[]}, "
-     "bg_effect{blur,region[x,y,w,h]}, limits, snapped[], scale_filter"},
+     "bg_effect{blur,region[x,y,w,h]}, limits, snapped[], scale_filter, "
+     "security_context{sandboxed,sandbox_engine,app_id,instance_id}"},
     {"count", "int", "number of views"},
 };
 
@@ -403,6 +409,19 @@ static void append_view_details(struct woodland_server *server, struct woodland_
      */
     woodland_json_obj_key(&obj, "foreign_toplevel");
     woodland_protocol_toplevel_view_status(view, out);
+    const struct wlr_security_context_v1_state *sec_ctx =
+        woodland_protocol_view_security_context(server, view);
+    woodland_json_obj_key(&obj, "security_context");
+    struct woodland_json_obj sec_obj;
+    woodland_json_obj_open(&sec_obj, out);
+    woodland_json_obj_bool(&sec_obj, "sandboxed", sec_ctx != NULL);
+    if (sec_ctx) {
+        woodland_json_obj_str(&sec_obj, "sandbox_engine", sec_ctx->sandbox_engine);
+        woodland_json_obj_str(&sec_obj, "app_id", sec_ctx->app_id);
+        woodland_json_obj_str(&sec_obj, "instance_id", sec_ctx->instance_id);
+    }
+    woodland_json_obj_close(&sec_obj);
+
 
     struct wlr_box outer = {0};
     woodland_view_outer_box(view, &outer);
@@ -615,6 +634,9 @@ static void ipc_get_tree(struct woodland_server *server, struct woodland_json *o
 
     woodland_json_obj_key(&obj, "toplevel_manager");
     woodland_protocol_toplevel_status(server, out);
+    woodland_json_obj_key(&obj, "security_context");
+    woodland_protocol_security_context_status(server, out);
+
 
     woodland_json_obj_key(&obj, "focus");
     struct woodland_json_obj focus_obj;

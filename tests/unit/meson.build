@@ -122,6 +122,30 @@ if wayland_client_dep.found()
     link_with: [protocol_lib, output_lib, cursor_lib, shell_lib, seat_lib, session_lock_lib, ime_lib, workspace_lib, layer_lib, ssd_lib, capture_lib, util_lib])
   test('syncobj', test_syncobj)
 endif
+sec_ctx_xml = wp_datadir / 'staging' / 'security-context' / 'security-context-v1.xml'
+test_sec_ctx_srcs = ['test_security_context.c']
+test_sec_ctx_deps = [scene_deps, wayland_server]
+test_sec_ctx_c_args = []
+if wayland_client_dep.found() and wayland_scanner.found() and wp_datadir != '' and fs.exists(sec_ctx_xml)
+  test_sec_ctx_deps += wayland_client_dep
+  test_sec_ctx_c_args += ['-DTEST_HAS_SECURITY_CONTEXT_CLIENT=1']
+  test_sec_ctx_srcs += custom_target('security-context-client-header',
+    input: sec_ctx_xml,
+    output: 'security-context-v1-client-protocol.h',
+    command: [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@'])
+  test_sec_ctx_srcs += custom_target('security-context-client-code',
+    input: sec_ctx_xml,
+    output: 'security-context-v1-protocol.c',
+    command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'])
+endif
+
+test_security_context = executable('test_security_context', test_sec_ctx_srcs,
+  c_args: test_sec_ctx_c_args,
+  dependencies: test_sec_ctx_deps,
+  include_directories: woodland_inc,
+  link_with: [protocol_lib, output_lib, cursor_lib, shell_lib, seat_lib, session_lock_lib, ime_lib, workspace_lib, layer_lib, ssd_lib, effect_lib, capture_lib, util_lib, trace_lib, ipc_lib])
+test('security_context', test_security_context)
+
 
 test_config = executable('test_config', 'test_config.c',
   dependencies: [scene_deps, wayland_server, xkbcommon],
