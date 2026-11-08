@@ -172,6 +172,13 @@ struct woodland_server {
     struct wlr_box grab_geobox;
     uint32_t resize_edges;
     struct woodland_snap_preview snap_preview;
+    /* 前置抓取上下文（按下时记录，避免客户端 request_move 的 RPC 往返丢失初速度） */
+    struct {
+        struct woodland_view *view;
+        double cursor_x, cursor_y;
+        int node_x, node_y;
+        bool active;
+    } grab_context;
 
     /* 指针约束（zwp_pointer_constraints_v1） */
     struct wlr_pointer_constraints_v1 *pointer_constraints;

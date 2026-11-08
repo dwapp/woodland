@@ -201,6 +201,11 @@ void woodland_view_center_on(const struct wlr_box *parent_box,
 /** 单轴贴边吸附（纯函数），见 view.h 历史语义。 */
 int woodland_snap_axis(int desired, int size, int lo, int hi,
                        const int *edges, int n_edges, int threshold);
+/**
+ * 考虑移动方向的单轴吸附/阻尼（labwc resistance 同款原则：朝向边缘接近时吸附，离开时绝不拉扯）。
+ */
+int woodland_snap_axis_motion(int cur, int desired, int size, int lo, int hi,
+                              const int *edges, int n_edges, int threshold);
 
 /* ==================== 首次放置与尺寸限制 ==================== */
 
