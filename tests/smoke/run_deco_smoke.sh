@@ -25,6 +25,7 @@ export XDG_RUNTIME_DIR="$(mktemp -d)"
 # 断言的基准是内置默认外观（26 标题栏 + 1 边框），别让 ~/.config 里的
 # 用户配置把它改掉
 export XDG_CONFIG_HOME="$XDG_RUNTIME_DIR/config"
+export HOME="$XDG_RUNTIME_DIR"
 mkdir -p "$XDG_CONFIG_HOME"
 export WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1
 

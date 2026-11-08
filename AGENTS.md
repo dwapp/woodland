@@ -2,8 +2,12 @@
 
 ## 全局认识
 
-- `woodland` 是**纯 C + wlroots** 的通用轻量 Wayland 合成器，目标是**兼容 treeland 生态（主要是协议）**，但**不复刻 treeland 的全部逻辑**。单体结构（sway/labwc 风格），单用户、运行在用户 session 内。
-- 无 Qt/QML 依赖。渲染默认走 `wlr_scene` 直出；特效经 scenefx 实现，**编译期默认开启**（`-Deffects=enabled`），运行期由 `[effects] enabled` 控制（默认 true）。
+- `woodland` 是**纯 C + wlroots** 的通用轻量 Wayland 合成器，单体结构（sway/labwc 风格），常规单用户、运行在用户 session 内，无 Qt/QML 依赖。
+- **核心项目目标**：
+  1. **兼容 treeland 生态，可以运行 DDE 桌面环境**：常规单用户支持，提供朴素的特效（基于 scenefx 适度提供模糊/圆角/阴影，克制简洁、性能优先，不复刻 treeland 臃肿逻辑与重度绑定）。
+  2. **支持运行 noctalia / quickshell / lxqt**：作为通用轻量合成器，完整支持现代 layer-shell 壳体组件（Quickshell、Noctalia Shell）与轻量桌面环境（LXQt Wayland 会话）。
+  3. **发行版优先支持 deepin / arch**：优先保障 deepin 与 Arch Linux 环境下的构建、依赖兼容、打包和开箱运行体验。
+- 渲染默认走 `wlr_scene` 直出；特效经 scenefx 实现，**编译期默认开启**（`-Deffects=enabled`），运行期由 `[effects] enabled` 控制（默认 true）。
 - wlroots 经 meson wrap 下载，**锁定 tag 0.20.2**（不跟随 master）；scenefx 锁定 0.5（随 `effects` 选项启用）。两者都**不 vendored**。
 - 许可证：GPL-2.0-only。
 

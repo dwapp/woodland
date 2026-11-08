@@ -4,7 +4,7 @@
 
 | 文档 | 领域与内容 |
 | --- | --- |
-| [architecture.md](architecture.md) | 全局架构规格：单体结构、技术选型（wlroots 0.20.2 + scenefx 0.5）、模块职责分工与 treeland 协议兼容分级 |
+| [architecture.md](architecture.md) | 全局架构规格：三大核心目标（DDE运行/朴素特效、Noctalia/Quickshell/LXQt、deepin/arch）、单体结构、技术选型与协议分级 |
 | [clipboard-dnd.md](clipboard-dnd.md) | 剪贴板与拖拽（selection 与 wl_data_device drag-and-drop）机制：时序图、数据流、图标树位置与指针捕获细节 |
 | [layer-shell.md](layer-shell.md) | layer-shell 子系统设计：四层图层树（background/bottom/top/overlay）、exclusive zone 排版计算、键盘交互与弹层 |
 | [xdg-shell-workspaces.md](xdg-shell-workspaces.md) | 窗口与工作区管理：xdg-shell 状态机、12 工作区 scene 节点 reparent、多输出几何与窗口约束 |

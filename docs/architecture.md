@@ -8,21 +8,38 @@
 
 treeland 是 deepin 桌面的 Wayland 合成器，架构为三层：vendored wlroots 0.20.2（C）→ waylib（Qt/C++ 封装库）→ treeland（Qt6/QML 桌面策略层）。它深度绑定 DDE 生态：DDM 登录管理器、DConfig 配置中心、DTK 组件、D-Bus(logind)、Qt Remote Objects 调试通道，以及 30+ 私有 Wayland 协议。
 
-Woodland 的目标是**兼容 treeland 生态（主要是协议）**：一个基于 C + wlroots 的通用轻量 Wayland 合成器，重点实现 treeland 的 Wayland 协议兼容，让 treeland 生态的客户端（DDE 组件、壁纸客户端、控制中心等）可以运行，但**不复刻 treeland 的全部逻辑**。比 treeland 更注重性能和代码整洁/简约，可以丢失部分特效和非关键特性。
+Woodland 是一个基于 C + wlroots 的通用轻量 Wayland 合成器，核心目标聚焦于三大方向：
+1. **兼容 treeland 生态，可以运行 DDE 桌面环境**：常规单用户支持（运行在用户 session 内），提供朴素的特效（基于 scenefx 适度提供模糊、圆角、阴影等，克制简洁、性能优先，不复刻 treeland 臃肿逻辑与重度绑定）；
+2. **支持运行 noctalia / quickshell / lxqt**：作为通用轻量合成器，全面支持现代 layer-shell 壳体组件（Quickshell、Noctalia Shell）与轻量桌面环境（LXQt Wayland 会话）；
+3. **发行版优先支持 deepin / arch**：优先保障 deepin 与 Arch Linux 环境下的构建兼容、依赖适配、打包与开箱运行体验。
 
 ## 2. 目标与非目标
 
 ### 2.1 定位
 
-**通用轻量 Wayland 合成器**，单用户、运行在用户 session 内。目标是兼容 treeland 生态（主要是协议）：普通 Wayland 客户端（含 XWayland 客户端、中文输入法）无需修改即可运行；使用 treeland 私有协议的客户端（DDE 组件、壁纸客户端、控制中心等）能完成协议协商与基本功能。内部实现独立设计，不复刻 treeland 的逻辑。
+**通用轻量 Wayland 合成器**，常规单用户支持，运行在用户 session 内：
+- **兼容 treeland 生态与 DDE 运行**：能够完整运行 DDE（Deepin Desktop Environment）桌面环境及其外壳组件（dde-shell、dock、壁纸客户端、控制中心等），实现 treeland 私有协议的高效兼容与语义闭环，内部架构独立简约，不复刻 treeland 的冗余逻辑。
+- **支持现代与轻量桌面生态**：支持运行 Noctalia、Quickshell 定制壳体以及 LXQt 桌面环境，标准 Wayland 协议语义严谨完整。
+- **常规单用户与朴素特效**：定位为标准单用户 session 合成器，提供实用、克制的“朴素特效”，追求极致性能与代码整洁。
+- **优先面向目标发行版**：深度适配 deepin 与 Arch Linux 两个主要发行版生态。
 
 ### 2.2 目标
 
-- 纯 C + wlroots 实现，无 Qt/QML 依赖。
-- 线缆级兼容 treeland 私有协议（见第 7 节分级）；目标是兼容 treeland 生态（主要是协议），而非复刻 treeland 的逻辑。
-- 性能优先：默认渲染路径为 wlr_scene 直出；特效经 scenefx 实现，编译期默认开启、运行期默认开（可关）。
-- 代码整洁/简约：单体结构（sway 风格），避免过度抽象。
-
+1. **兼容 treeland 生态与 DDE 运行**：
+   - 纯 C + wlroots 实现，无 Qt/QML/DTK 强依赖。
+   - 兼容 treeland 私有协议（见第 7 节分级），满足 DDE 桌面环境各组件（dde-shell/dock、壁纸服务、控制中心、全局快捷键等）正常运行与交互。
+   - 常规单用户设计：通过常规 display manager 或 TTY session 启动，无需承担多用户登录管理器（DDM）中转复杂性。
+   - 朴素的特效：基于 scenefx 提供模糊、圆角、阴影等轻量视觉呈现，渲染管线以 `wlr_scene` 直出为基底，拒绝过度消耗资源的重度 3D/复杂转场。
+2. **支持运行 noctalia / quickshell / lxqt**：
+   - 严谨实现 upstream wlroots 协议矩阵：完备支持 `zwlr_layer_shell_v1`（四图层、exclusive zone 避让、键盘交互三态）、`wlr_foreign_toplevel_management_v1`、`xdg-shell`、`ext-session-lock-v1` 等。
+   - 确保 Quickshell 框架及其衍生桌面外壳（如 Noctalia Shell）的面板、小组件、弹层可稳定挂载与交互。
+   - 确保 LXQt Wayland 会话（lxqt-panel, pcmanfm-qt, lxqt-runner 等）的图层停靠、窗口菜单及托盘协同无障碍运行。
+3. **发行版优先支持 deepin / arch**：
+   - **deepin**：作为 DDE/treeland 原生阵地，保障依赖链可构建，适配 deepin 运行环境、系统库版本与桌面组件联动。
+   - **Arch Linux**：利用 Arch 最新的编译器、上游 Wayland/wlroots 依赖栈及 AUR 生态，持续验证最新工具链兼容性与 CI 自动化测试（CI 基线为 `archlinux:base-devel`）。
+4. **性能与工程质量优先**：
+   - 单体结构（sway/labwc 风格），避免层层抽象。
+   - 特效编译期与运行期双可控（`-Deffects=enabled/disabled`，`[effects] enabled`）。
 ### 2.3 非目标（显式砍掉）
 
 - **DDM 登录管理器集成**：不内置登录/greeter，不支持 `treeland-ddm-v1` 与 Qt Remote Objects 登录通道。
@@ -52,6 +69,7 @@ Woodland 的目标是**兼容 treeland 生态（主要是协议）**：一个基
 | XWayland | 完整支持（wlr_xwayland） |
 | 特效 | scenefx 实现模糊/圆角/阴影等（scenefx 0.5，经 wrap 下载）；编译期 feature flag + 运行期配置，**编译期默认开启**、运行期由 `[effects] enabled` 控制（默认 true） |
 | 布局 | 单体内置（sway 风格）；**默认堆叠（stacking）布局**，支持运行时切换模式，不同工作区可为不同模式 |
+| 目标发行版 | 优先支持 deepin 与 Arch Linux（CI 基线为 archlinux:base-devel） |
 
 ## 5. 架构组织
 
@@ -283,3 +301,6 @@ struct woodland_layout {
 6. 配置文件与 key-value 协议运行时改配置即时生效。
 7. 特效运行期关闭时，`[effects] enabled=false` 下渲染路径无特效开销（可测量帧时间无显著差异）。
 8. 许可证检查通过（GPL-2.0-only，无不兼容代码混入）。
+9. DDE 核心外壳组件（dde-shell/dock、壁纸、控制中心交互）协议握手与基础功能可用。
+10. 基于 layer-shell 的现代组件与桌面（Noctalia、Quickshell、LXQt 组件）可正确停靠、获得输入与交互。
+11. deepin 与 Arch Linux 构建与运行顺畅，CI（Arch Linux）自动化测试通过。
