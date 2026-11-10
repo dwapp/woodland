@@ -48,15 +48,16 @@ struct woodland_ime_relay {
 /**
  * 安全特权策略说明 (Security Policy):
  *
- * Woodland 为单用户 Wayland 会话合成器，依照全局协议规划（见 include/protocol.h 及
- * docs/architecture.md），security-context-v1 暂未接线。
- * zwp_input_method_manager_v2 与 zwp_virtual_keyboard_manager_v1 暴露在当前会话的全局接口列表中，
- * 供用户环境下的输入法引擎（如 Fcitx5、IBus）绑定使用。
+ * Woodland 为单用户 Wayland 会话合成器，目前已通过 wp_security_context_manager_v1
+ * 对带沙箱上下文的客户端屏蔽特权全局（含 zwp_input_method_manager_v2 与
+ * zwp_virtual_keyboard_manager_v1）。对于未沙箱化的本地同会话客户端，这两者仍
+ * 暴露在全局接口列表中，供用户环境下的输入法引擎（如 Fcitx5、IBus）绑定使用。
  *
  * [已知风险与限制]：
- * 任何能连入该 Wayland socket 的客户端均可请求输入法或虚拟键盘权限。
- * 当后续里程碑引入特权协议访问控制机制后，应在 wl_global 的 bind 回调或
- * wl_display_set_global_filter 中对输入法/虚拟键盘的绑定方施加权限验证。
+ * 任何未带 security context 且能连入主 Wayland socket 的客户端均可请求输入法或虚拟键盘权限。
+ * 后续若对输入法 / 虚拟键盘的绑定方施加进一步权限校验，应在 wl_global 的 bind 回调或
+ * 统一全局过滤器入口 woodland_global_filter_add()（include/util/global_filter.h）中注册
+ * checker，严禁直接调用 wl_display_set_global_filter() 覆盖既有过滤策略。
  */
 
 /**

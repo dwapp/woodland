@@ -47,7 +47,12 @@ struct wlr_output;
  *             treeland-appearance（bind 即推送 + 变化广播，9 项真生效）、
  *             treeland-appearance-manager 的 9 条 set_*（同上一一对应）、
  *             ext-background-effect（capability 随 [effects] 运行期变化）、
- *             wp-security-context-v1（白名单过滤特权协议，禁止嵌套沙箱）
+ *             wp-security-context-v1（按 Wayland 连接隔离：白名单过滤特权协议、
+ *             禁止嵌套沙箱；默认放行 zwp_keyboard_shortcuts_inhibit_manager_v1；
+ *             仅对沙箱引擎通过 create_listener + commit 建立的私有 socket 连接生效，
+ *             X11/Xwayland 应用与沙盒内直连主 WAYLAND_DISPLAY 的进程不受限；
+ *             新增任何暴露给客户端的 global 时必须同步更新 security_context.c 的
+ *             allowed_protocols / privileged_protocols 分类）
  *             —— 客户端请求会真的影响合成器行为。
  *   委派实现：treeland-wallpaper-shell / -manager / -notifier
  *             —— 配置、场景托管、播放控制都在合成器里，但**解码不在**：

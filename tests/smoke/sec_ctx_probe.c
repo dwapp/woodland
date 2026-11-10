@@ -3,10 +3,12 @@
  * wp-security-context-v1 冒烟探针。
  *
  * 流程：
- *   1. 作为沙箱引擎（父客户端）接入主 Wayland 显示，bind wp_security_context_manager_v1；
+ *   1. 作为沙箱引擎（父客户端）接入主 Wayland 显示，校验普通客户端能正常见到
+ *      wp_security_context_manager_v1 及特权全局（且看不到 xwayland_shell_v1）；
  *   2. 创建监听 socket 与 close_fd，通过 wp_security_context_manager_v1 注册沙箱上下文；
  *   3. 作为沙箱客户端连接该监听 socket；
- *   4. 沙箱客户端验证全局接口过滤（不能看到 security_context、layer_shell、screencopy 等）；
+ *   4. 沙箱客户端验证全局接口过滤（必须看到 zwp_keyboard_shortcuts_inhibit_manager_v1，
+ *      必须屏蔽 wp_security_context_manager_v1 与其他全部特权接口）；
  *   5. 沙箱客户端创建一个 xdg toplevel 窗口，输出 SANDBOX_READY 供脚本断言；
  *   6. 保持运行直到被终止。
  */
@@ -31,6 +33,17 @@
 #define HEIGHT 200
 
 static struct wp_security_context_manager_v1 *parent_sec_ctx_manager;
+static bool parent_saw_layer_shell;
+static bool parent_saw_screencopy;
+static bool parent_saw_data_control;
+static bool parent_saw_output_mgr;
+static bool parent_saw_session_lock;
+static bool parent_saw_ftl_list;
+static bool parent_saw_workspace_mgr;
+static bool parent_saw_shortcuts_inhibit;
+static bool parent_saw_treeland_ftl;
+static bool parent_saw_treeland_shortcut;
+static bool parent_saw_xwayland_shell;
 
 static void parent_registry_global(void *data, struct wl_registry *reg, uint32_t name,
                                    const char *interface, uint32_t version)
@@ -40,6 +53,28 @@ static void parent_registry_global(void *data, struct wl_registry *reg, uint32_t
     if (strcmp(interface, wp_security_context_manager_v1_interface.name) == 0) {
         parent_sec_ctx_manager =
             wl_registry_bind(reg, name, &wp_security_context_manager_v1_interface, 1);
+    } else if (strcmp(interface, "zwlr_layer_shell_v1") == 0) {
+        parent_saw_layer_shell = true;
+    } else if (strcmp(interface, "zwlr_screencopy_manager_v1") == 0) {
+        parent_saw_screencopy = true;
+    } else if (strcmp(interface, "zwlr_data_control_manager_v1") == 0) {
+        parent_saw_data_control = true;
+    } else if (strcmp(interface, "zwlr_output_manager_v1") == 0) {
+        parent_saw_output_mgr = true;
+    } else if (strcmp(interface, "ext_session_lock_manager_v1") == 0) {
+        parent_saw_session_lock = true;
+    } else if (strcmp(interface, "ext_foreign_toplevel_list_v1") == 0) {
+        parent_saw_ftl_list = true;
+    } else if (strcmp(interface, "ext_workspace_manager_v1") == 0) {
+        parent_saw_workspace_mgr = true;
+    } else if (strcmp(interface, "zwp_keyboard_shortcuts_inhibit_manager_v1") == 0) {
+        parent_saw_shortcuts_inhibit = true;
+    } else if (strcmp(interface, "treeland_foreign_toplevel_manager_v3") == 0) {
+        parent_saw_treeland_ftl = true;
+    } else if (strcmp(interface, "treeland_shortcut_manager_v3") == 0) {
+        parent_saw_treeland_shortcut = true;
+    } else if (strcmp(interface, "xwayland_shell_v1") == 0) {
+        parent_saw_xwayland_shell = true;
     }
 }
 
@@ -64,6 +99,15 @@ static struct xdg_wm_base *child_wm_base;
 static bool child_saw_sec_ctx;
 static bool child_saw_layer_shell;
 static bool child_saw_screencopy;
+static bool child_saw_data_control;
+static bool child_saw_output_mgr;
+static bool child_saw_session_lock;
+static bool child_saw_ftl_list;
+static bool child_saw_workspace_mgr;
+static bool child_saw_treeland_ftl;
+static bool child_saw_treeland_shortcut;
+static bool child_saw_xwayland_shell;
+static bool child_saw_shortcuts_inhibit;
 static bool child_configured;
 
 static void child_registry_global(void *data, struct wl_registry *reg, uint32_t name,
@@ -77,6 +121,24 @@ static void child_registry_global(void *data, struct wl_registry *reg, uint32_t 
         child_saw_layer_shell = true;
     } else if (strcmp(interface, "zwlr_screencopy_manager_v1") == 0) {
         child_saw_screencopy = true;
+    } else if (strcmp(interface, "zwlr_data_control_manager_v1") == 0) {
+        child_saw_data_control = true;
+    } else if (strcmp(interface, "zwlr_output_manager_v1") == 0) {
+        child_saw_output_mgr = true;
+    } else if (strcmp(interface, "ext_session_lock_manager_v1") == 0) {
+        child_saw_session_lock = true;
+    } else if (strcmp(interface, "ext_foreign_toplevel_list_v1") == 0) {
+        child_saw_ftl_list = true;
+    } else if (strcmp(interface, "ext_workspace_manager_v1") == 0) {
+        child_saw_workspace_mgr = true;
+    } else if (strcmp(interface, "treeland_foreign_toplevel_manager_v3") == 0) {
+        child_saw_treeland_ftl = true;
+    } else if (strcmp(interface, "treeland_shortcut_manager_v3") == 0) {
+        child_saw_treeland_shortcut = true;
+    } else if (strcmp(interface, "xwayland_shell_v1") == 0) {
+        child_saw_xwayland_shell = true;
+    } else if (strcmp(interface, "zwp_keyboard_shortcuts_inhibit_manager_v1") == 0) {
+        child_saw_shortcuts_inhibit = true;
     } else if (strcmp(interface, wl_compositor_interface.name) == 0) {
         child_compositor = wl_registry_bind(reg, name, &wl_compositor_interface, 4);
     } else if (strcmp(interface, wl_shm_interface.name) == 0) {
@@ -182,8 +244,15 @@ int main(void)
     wl_display_roundtrip(parent_display);
     wl_display_roundtrip(parent_display);
 
-    if (!parent_sec_ctx_manager) {
-        fprintf(stderr, "wp_security_context_manager_v1 not available on parent display\n");
+    if (!parent_sec_ctx_manager || !parent_saw_layer_shell || !parent_saw_screencopy ||
+        !parent_saw_data_control || !parent_saw_output_mgr || !parent_saw_session_lock ||
+        !parent_saw_ftl_list || !parent_saw_workspace_mgr || !parent_saw_shortcuts_inhibit ||
+        !parent_saw_treeland_ftl || !parent_saw_treeland_shortcut) {
+        fprintf(stderr, "FAIL: normal parent client missing expected privileged globals\n");
+        return 1;
+    }
+    if (parent_saw_xwayland_shell) {
+        fprintf(stderr, "FAIL: normal parent client unexpectedly saw xwayland_shell_v1\n");
         return 1;
     }
 
@@ -247,20 +316,25 @@ int main(void)
     wl_display_roundtrip(child_display);
 
     /* 4. 校验过滤规则 */
-    if (child_saw_sec_ctx) {
-        fprintf(stderr, "FAIL: sandboxed client saw wp_security_context_manager_v1\n");
+    if (child_saw_sec_ctx || child_saw_layer_shell || child_saw_screencopy ||
+        child_saw_data_control || child_saw_output_mgr || child_saw_session_lock ||
+        child_saw_ftl_list || child_saw_workspace_mgr || child_saw_treeland_ftl ||
+        child_saw_treeland_shortcut || child_saw_xwayland_shell) {
+        fprintf(stderr,
+                "FAIL: sandboxed client saw privileged globals "
+                "(sec=%d layer=%d screen=%d data=%d out=%d lock=%d ftl=%d ws=%d tftl=%d tsc=%d xwl=%d)\n",
+                child_saw_sec_ctx, child_saw_layer_shell, child_saw_screencopy,
+                child_saw_data_control, child_saw_output_mgr, child_saw_session_lock,
+                child_saw_ftl_list, child_saw_workspace_mgr, child_saw_treeland_ftl,
+                child_saw_treeland_shortcut, child_saw_xwayland_shell);
         return 2;
     }
-    if (child_saw_layer_shell) {
-        fprintf(stderr, "FAIL: sandboxed client saw zwlr_layer_shell_v1\n");
-        return 2;
-    }
-    if (child_saw_screencopy) {
-        fprintf(stderr, "FAIL: sandboxed client saw zwlr_screencopy_manager_v1\n");
-        return 2;
-    }
-    if (!child_compositor || !child_shm || !child_wm_base) {
-        fprintf(stderr, "FAIL: sandboxed client missing compositor, shm or wm_base\n");
+    if (!child_compositor || !child_shm || !child_wm_base || !child_saw_shortcuts_inhibit) {
+        fprintf(stderr,
+                "FAIL: sandboxed client missing allowed globals "
+                "(comp=%d shm=%d wm_base=%d shortcuts_inhibit=%d)\n",
+                child_compositor != NULL, child_shm != NULL, child_wm_base != NULL,
+                child_saw_shortcuts_inhibit);
         return 2;
     }
 

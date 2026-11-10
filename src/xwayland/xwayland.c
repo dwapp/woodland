@@ -12,6 +12,7 @@
  * configure）→ associate（wlr_surface 可用，挂 surface 事件）→ map（真正上屏）。
  */
 #include "util/listener.h"
+#include "util/global_filter.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -893,6 +894,20 @@ static void xwl_ready(struct wl_listener *listener, void *data) {
     woodland_xwayland_update_cursor(server);
     (void)data;
 }
+static bool xwl_global_filter(const struct wl_client *client,
+                              const struct wl_global *global,
+                              void *data) {
+    struct woodland_server *server = data;
+    const struct wl_interface *iface = wl_global_get_interface(global);
+    if (!iface || !iface->name || strcmp(iface->name, "xwayland_shell_v1") != 0) {
+        return true;
+    }
+    struct wl_client *xwayland_client = (server && server->xwayland && server->xwayland->server)
+        ? server->xwayland->server->client
+        : NULL;
+    return client == xwayland_client;
+}
+
 
 bool woodland_xwayland_init(struct woodland_server *server) {
     wl_list_init(&server->xwayland_unmanaged);
@@ -901,6 +916,13 @@ bool woodland_xwayland_init(struct woodland_server *server) {
                                            true);
     if (!server->xwayland) {
         wlr_log(WLR_ERROR, "failed to create xwayland");
+        return false;
+    }
+    if (!woodland_global_filter_add(server->display, "xwayland_shell",
+                                    xwl_global_filter, server)) {
+        wlr_log(WLR_ERROR, "failed to register xwayland global filter");
+        wlr_xwayland_destroy(server->xwayland);
+        server->xwayland = NULL;
         return false;
     }
     if (server->seat) {
@@ -930,6 +952,7 @@ void woodland_xwayland_finish(struct woodland_server *server) {
     if (!server->xwayland) {
         return;
     }
+    woodland_global_filter_remove(server->display, "xwayland_shell");
     wl_list_remove(&server->new_xwayland_surface.link);
     wl_list_remove(&server->xwayland_ready.link);
     server->xwayland_cursor_hook = NULL;
