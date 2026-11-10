@@ -468,6 +468,10 @@ static void handle_new_popup(struct wl_listener *listener, void *data)
         free(popup);
         return;
     }
+    /* 和 shell.c 里 toplevel/popup 一致：base->data 存这个 xdg surface 自己的
+     * 场景树。嵌套 popup（父是 popup）走 shell.c 的 server_new_xdg_popup，
+     * 靠读父 popup 的 base->data 找到挂载点；这里不设会留下 NULL 导致断言崩溃 */
+    xdg_popup->base->data = popup->scene_tree;
 
     woodland_listener_connect(&popup->commit, &xdg_popup->base->surface->events.commit,
                               handle_popup_commit, "layer.commit");
