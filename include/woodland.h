@@ -318,6 +318,14 @@ struct woodland_server {
     uint32_t next_view_id;
 
     const char *startup_cmd;        // -s 启动命令
+    /*
+     * --socket 指定的固定 Wayland socket 名（相对 $XDG_RUNTIME_DIR）。
+     * 非 NULL 时用 wl_display_add_socket 建这个固定名；NULL 且没有被
+     * systemd socket activation 唤醒时退回 wl_display_add_socket_auto。
+     * systemd socket activation 优先于它（fd 由 systemd 提供，名字按
+     * socket unit 的 ListenStream 约定为 woodland.socket）。
+     */
+    const char *socket_name;
     const char *config_path;        // -c 配置文件路径
     struct woodland_config *config; // 运行时配置
 };

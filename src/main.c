@@ -11,12 +11,14 @@
 
 static void usage(const char *name)
 {
-    printf("Usage: %s [-s startup command] [-c config file] [-p placement policy] [--self-check]"
-           " [--trace]\n"
+    printf("Usage: %s [-s startup command] [-c config file] [-p placement policy]\n"
+           "           [-S socket name] [--self-check] [--trace]\n"
            "\n"
            "  -s  command run after the compositor is up\n"
            "  -c  path to configuration file (default: $XDG_CONFIG_HOME/woodland/config.toml)\n"
            "  -p  new window placement: cascade (default), center, cursor, autoplace\n"
+           "  -S  fixed Wayland socket name under $XDG_RUNTIME_DIR\n"
+           "      (ignored when started via systemd socket activation)\n"
            "  --self-check  run invariant checks after every state change\n"
            "                (failures are logged, not fatal)\n"
            "  --trace       keep the last 4096 state-change decisions in a ring\n"
@@ -33,6 +35,7 @@ int main(int argc, char *argv[])
 
     char *startup_cmd = NULL;
     char *config_path = NULL;
+    const char *socket_name = NULL;
     bool self_check = false;
     bool trace_enabled = false;
     bool placement_specified = false;
@@ -45,18 +48,22 @@ int main(int argc, char *argv[])
         {"self-check", no_argument, NULL, OPT_SELF_CHECK},
         {"trace", no_argument, NULL, OPT_TRACE},
         {"config", required_argument, NULL, 'c'},
+        {"socket", required_argument, NULL, 'S'},
         {"help", no_argument, NULL, 'h'},
         {NULL, 0, NULL, 0},
     };
 
     int c;
-    while ((c = getopt_long(argc, argv, "s:p:c:h", long_options, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "s:p:c:S:h", long_options, NULL)) != -1) {
         switch (c) {
         case 's':
             startup_cmd = optarg;
             break;
         case 'c':
             config_path = optarg;
+            break;
+        case 'S':
+            socket_name = optarg;
             break;
         case 'p':
             if (!woodland_placement_policy_parse(optarg, &placement)) {
@@ -87,6 +94,7 @@ int main(int argc, char *argv[])
 
     struct woodland_server server = {0};
     server.startup_cmd = startup_cmd;
+    server.socket_name = socket_name;
     server.config_path = config_path;
     server.placement_policy = placement;
     server.placement_specified = placement_specified;

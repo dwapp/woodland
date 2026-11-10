@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "util/listener.h"
+#include <errno.h>
 #include <signal.h>
 #include <stdlib.h>
+#include <string.h>
+#include <systemd/sd-daemon.h>
 #include <unistd.h>
 
 #include <wlr/types/wlr_alpha_modifier_v1.h>
@@ -314,10 +317,47 @@ bool woodland_server_init(struct woodland_server *server)
 
 bool woodland_server_start(struct woodland_server *server)
 {
-    const char *socket = wl_display_add_socket_auto(server->display);
-    if (!socket) {
-        wlr_log(WLR_ERROR, "failed to add wayland socket");
+    const char *socket = NULL;
+
+    /*
+     * Wayland socket 的三条来源，按优先级：
+     *   1. systemd socket activation：fd 已由 systemd bind+listen，socket 名
+     *      由 socket unit 的 ListenStream 固定为 woodland.socket，对应
+     *      WAYLAND_DISPLAY=woodland.socket（treeland 用 treeland.socket 的
+     *      同一套做法，只是名字换成 woodland 自己的）。
+     *   2. --socket 固定名（手动 / 调试用），名字落在 $XDG_RUNTIME_DIR 下。
+     *   3. 都缺省时退回 wl_display_add_socket_auto（wayland-N 自动找空位）。
+     */
+    int n_fds = sd_listen_fds(0);
+    if (n_fds < 0) {
+        wlr_log(WLR_ERROR, "sd_listen_fds failed: %s", strerror(-n_fds));
         return false;
+    }
+    if (n_fds > 1) {
+        wlr_log(WLR_ERROR, "expected at most one systemd socket, got %d", n_fds);
+        return false;
+    }
+    if (n_fds == 1) {
+        if (wl_display_add_socket_fd(server->display, SD_LISTEN_FDS_START) < 0) {
+            wlr_log(WLR_ERROR, "failed to use systemd-activated wayland socket");
+            return false;
+        }
+        socket = "woodland.socket";
+        wlr_log(WLR_INFO, "using systemd-activated socket (WAYLAND_DISPLAY=%s)",
+                socket);
+    } else if (server->socket_name) {
+        if (wl_display_add_socket(server->display, server->socket_name) < 0) {
+            wlr_log(WLR_ERROR, "failed to add wayland socket %s",
+                    server->socket_name);
+            return false;
+        }
+        socket = server->socket_name;
+    } else {
+        socket = wl_display_add_socket_auto(server->display);
+        if (!socket) {
+            wlr_log(WLR_ERROR, "failed to add wayland socket");
+            return false;
+        }
     }
 
     if (!wlr_backend_start(server->backend)) {
@@ -326,6 +366,13 @@ bool woodland_server_start(struct woodland_server *server)
     }
 
     setenv("WAYLAND_DISPLAY", socket, true);
+
+    /*
+     * 通知 systemd 已就绪：Type=notify 的 service 依赖它判定启动完成，
+     * 也用于 service 到达 active 态后（systemd 会给同一 socket 上的客户端
+     * 排队 accept）。没有 NOTIFY_SOCKET（裸跑/冒烟）时是空操作。
+     */
+    sd_notify(0, "READY=1");
 
     /* 调试接口：路径按 wayland socket 名派生，并导出 WOODLAND_IPC。
      * 起不来只记日志——调试面挂了不该影响合成器本身。 */

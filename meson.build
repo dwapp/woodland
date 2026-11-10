@@ -42,6 +42,9 @@ wayland_server = dependency('wayland-server')
 xkbcommon = dependency('xkbcommon')
 pangocairo = dependency('pangocairo')
 cairo = dependency('cairo')
+# sd_notify / sd_listen_fds（socket activation + Type=notify 就绪报告）。
+# 只在 user session 的 systemd 场景有意义，headless 冒烟下是空操作。
+libsystemd_dep = dependency('libsystemd')
 rsvg_dep = dependency('librsvg-2.0', version: '>=2.52', required: false)
 # Xwayland：依赖只提供 Xwayland 可执行文件路径（wlroots 编译期读取）。
 # 代码始终参与编译（view 访问器里要引用 wlroots 的 xwayland API），
@@ -78,3 +81,27 @@ install_data(
   install_dir: get_option('bindir'),
   install_mode: 'rwxr-xr-x',
 )
+
+# systemd 用户单元：代替 treeland user 模式的 compositor 服务。
+# Type=notify + socket activation（woodland.socket → woodland.service），
+# 与 treeland.service(org.deepin.Compositor1, Type=dbus) 的区别在于 woodland
+# 没有 D-Bus 总线名，靠 sd_notify(READY=1) 报告就绪。
+systemd_dep = dependency('systemd', required: false)
+if systemd_dep.found()
+  systemd_user_unit_dir = systemd_dep.get_variable('systemduserunitdir')
+  # ExecStart 要跟随实际安装目录（prefix 默认 /usr/local，发行版打包常设 /usr），
+  # 用独立的 configuration_data 展开 @BINDIR@（conf_data 已用于 config.h，不能复用）。
+  unit_data = configuration_data()
+  unit_data.set('BINDIR', get_option('prefix') / get_option('bindir'))
+  configure_file(
+    input: 'resources/systemd/woodland.service.in',
+    output: 'woodland.service',
+    configuration: unit_data,
+    install: true,
+    install_dir: systemd_user_unit_dir,
+  )
+  install_data(
+    'resources/systemd/woodland.socket',
+    install_dir: systemd_user_unit_dir,
+  )
+endif
