@@ -143,7 +143,7 @@ test_security_context = executable('test_security_context', test_sec_ctx_srcs,
   c_args: test_sec_ctx_c_args,
   dependencies: test_sec_ctx_deps,
   include_directories: woodland_inc,
-  link_with: [protocol_lib, output_lib, cursor_lib, shell_lib, seat_lib, session_lock_lib, ime_lib, workspace_lib, layer_lib, ssd_lib, effect_lib, capture_lib, util_lib, trace_lib, ipc_lib])
+  link_with: [protocol_lib] + xwayland_libs + [output_lib, cursor_lib, shell_lib, seat_lib, session_lock_lib, ime_lib, workspace_lib, layer_lib, ssd_lib, effect_lib, capture_lib, util_lib, trace_lib, ipc_lib])
 test('security_context', test_security_context)
 
 

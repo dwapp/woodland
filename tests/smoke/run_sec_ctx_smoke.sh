@@ -26,7 +26,7 @@ export XDG_CONFIG_HOME="$XDG_RUNTIME_DIR/config"
 export XDG_DATA_HOME="$XDG_RUNTIME_DIR/data"
 mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME"
 
-export WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_HEADLESS_OUTPUTS=1
+export WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1
 SMOKE_FLAGS="--trace"
 SMOKE_LOG="$XDG_RUNTIME_DIR/log"
 "$BIN" --trace >"$SMOKE_LOG" 2>&1 &
@@ -95,14 +95,15 @@ printf '%s' "$tree" | jq -e '
     .security_context.last_instance_id == "smoke-42"
 ' >/dev/null || smoke_fail "get_tree security_context fields unexpected: $(printf '%s' "$tree" | jq -c '.security_context')"
 
-# 4. 校验 views[0] 的 security_context 注入
+# 4. 按 app_id 定位沙箱窗口并校验 security_context 注入
 printf '%s' "$tree" | jq -e '
-    .count >= 1 and
-    .views[0].security_context.sandboxed == true and
-    .views[0].security_context.sandbox_engine == "org.flatpak" and
-    .views[0].security_context.app_id == "org.example.SecCtxSmoke" and
-    .views[0].security_context.instance_id == "smoke-42"
-' >/dev/null || smoke_fail "view security_context fields unexpected: $(printf '%s' "$tree" | jq -c '.views[0].security_context')"
+    ([.views[] | select(.app_id == "org.example.SecCtxSmoke")]) as $v |
+    ($v | length) == 1 and
+    $v[0].security_context.sandboxed == true and
+    $v[0].security_context.sandbox_engine == "org.flatpak" and
+    $v[0].security_context.app_id == "org.example.SecCtxSmoke" and
+    $v[0].security_context.instance_id == "smoke-42"
+' >/dev/null || smoke_fail "view security_context fields unexpected: $(printf '%s' "$tree" | jq -c '.views')"
 
 # 5. 校验 get_trace 中记录的决策轨迹
 trace="$(wctl_cmd get_trace)" || smoke_fail "get_trace failed"
@@ -114,7 +115,13 @@ printf '%s' "$trace" | jq -e '
     .entries[] | select(.what == "sec_ctx" and (.detail | contains("engine=org.flatpak") and contains("app_id=org.example.SecCtxSmoke") and contains("instance_id=smoke-42")))
 ' >/dev/null || smoke_fail "sec_ctx detail mismatch in trace: $trace"
 
-# 6. 正常终止探针并等待退出
+# 6. 校验无未分类协议 ERROR 日志
+if grep -q 'Blocking unknown protocol' "$SMOKE_LOG" 2>/dev/null; then
+    cat "$SMOKE_LOG" >&2 || true
+    smoke_fail "unexpected unknown protocol error logged during sandbox connection"
+fi
+
+# 7. 正常终止探针并等待退出
 kill -TERM "$probe_pid" 2>/dev/null || true
 wait "$probe_pid" 2>/dev/null || true
 probe_pid=""
