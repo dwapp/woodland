@@ -9,4 +9,9 @@ export GDK_BACKEND=wayland,x11
 export SDL_VIDEODRIVER=wayland
 export CLUTTER_BACKEND=wayland
 
-exec woodland -s "dms run"
+# 桌面 shell / 启动命令不在这里写死：woodland 是通用合成器，DDE(dms) 等
+# 三方桌面环境的启动命令由各自的项目通过 WOODLAND_STARTUP_CMD 注入。
+if [ -n "$WOODLAND_STARTUP_CMD" ]; then
+    exec woodland -s "$WOODLAND_STARTUP_CMD"
+fi
+exec woodland
