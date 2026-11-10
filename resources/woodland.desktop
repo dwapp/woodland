@@ -5,3 +5,4 @@ Exec=woodland-session
 TryExec=woodland
 Type=Application
 DesktopNames=woodland
+X-Woodland-Socket-Activated=true

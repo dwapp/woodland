@@ -1,0 +1,24 @@
+[Unit]
+Description=Woodland Wayland compositor session service
+CollectMode=inactive-or-failed
+
+Requires=woodland.socket
+After=woodland.socket
+
+Requisite=graphical-session-pre.target
+PartOf=graphical-session.target
+Before=graphical-session.target
+
+[Service]
+Type=notify
+Sockets=woodland.socket
+Slice=session.slice
+ExecStart=@BINDIR@/woodland-session
+ExecStartPost=-/usr/bin/systemctl --user set-environment WAYLAND_DISPLAY=woodland.socket
+ExecStop=-/usr/bin/systemctl --user unset-environment WAYLAND_DISPLAY
+
+OOMScoreAdjust=-300
+Nice=-15
+NoNewPrivileges=true
+Restart=on-failure
+RestartSec=1s
