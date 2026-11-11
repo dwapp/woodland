@@ -113,6 +113,13 @@ static const struct ipc_field_doc get_tree_fields[] = {
      "wp-security-context-v1: available (bool), commit_count (int), "
      "last_engine (str|null), last_app_id (str|null), "
      "last_instance_id (str|null)"},
+    {"xwindow_control", "obj",
+     "treeland-xwindow-control-v1: available (bool), bindings (int), "
+     "xwayland (bool: move hook wired), request_count, success_count, "
+     "failure_count (int), last_wid (int), last_dx/last_dy (int), "
+     "last_outcome (str: none|moved|no_xwayland|invalid_anchor|no_window|"
+     "callback_failed), last_anchor (int[2]|null), last_target (int[2]|null), "
+     "last_target_kind (str|null: managed|unmanaged), last_view_id (int)"},
     {"focus", "obj", "same fields as get_focus"},
     {"snap_preview", "obj",
      "snap preview overlay: active, edges[], box[x,y,w,h], output"},
@@ -636,6 +643,9 @@ static void ipc_get_tree(struct woodland_server *server, struct woodland_json *o
     woodland_protocol_toplevel_status(server, out);
     woodland_json_obj_key(&obj, "security_context");
     woodland_protocol_security_context_status(server, out);
+    /* X11 摆位：bind 数、累计成败、最近一次请求的目标与处置 */
+    woodland_json_obj_key(&obj, "xwindow_control");
+    woodland_protocol_xwindow_control_status(server, out);
 
 
     woodland_json_obj_key(&obj, "focus");

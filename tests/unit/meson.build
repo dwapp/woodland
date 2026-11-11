@@ -186,6 +186,18 @@ test_foreign_toplevel = executable('test_foreign_toplevel', 'test_foreign_toplev
               session_lock_lib, ime_lib, capture_lib])
 test('foreign_toplevel', test_foreign_toplevel)
 
+# treeland-xwindow-control-v1：fixed 取整、目标坐标饱和、状态默认值。
+# 纯逻辑，不建 display；xwindow_control.c.o 会经 security_context.c.o 拉入
+# wlroots 的 security-context / global-filter 符号，链接列表跟
+# test_compositor_action 一样长。
+test_xwindow_control = executable('test_xwindow_control', 'test_xwindow_control.c',
+  dependencies: [scene_deps, wayland_server],
+  include_directories: woodland_inc,
+  link_with: [protocol_lib, workspace_lib, trace_lib, util_lib, shell_lib,
+              output_lib, cursor_lib, layer_lib, ssd_lib, effect_lib, seat_lib,
+              session_lock_lib, ime_lib, capture_lib])
+test('xwindow_control', test_xwindow_control)
+
 # treeland-shortcut-manager-v3：PortableText 解析 / 有效性 / 匹配 / 动作分档。
 # 纯逻辑，但 shortcut.c.o 会拉入窗口与工作区动作，链接列表跟
 # test_compositor_action 一样长；xkbcommon 只被本测试直接用到。

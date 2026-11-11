@@ -84,7 +84,7 @@ wctl --help
             {"seq":3,"ms":31,"obj":1,"what":"focus","detail":"prev=0 raise=1"}]}
 ```
 
-- `what` 是**稳定标签**（脚本会 grep），权威清单在 `include/trace.h`：`map` / `unmap` / `destroy` / `focus` / `focus_none` / `layer_focus` / `place` / `workspace` / `output_add` / `output_remove` / `cfg_apply` / `deco` / `bg_effect` / `action` / `shortcut` / `appearance` / `ftl` / `tearing` / `vt` / `snap` / `dnd`。加新标签先改 trace.h 的清单，再发第一条轨迹。
+- `what` 是**稳定标签**（脚本会 grep），权威清单在 `include/trace.h`：`map` / `unmap` / `destroy` / `focus` / `focus_none` / `layer_focus` / `place` / `workspace` / `output_add` / `output_remove` / `cfg_apply` / `deco` / `bg_effect` / `action` / `shortcut` / `appearance` / `ftl` / `tearing` / `vt` / `snap` / `dnd` / `sec_ctx` / `xwindow`。加新标签先改 trace.h 的清单，再发第一条轨迹。
 - `detail` 只写**决策依据**（走了哪个分支、策略名、抑制窗口），不要抄 `get_tree` 已有的数值。
 - 关闭时零分配零格式化；打开后也不分配（一次 calloc）。**它只依赖 `util/json`，不许反向依赖任何业务模块**——否则会成为依赖环的入口。
 - 环的语义：`seq` 全局单调，`total` 是累计条数，`dropped = total - count` 就是被覆盖掉的条数。第一个 entry 的 `seq` 一定等于 `dropped`。
@@ -321,3 +321,25 @@ X11 窗口的缩放滤波（按所在输出的 scale 选 nearest/bilinear）全�
   **资源**（光标主题、scenefx 缓存、SSD buffer、X11 滤波），这里缺的是"按输出
   scale 生成设备像素对齐的几何"，是另一件事：要么给预览加一条 output-local
   绘制路径，要么接受这 2px 软边。
+- **treeland-xwindow-control-unstable-v1 已实现**（`feature/treeland-xwindow-control`）：
+  Dock 的 XEmbed 托盘图标是 X11 窗口，Wayland 客户端没法 reparent，只能请合成器
+  按 X11 wid 把它摆到 anchor surface 左上角 + (dx,dy)。几条改之前必须知道的：
+  ① **anchor 的左上角是布局坐标**，用 `wlr_scene_node_for_each_buffer()` 遍历场景、
+    `wlr_scene_surface_try_from_buffer()` 认领 anchor 的那份 buffer 拿 (x,y)。
+    xdg toplevel / layer surface / popup / X11 窗口都走这一条，别改成按后端反查的
+    switch；裸 wl_surface（没 mapped / 没进场景）自然找不到，按协议回 `done(1)`。
+  ② **位置有两份真相**：scene 节点 + X server 里的窗口几何。只挪节点会被下一次
+    X11 `set_geometry` 弹回去，只 configure 画面不会立刻动。`xwayland.c` 的
+    `woodland_xwayland_move_by_wid()` 两边一起写并 flush xcb；受管理视图和
+    override-redirect（`server->xwayland_unmanaged`，XEmbed 常见形态）都覆盖。
+  ③ **跨层钩子 `server->xwindow_move_hook`**：`protocol_lib` 不反向链接
+    `xwayland_lib`（只链 protocol_lib 的单测会缺符号），钩子为 NULL 就是本构建
+    没 Xwayland，如实回 `callback.done(1)` 并记 `no_xwayland`，别假装生效。
+  ④ 每条请求建一个 `wl_callback`、发一次 `done(0/1)` 后立刻销毁；连 callback
+    都分配不出来只能 `post_no_memory`。bind 限同 uid 且非沙箱（不是 DDE 的
+    privilege 服务），新 global 已登记进 `security_context.c` 的
+    `privileged_protocols`，加了暴露给客户端的 global 都要同步那张表。
+  轨迹标签 `xwindow`，状态在 `wctl get_tree` 的 `xwindow_control`，协议 XML 是
+  `protocols/treeland/` 下的只读副本（MIT，上游 `dde/`）。回归：
+  `tests/unit/test_xwindow_control.c`（fixed 取整 / 目标坐标饱和 / 状态默认值）、
+  `smoke-xwindow-control`（bind / destroy / 无效 anchor / wid 不存在 / 真 X11 摆位）。

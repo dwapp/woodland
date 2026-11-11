@@ -261,6 +261,19 @@ struct woodland_server {
     void (*xwayland_restack_hook)(struct woodland_view *view);
     void (*xwayland_flush_hook)(struct woodland_server *server);
     /*
+     * treeland-xwindow-control-v1 的按 X11 wid 摆位入口。
+     *
+     * 窗口有两份真相（scene 节点 + X server 几何），且 override-redirect
+     * 窗口的链表是 xwayland.c 的私有状态，所以实现放在那儿；协议层经这个
+     * 钩子反向调用，不必让 protocol_lib 链接 xwayland_lib（只链
+     * protocol_lib 的单测会缺符号）。NULL = 本构建没有 Xwayland。
+     *
+     * (x,y) 是布局坐标下的目标左上角；view_id 只在命中受管理视图时写，
+     * unmanaged 写是否为 override-redirect 窗口。返回是否真的摆了。
+     */
+    bool (*xwindow_move_hook)(struct woodland_server *server, uint32_t wid,
+                              int x, int y, uint32_t *view_id, bool *unmanaged);
+    /*
      * 指针约束的"申请者是否持有焦点"：视图 / layer / 锁屏状态只有 shell 层
      * 知道，而 cursor_lib 不能反向依赖 shell_lib（只链 cursor_lib 的单测会缺
      * 符号）。由 shell 在 init / finish 挂上、摘掉；NULL 表示 shell 没建起来，

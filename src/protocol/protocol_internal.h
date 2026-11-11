@@ -20,6 +20,7 @@ struct woodland_proto_shortcut;
 struct woodland_proto_toplevel;
 struct woodland_proto_tearing;
 struct woodland_proto_security_context;
+struct woodland_proto_xwindow_control;
 struct wl_client;
 struct woodland_tearing_controller;
 
@@ -81,6 +82,7 @@ struct woodland_proto {
     struct woodland_proto_toplevel *toplevel; /* foreign_toplevel.c */
     struct woodland_proto_tearing *tearing;   /* tearing.c */
     struct woodland_proto_security_context *security_context; /* security_context.c */
+    struct woodland_proto_xwindow_control *xwindow_control;   /* xwindow_control.c */
 };
 
 /* 空闲与抑制族（idle.c）：idle-notify / idle-inhibit / keyboard-shortcuts-inhibit */
@@ -169,5 +171,11 @@ void woodland_proto_security_context_finish(struct woodland_proto *proto);
 const struct wlr_security_context_v1_state *
 woodland_proto_security_context_lookup_client(struct woodland_proto *proto,
                                               const struct wl_client *client);
+
+/* X11 摆位族（xwindow_control.c）：treeland-xwindow-control-v1。
+ * 谁都不依赖它，也不被别人依赖；排在 security_context 之后是为了让
+ * finish 的逆序对称，且沙箱过滤已经就位后才广播新 global。 */
+bool woodland_proto_xwindow_control_init(struct woodland_proto *proto);
+void woodland_proto_xwindow_control_finish(struct woodland_proto *proto);
 
 #endif

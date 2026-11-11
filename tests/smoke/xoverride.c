@@ -5,7 +5,10 @@
  * 用来验证 compositor 的 unmanaged 路径（菜单/提示类窗口）：不生成
  * woodland_view、不画 SSD、不参与焦点，位置由 X 侧坐标决定。
  *
- * 用法: xoverride [x] [y] [w] [h]，窗口底色为纯红，map 后打印 READY 并阻塞。
+ * 用法: xoverride [x] [y] [w] [h]，窗口底色为纯红，map 后打印窗口 id 并阻塞。
+ *       xoverride --managed-window 另外建一个**受管理**的 X11 顶层窗口（不带
+ *       override_redirect），供 treeland-xwindow-control 冒烟验证 managed 分支；
+ *       --test-toggle 做 override_redirect 的双向迁移回归。
  */
 #define _DEFAULT_SOURCE
 #include <stdio.h>
@@ -47,7 +50,19 @@ int main(int argc, char *argv[]) {
     xcb_window_t win = xcb_generate_id(conn);
     uint32_t mask = XCB_CW_BACK_PIXEL | XCB_CW_OVERRIDE_REDIRECT;
 
-    if (argc > 1 && strcmp(argv[1], "--test-toggle") == 0) {
+    if (argc > 1 && strcmp(argv[1], "--managed-window") == 0) {
+        /* 普通顶层窗口：合成器会建 woodland_view / SSD，用于按 wid 摆位的
+         * managed 分支。打印的 0x.. 就是协议要的 X11 window id。 */
+        uint32_t val_managed[] = {red, 0};
+        xcb_create_window(conn, XCB_COPY_FROM_PARENT, win, screen->root,
+                          (int16_t)x, (int16_t)y, (uint16_t)w, (uint16_t)h, 0,
+                          XCB_WINDOW_CLASS_INPUT_OUTPUT, screen->root_visual,
+                          mask, val_managed);
+        xcb_map_window(conn, win);
+        xcb_flush(conn);
+        printf("managed window 0x%x at %d,%d %dx%d\n", win, x, y, w, h);
+        fflush(stdout);
+    } else if (argc > 1 && strcmp(argv[1], "--test-toggle") == 0) {
         /* 先以 managed (override_redirect = 0) 创建并 map */
         uint32_t val_managed[] = {red, 0};
         xcb_create_window(conn, XCB_COPY_FROM_PARENT, win, screen->root,

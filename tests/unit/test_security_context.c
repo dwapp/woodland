@@ -328,6 +328,7 @@ static void test_pure_functions(void)
         "treeland_shortcut_manager_v3",
         "treeland_foreign_toplevel_manager_v3",
         "treeland_appearance_manager_v1",
+        "treeland_xwindow_control_v1",
     };
 
     for (size_t i = 0; i < sizeof(expected_privileged) / sizeof(expected_privileged[0]); i++) {
@@ -496,6 +497,7 @@ static void test_server_integration(void)
         "treeland_compositor_action_v1",
         "treeland_shortcut_manager_v3",
         "treeland_appearance_manager_v1",
+        "treeland_xwindow_control_v1",
         "treeland_wallpaper_manager_v1",
         "treeland_wallpaper_shell_v1",
         "treeland_wallpaper_notifier_v1",

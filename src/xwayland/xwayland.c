@@ -942,6 +942,7 @@ bool woodland_xwayland_init(struct woodland_server *server) {
     server->xwayland_refresh_hook = woodland_xwayland_refresh_unmanaged_filters;
     server->xwayland_restack_hook = woodland_xwayland_restack_view;
     server->xwayland_flush_hook = woodland_xwayland_flush;
+    server->xwindow_move_hook = woodland_xwayland_move_by_wid;
 
     wlr_log(WLR_INFO, "xwayland initialised, DISPLAY=%s",
             server->xwayland->display_name);
@@ -960,6 +961,7 @@ void woodland_xwayland_finish(struct woodland_server *server) {
     server->xwayland_refresh_hook = NULL;
     server->xwayland_restack_hook = NULL;
     server->xwayland_flush_hook = NULL;
+    server->xwindow_move_hook = NULL;
     wlr_xwayland_destroy(server->xwayland);
     server->xwayland = NULL;
 }
@@ -971,6 +973,79 @@ void woodland_xwayland_flush(struct woodland_server *server) {
     if (conn) {
         xcb_flush(conn);
     }
+}
+
+/*
+ * treeland-xwindow-control-v1 的摆位入口（挂在 server->xwindow_move_hook 上）。
+ *
+ * X11 窗口的坐标有两份真相：wlr_scene 节点（画在哪）和 X server 里的窗口
+ * 几何（X11 客户端以为自己在哪）。只改前者，下一次 set_geometry 会把节点
+ * 拉回旧坐标；只改后者，画面要等 X11 回 ConfigureNotify 才动。两边一起写，
+ * 再 flush 一次 xcb 让 configure 立刻出栈。
+ *
+ * 受管理视图的内容原点就是 scene_tree 原点（SSD 画在负坐标上）；协议说的
+ * "窗口左上角"取的是 X11 窗口自身的几何原点，与 X11 侧的 x/y 一致。
+ */
+bool woodland_xwayland_move_by_wid(struct woodland_server *server, uint32_t wid,
+                                   int x, int y, uint32_t *view_id,
+                                   bool *unmanaged)
+{
+    if (view_id) {
+        *view_id = 0;
+    }
+    if (unmanaged) {
+        *unmanaged = false;
+    }
+    if (!server) {
+        return false;
+    }
+
+    struct woodland_view *view;
+    wl_list_for_each(view, &server->views, link) {
+        struct wlr_xwayland_surface *xsurface = view->xwayland_surface;
+        if (view->type != WOODLAND_VIEW_XWAYLAND || !xsurface ||
+            xsurface->window_id != (xcb_window_t)wid) {
+            continue;
+        }
+        if (!view->mapped || !view->scene_tree) {
+            wlr_log(WLR_DEBUG, "xwindow-control: wid=%u exists but is not mapped", wid);
+            return false;
+        }
+        struct wlr_box content;
+        woodland_view_content_box(view, &content);
+        wlr_scene_node_set_position(&view->scene_tree->node, x, y);
+        wlr_xwayland_surface_configure(xsurface, (int16_t)x, (int16_t)y,
+                                       (uint16_t)content.width,
+                                       (uint16_t)content.height);
+        view->placed = true;
+        woodland_view_update_outputs(view);
+        woodland_xwayland_flush(server);
+        if (view_id) {
+            *view_id = view->id;
+        }
+        return true;
+    }
+
+    struct woodland_unmanaged *u;
+    wl_list_for_each(u, &server->xwayland_unmanaged, link) {
+        struct wlr_xwayland_surface *xsurface = u->xsurface;
+        if (!xsurface || xsurface->window_id != (xcb_window_t)wid) {
+            continue;
+        }
+        if (!u->scene_tree || !xsurface->surface || !xsurface->surface->mapped) {
+            wlr_log(WLR_DEBUG, "xwindow-control: wid=%u exists but is not mapped", wid);
+            return false;
+        }
+        wlr_scene_node_set_position(&u->scene_tree->node, x, y);
+        wlr_xwayland_surface_configure(xsurface, (int16_t)x, (int16_t)y,
+                                       xsurface->width, xsurface->height);
+        woodland_xwayland_flush(server);
+        if (unmanaged) {
+            *unmanaged = true;
+        }
+        return true;
+    }
+    return false;
 }
 
 void woodland_xwayland_restack_view(struct woodland_view *view) {
