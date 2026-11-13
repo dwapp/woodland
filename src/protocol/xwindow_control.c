@@ -32,10 +32,20 @@
  *     user_data 指向本族状态，finish 里必须先把 binding 全部销毁再 free，
  *     否则活着的 resource 再收到请求就是 UAF（同 compositor_action.c）。
  *
+ *  4. X11 侧的 wlr_xwayland_surface_configure() 收的是 int16_t x/y，而协议
+ *     的 wl_fixed_t 能给出几万的合法偏移。截断后回 done(0) 等于把窗口配到
+ *     另一个坐标，还会被随后的 ConfigureNotify 反向污染 scene 节点。所以
+ *     目标先过 woodland_xwindow_target_in_x11_range()，越界一律回 done(1)
+ *     且**不调用摆位钩子**，两份真相都不动。没有 XWayland 的构建连 global
+ *     都不广播：DDE Dock 用 isActive() 判通道可用性，广播一个永远失败的
+ *     global 会让它一直发请求、不再回退到 X11 原生 reparent。
+ *
  * 权限：协议要求"应当拒绝非特权客户端的 bind"。woodland 没有 DDE 的
  * privilege 服务，只做两层力所能及的校验——对端 uid 与合成器相同、且该连接
  * 没有 security context（沙箱客户端的 global 过滤在 sec_ctx_global_filter
- * 里已经挡了一道，这里是纵深防御）。这不是 DDE 的按 app_id 授权。
+ * 里已经挡了一道，这里是纵深防御）。这不是 DDE 的按 app_id 授权，也不等价
+ * 于上游要求 target 与 anchor 同 session 的隔离：任何同 uid 的非沙箱进程
+ * 都能按 X11 window id 挪动别人的窗口。
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -47,6 +57,7 @@
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/util/log.h>
 
+#include "config.h" /* WOODLAND_HAVE_XWAYLAND：宏判断必须在 include 之后 */
 #include "protocol.h"
 #include "protocol_internal.h"
 #include "scene.h"
@@ -65,6 +76,7 @@ static const char *const outcome_names[] = {
     [WOODLAND_XWINDOW_NO_XWAYLAND] = "no_xwayland",
     [WOODLAND_XWINDOW_INVALID_ANCHOR] = "invalid_anchor",
     [WOODLAND_XWINDOW_NO_WINDOW] = "no_window",
+    [WOODLAND_XWINDOW_OUT_OF_RANGE] = "out_of_range",
     [WOODLAND_XWINDOW_CALLBACK_FAILED] = "callback_failed",
 };
 
@@ -93,6 +105,7 @@ struct woodland_proto_xwindow_control {
     uint32_t failure_count;
     uint32_t last_wid;
     int last_dx, last_dy;              /* fixed 取整后的像素偏移 */
+    int32_t last_dx_fixed, last_dy_fixed; /* 客户端原始 24.8 值，/256 即像素 */
     enum woodland_xwindow_outcome last_outcome;
     bool have_anchor;
     int last_anchor_x, last_anchor_y;
@@ -112,6 +125,7 @@ const char *woodland_xwindow_outcome_name(enum woodland_xwindow_outcome outcome)
     case WOODLAND_XWINDOW_NO_XWAYLAND:
     case WOODLAND_XWINDOW_INVALID_ANCHOR:
     case WOODLAND_XWINDOW_NO_WINDOW:
+    case WOODLAND_XWINDOW_OUT_OF_RANGE:
     case WOODLAND_XWINDOW_CALLBACK_FAILED:
         return outcome_names[outcome];
     default:
@@ -128,6 +142,16 @@ int woodland_xwindow_control_round_fixed(int32_t value)
      */
     double v = wl_fixed_to_double((wl_fixed_t)value);
     return (int)(v >= 0.0 ? v + 0.5 : v - 0.5);
+}
+
+bool woodland_xwindow_target_in_x11_range(int x, int y)
+{
+    /*
+     * wlr_xwayland_surface_configure() 的 x/y 是 int16_t，且 X11 的
+     * ConfigureWindow 本身也只收 int16 坐标。别在这里 clamp 后继续摆位：
+     * "成功"但落点不是客户端请求的位置，比直接回失败更难排查。
+     */
+    return x >= INT16_MIN && x <= INT16_MAX && y >= INT16_MIN && y <= INT16_MAX;
 }
 
 void woodland_xwindow_control_target(int anchor_x, int anchor_y,
@@ -158,7 +182,11 @@ void woodland_protocol_xwindow_control_status(struct woodland_server *server,
         return;
     }
 
-    woodland_json_obj_bool(&obj, "available", true);
+    /*
+     * noxwl 构建里族状态仍保留（便于诊断），但 global 根本没广播；available
+     * 必须按 global 判，否则客户端会以为摆位通道可用而不再回退。
+     */
+    woodland_json_obj_bool(&obj, "available", family->global != NULL);
     woodland_json_obj_int(&obj, "bindings", (long long)wl_list_length(&family->bindings));
     woodland_json_obj_bool(&obj, "xwayland", server->xwindow_move_hook != NULL);
     woodland_json_obj_int(&obj, "request_count", family->request_count);
@@ -167,6 +195,9 @@ void woodland_protocol_xwindow_control_status(struct woodland_server *server,
     woodland_json_obj_int(&obj, "last_wid", family->last_wid);
     woodland_json_obj_int(&obj, "last_dx", family->last_dx);
     woodland_json_obj_int(&obj, "last_dy", family->last_dy);
+    /* 原始 24.8 值：排查 Dock 小数偏移时不会把"取整"误判成"算错" */
+    woodland_json_obj_int(&obj, "last_dx_fixed", family->last_dx_fixed);
+    woodland_json_obj_int(&obj, "last_dy_fixed", family->last_dy_fixed);
     woodland_json_obj_str(&obj, "last_outcome",
                           woodland_xwindow_outcome_name(family->last_outcome));
 
@@ -192,6 +223,14 @@ void woodland_protocol_xwindow_control_status(struct woodland_server *server,
     woodland_json_obj_close(&obj);
 }
 
+/*
+ * 以下整段是"有客户端能 bind 到这个 global"才需要的路径。编译期关闭
+ * XWayland 时 global 根本不创建，这些 static 函数在 werror=true 下会全部
+ * 触发 -Wunused-function；与其逐个 (void) 引用，不如整段裁掉——没有
+ * XWayland 时本协议族只剩上面的纯逻辑和一个 available:false 的诊断壳。
+ */
+#if WOODLAND_HAVE_XWAYLAND
+
 /* ==================== anchor 定位 ==================== */
 
 static void anchor_iterator(struct wlr_scene_buffer *buffer, int sx, int sy, void *data)
@@ -210,24 +249,45 @@ static void anchor_iterator(struct wlr_scene_buffer *buffer, int sx, int sy, voi
 }
 
 /*
- * 参数里的 interface="wl_surface" 由 libwayland 在派发时校验，所以这里可以
- * 直接用 wlr_surface_from_resource()（wlroots 内部对 impl 有 assert）。
- * 找不到场景节点 => anchor 还没 mapped / 是裸 surface，协议规定回失败。
+ * anchor 必须是**本 client 自己的** wl_surface，且在场景里有一份 buffer 节点
+ * （否则没有布局坐标）。libwayland 的对象 ID 按 client 隔离，跨 client 传
+ * surface 实际很难成立，但上游 xwindowcontrolinterfacev1.cpp:52 也显式校验，
+ * 这里对齐它；另外补一次 wl_surface_interface 类型检查，避免客户端传错对象
+ * 时 wlr_surface_from_resource() 内部 assert 把合成器带崩。
  */
-static bool anchor_position(struct woodland_server *server,
-                            struct wl_resource *anchor_resource, int *x, int *y)
+static bool anchor_fail(const char **reason, const char *why)
+{
+    if (reason) {
+        *reason = why;
+    }
+    return false;
+}
+
+static bool anchor_position(struct woodland_server *server, struct wl_client *client,
+                            struct wl_resource *anchor_resource, int *x, int *y,
+                            const char **reason)
 {
     if (!anchor_resource || !server || !server->scene) {
-        return false;
+        return anchor_fail(reason, "no anchor surface or scene");
+    }
+    if (client && wl_resource_get_client(anchor_resource) != client) {
+        return anchor_fail(reason, "anchor belongs to a different client");
+    }
+    /*
+     * wl_resource_instance_of() 的第三参数是要**相等**的 implementation，
+     * 传 NULL 会把所有合法 wl_surface 都判成不匹配；这里只需要比接口类型。
+     */
+    if (wl_resource_get_interface(anchor_resource) != &wl_surface_interface) {
+        return anchor_fail(reason, "anchor is not a wl_surface");
     }
     struct wlr_surface *surface = wlr_surface_from_resource(anchor_resource);
     if (!surface) {
-        return false;
+        return anchor_fail(reason, "anchor wl_surface has no wlr_surface");
     }
     struct anchor_lookup lookup = {.surface = surface, .found = false};
     wlr_scene_node_for_each_buffer(&server->scene->tree.node, anchor_iterator, &lookup);
     if (!lookup.found) {
-        return false;
+        return anchor_fail(reason, "anchor has no scene buffer (unmapped or unknown surface)");
     }
     *x = lookup.x;
     *y = lookup.y;
@@ -307,6 +367,7 @@ static void xwindow_handle_set_position_relative(struct wl_client *client,
     int anchor_x = 0, anchor_y = 0, target_x = 0, target_y = 0;
     uint32_t view_id = 0;
     bool unmanaged = false;
+    const char *reason = "unknown";
     char detail[160] = "";
 
     if (family) {
@@ -314,6 +375,8 @@ static void xwindow_handle_set_position_relative(struct wl_client *client,
         family->last_wid = wid;
         family->last_dx = woodland_xwindow_control_round_fixed(dx);
         family->last_dy = woodland_xwindow_control_round_fixed(dy);
+        family->last_dx_fixed = (int32_t)dx;
+        family->last_dy_fixed = (int32_t)dy;
         family->have_anchor = false;
         family->have_target = false;
         family->last_view_id = 0;
@@ -323,9 +386,10 @@ static void xwindow_handle_set_position_relative(struct wl_client *client,
     if (!server || !server->xwindow_move_hook) {
         outcome = WOODLAND_XWINDOW_NO_XWAYLAND;
         snprintf(detail, sizeof(detail), "xwayland layer unavailable");
-    } else if (!anchor_position(server, anchor_resource, &anchor_x, &anchor_y)) {
+    } else if (!anchor_position(server, client, anchor_resource,
+                                &anchor_x, &anchor_y, &reason)) {
         outcome = WOODLAND_XWINDOW_INVALID_ANCHOR;
-        snprintf(detail, sizeof(detail), "anchor has no scene buffer (unmapped or unknown surface)");
+        snprintf(detail, sizeof(detail), "%s", reason);
     } else {
         if (family) {
             family->have_anchor = true;
@@ -333,18 +397,28 @@ static void xwindow_handle_set_position_relative(struct wl_client *client,
             family->last_anchor_y = anchor_y;
         }
         woodland_xwindow_control_target(anchor_x, anchor_y, dx, dy, &target_x, &target_y);
-        bool moved = server->xwindow_move_hook(server, wid, target_x, target_y,
-                                               &view_id, &unmanaged);
-        if (moved) {
-            outcome = WOODLAND_XWINDOW_MOVED;
-            snprintf(detail, sizeof(detail), "anchor=(%d,%d) + (%d,%d) -> (%d,%d) %s",
+        if (!woodland_xwindow_target_in_x11_range(target_x, target_y)) {
+            /* 不调钩子：scene 节点与 X11 几何两份真相都保持原样 */
+            outcome = WOODLAND_XWINDOW_OUT_OF_RANGE;
+            snprintf(detail, sizeof(detail),
+                     "anchor=(%d,%d) + (%d,%d) -> (%d,%d) exceeds X11 int16 range",
                      anchor_x, anchor_y,
                      woodland_xwindow_control_round_fixed(dx),
-                     woodland_xwindow_control_round_fixed(dy), target_x, target_y,
-                     unmanaged ? "unmanaged" : "managed");
+                     woodland_xwindow_control_round_fixed(dy), target_x, target_y);
         } else {
-            outcome = WOODLAND_XWINDOW_NO_WINDOW;
-            snprintf(detail, sizeof(detail), "no mapped X11 window with this wid");
+            bool moved = server->xwindow_move_hook(server, wid, target_x, target_y,
+                                                   &view_id, &unmanaged);
+            if (moved) {
+                outcome = WOODLAND_XWINDOW_MOVED;
+                snprintf(detail, sizeof(detail), "anchor=(%d,%d) + (%d,%d) -> (%d,%d) %s",
+                         anchor_x, anchor_y,
+                         woodland_xwindow_control_round_fixed(dx),
+                         woodland_xwindow_control_round_fixed(dy), target_x, target_y,
+                         unmanaged ? "unmanaged" : "managed");
+            } else {
+                outcome = WOODLAND_XWINDOW_NO_WINDOW;
+                snprintf(detail, sizeof(detail), "no mapped X11 window with this wid");
+            }
         }
     }
 
@@ -389,7 +463,12 @@ static void xwindow_bind(struct wl_client *client, void *data, uint32_t version,
                 "xwindow-control: denied bind from uid %u (compositor uid %u), sandboxed=%d",
                 (unsigned)uid, (unsigned)getuid(),
                 woodland_protocol_client_security_context(family->server, client) != NULL);
-        /* 协议没有自己的 error enum：用 implementation 错误明确拒绝 bind */
+        /*
+         * 协议没有自己的 error enum：用 implementation 错误明确拒绝 bind。
+         * 注意这会断掉整条连接（不只是这次 bind），误 bind 的普通应用会直接
+         * 掉线。security-context 的 global 过滤已经挡了第一道，这里的失败面
+         * 很小；要更温和可以改成建完 resource 立刻销毁，但那样诊断更弱。
+         */
         wl_client_post_implementation_error(client,
             "treeland_xwindow_control_v1: bind rejected (different user or sandboxed)");
         return;
@@ -418,6 +497,8 @@ static void xwindow_bind(struct wl_client *client, void *data, uint32_t version,
     wl_list_insert(&family->bindings, &binding->link);
 }
 
+#endif /* WOODLAND_HAVE_XWAYLAND */
+
 /* ==================== 由编排层调用的入口 ==================== */
 
 bool woodland_proto_xwindow_control_init(struct woodland_proto *proto)
@@ -433,6 +514,17 @@ bool woodland_proto_xwindow_control_init(struct woodland_proto *proto)
     /* 先挂上去：init 中途失败时 finish 也能把它收走 */
     proto->xwindow_control = family;
 
+#if !WOODLAND_HAVE_XWAYLAND
+    /*
+     * 与上游 waylandserver.cpp 的 #ifndef DISABLE_XWAYLAND 一致：没有 XWayland
+     * 就不广播这个 global。DDE Dock 用 isActive() 判通道是否可用，广播一个
+     * 永远回 done(1) 的 global 会让它一直发请求、不再回退到 X11 原生 reparent。
+     * 族状态保留下来给 wctl 看（available:false），但不建 global、不接 bind。
+     */
+    wlr_log(WLR_INFO,
+            "treeland-xwindow-control-v1: global not advertised (XWayland disabled)");
+    return true;
+#else
     family->global = wl_global_create(proto->server->display,
                                        &treeland_xwindow_control_v1_interface,
                                        XWINDOW_VERSION, family, xwindow_bind);
@@ -448,6 +540,7 @@ bool woodland_proto_xwindow_control_init(struct woodland_proto *proto)
      */
     wlr_log(WLR_INFO, "treeland-xwindow-control-v1: global advertised");
     return true;
+#endif
 }
 
 void woodland_proto_xwindow_control_finish(struct woodland_proto *proto)

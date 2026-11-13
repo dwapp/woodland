@@ -336,10 +336,24 @@ X11 窗口的缩放滤波（按所在输出的 scale 选 nearest/bilinear）全�
     `xwayland_lib`（只链 protocol_lib 的单测会缺符号），钩子为 NULL 就是本构建
     没 Xwayland，如实回 `callback.done(1)` 并记 `no_xwayland`，别假装生效。
   ④ 每条请求建一个 `wl_callback`、发一次 `done(0/1)` 后立刻销毁；连 callback
-    都分配不出来只能 `post_no_memory`。bind 限同 uid 且非沙箱（不是 DDE 的
-    privilege 服务），新 global 已登记进 `security_context.c` 的
-    `privileged_protocols`，加了暴露给客户端的 global 都要同步那张表。
-  轨迹标签 `xwindow`，状态在 `wctl get_tree` 的 `xwindow_control`，协议 XML 是
-  `protocols/treeland/` 下的只读副本（MIT，上游 `dde/`）。回归：
-  `tests/unit/test_xwindow_control.c`（fixed 取整 / 目标坐标饱和 / 状态默认值）、
-  `smoke-xwindow-control`（bind / destroy / 无效 anchor / wid 不存在 / 真 X11 摆位）。
+    都分配不出来只能 `post_no_memory`。bind 限同 uid 且非沙箱（**不是** DDE 的
+    privilege 服务，也不等价于上游要求 target/anchor 同 session 的隔离：同 uid
+    的非沙箱进程能按 wid 挪任意 X11 窗口），新 global 已登记进
+    `security_context.c` 的 `privileged_protocols`，加了暴露给客户端的 global
+    都要同步那张表。拒绝 bind 用 implementation error，会断掉整条连接。
+  ⑤ **X11 configure 收 int16_t x/y**，而 `wl_fixed_t` 能给出几万像素的合法
+    偏移。目标先过 `woodland_xwindow_target_in_x11_range()`，越界回
+    `done(1)` 记 `out_of_range` 且**不调摆位钩子**——截断后回 done(0) 会把
+    窗口配到别的坐标，X server 回 ConfigureNotify 又反向污染 scene 节点。
+    configure 的宽高用 `xsurface->width/height`，别用 content_box（带 SSD /
+    transform 时会附带触发 resize）。
+  ⑥ **编译期关闭 Xwayland 时不广播 global**（`#if WOODLAND_HAVE_XWAYLAND`）：
+    DDE Dock 用 `isActive()` 判通道可用性，广播一个永远失败的 global 会让它
+    一直发请求、不再回退到 X11 原生 reparent。族状态仍保留，`wctl` 报
+    `available:false`；运行期 Xwayland 没起来才走 `no_xwayland`。
+  轨迹标签 `xwindow`，状态在 `wctl get_tree` 的 `xwindow_control`（含
+  `last_dx_fixed/last_dy_fixed` 原始 24.8 值，排查 Dock 小数偏移用），协议 XML
+  是 `protocols/treeland/` 下的只读副本（MIT，上游 `dde/`）。回归：
+  `tests/unit/test_xwindow_control.c`（fixed 取整 / 目标坐标饱和 / int16 范围 /
+  状态默认值）、`smoke-xwindow-control`（bind / destroy / 无效 anchor / wid 不存在
+  / 真 X11 摆位 / 小数偏移 / 越界拒绝 / noxwl global 缺席）。

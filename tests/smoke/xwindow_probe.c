@@ -5,13 +5,17 @@
  * 用法：
  *   xwindow_probe --bind
  *   xwindow_probe --destroy
+ *   xwindow_probe --no-global
  *   xwindow_probe --move bare   <wid> <dx> <dy>
  *   xwindow_probe --move mapped <wid> <dx> <dy>
  *
- * 每次只发一条请求（--bind 一条都不发），冒烟脚本在两次调用之间用 wctl
- * 检查合成器状态。"bare" 是没分配角色、没 attach buffer 的裸 wl_surface
- * （场景里没有节点，协议应回 done(1)）；"mapped" 会真建一个 xdg toplevel
- * 并 attach shm buffer，作为合法 anchor。
+ * 每次只发一条请求（--bind / --no-global 一条都不发），冒烟脚本在两次调用
+ * 之间用 wctl 检查合成器状态。"bare" 是没分配角色、没 attach buffer 的裸
+ * wl_surface（场景里没有节点，协议应回 done(1)）；"mapped" 会真建一个 xdg
+ * toplevel 并 attach shm buffer，作为合法 anchor。
+ * --no-global 断言该 global **不在** registry 里（noxwl 构建用：Dock 靠
+ * isActive() 判通道可用性，广播一个永远失败的 global 会阻止它回退）。
+ * dx/dy 走 wl_fixed_from_double，允许小数，对齐 DDE Dock 的传参方式。
  *
  * 收到 wl_callback.done 后把结果打印成 "callback:<0|1>"，断言交给脚本。
  *
@@ -43,6 +47,7 @@
 enum run_mode {
     MODE_BIND,
     MODE_DESTROY,
+    MODE_NO_GLOBAL,
     MODE_MOVE,
 };
 
@@ -304,12 +309,14 @@ int main(int argc, char **argv)
     enum run_mode mode;
     bool mapped_anchor = false;
     uint32_t wid = 0;
-    int dx = 0, dy = 0;
+    double dx = 0.0, dy = 0.0;
 
     if (argc == 2 && strcmp(argv[1], "--bind") == 0) {
         mode = MODE_BIND;
     } else if (argc == 2 && strcmp(argv[1], "--destroy") == 0) {
         mode = MODE_DESTROY;
+    } else if (argc == 2 && strcmp(argv[1], "--no-global") == 0) {
+        mode = MODE_NO_GLOBAL;
     } else if (argc == 6 && strcmp(argv[1], "--move") == 0 &&
                (strcmp(argv[2], "bare") == 0 || strcmp(argv[2], "mapped") == 0)) {
         mode = MODE_MOVE;
@@ -322,11 +329,24 @@ int main(int argc, char **argv)
             return 2;
         }
         wid = (uint32_t)parsed;
-        dx = atoi(argv[4]);
-        dy = atoi(argv[5]);
+        char *dx_end = NULL;
+        char *dy_end = NULL;
+        errno = 0;
+        dx = strtod(argv[4], &dx_end);
+        if (errno != 0 || !dx_end || *dx_end != '\0') {
+            fprintf(stderr, "invalid dx: %s\n", argv[4]);
+            return 2;
+        }
+        errno = 0;
+        dy = strtod(argv[5], &dy_end);
+        if (errno != 0 || !dy_end || *dy_end != '\0') {
+            fprintf(stderr, "invalid dy: %s\n", argv[5]);
+            return 2;
+        }
     } else {
         fprintf(stderr,
-                "usage: %s --bind | --destroy | --move <bare|mapped> <wid> <dx> <dy>\n",
+                "usage: %s --bind | --destroy | --no-global | "
+                "--move <bare|mapped> <wid> <dx> <dy>\n",
                 argv[0]);
         return 2;
     }
@@ -348,6 +368,16 @@ int main(int argc, char **argv)
     /* 两次 roundtrip：第一次拿 global，第二次才把排队中的 bind flush 出去 */
     if (wl_display_roundtrip(display) < 0) {
         rc = report_error("registry roundtrip");
+        goto cleanup;
+    }
+    if (mode == MODE_NO_GLOBAL) {
+        if (state.found_control || state.control) {
+            fprintf(stderr, "treeland_xwindow_control_v1 was unexpectedly advertised\n");
+            rc = 1;
+            goto cleanup;
+        }
+        rc = 0;
+        printf("no global ok\n");
         goto cleanup;
     }
     if (!state.found_control || !state.control) {
@@ -405,7 +435,8 @@ int main(int argc, char **argv)
 
     struct wl_callback *callback =
         treeland_xwindow_control_v1_set_xwindow_position_relative(
-            state.control, wid, anchor, wl_fixed_from_int(dx), wl_fixed_from_int(dy));
+            state.control, wid, anchor,
+            wl_fixed_from_double(dx), wl_fixed_from_double(dy));
     if (!callback) {
         fprintf(stderr, "set_xwindow_position_relative returned no callback\n");
         rc = 1;

@@ -15,6 +15,7 @@
 #include "util/global_filter.h"
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 #include <math.h>
 #include <sys/types.h>
 #include <signal.h>
@@ -999,6 +1000,11 @@ bool woodland_xwayland_move_by_wid(struct woodland_server *server, uint32_t wid,
     if (!server) {
         return false;
     }
+    if (x < INT16_MIN || x > INT16_MAX || y < INT16_MIN || y > INT16_MAX) {
+        /* 协议族调用前已验过；这里是纵深防御，别让别的调用方截断成错坐标 */
+        wlr_log(WLR_DEBUG, "xwindow-control: target (%d,%d) outside X11 int16 range", x, y);
+        return false;
+    }
 
     struct woodland_view *view;
     wl_list_for_each(view, &server->views, link) {
@@ -1011,12 +1017,11 @@ bool woodland_xwayland_move_by_wid(struct woodland_server *server, uint32_t wid,
             wlr_log(WLR_DEBUG, "xwindow-control: wid=%u exists but is not mapped", wid);
             return false;
         }
-        struct wlr_box content;
-        woodland_view_content_box(view, &content);
+        /* 协议只改位置：宽高用 X11 窗口自己的几何，别用 content_box——
+         * 带 SSD / transform 时两者不等，会附带触发一次 resize。 */
         wlr_scene_node_set_position(&view->scene_tree->node, x, y);
         wlr_xwayland_surface_configure(xsurface, (int16_t)x, (int16_t)y,
-                                       (uint16_t)content.width,
-                                       (uint16_t)content.height);
+                                       xsurface->width, xsurface->height);
         view->placed = true;
         woodland_view_update_outputs(view);
         woodland_xwayland_flush(server);

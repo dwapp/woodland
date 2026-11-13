@@ -29,6 +29,8 @@ static void test_outcome_names(void)
                   "invalid_anchor") == 0);
     assert(strcmp(woodland_xwindow_outcome_name(WOODLAND_XWINDOW_NO_WINDOW),
                   "no_window") == 0);
+    assert(strcmp(woodland_xwindow_outcome_name(WOODLAND_XWINDOW_OUT_OF_RANGE),
+                  "out_of_range") == 0);
     assert(strcmp(woodland_xwindow_outcome_name(WOODLAND_XWINDOW_CALLBACK_FAILED),
                   "callback_failed") == 0);
     /* 枚举外的值不能越界读表 */
@@ -49,6 +51,11 @@ static void test_round_fixed(void)
     assert(woodland_xwindow_control_round_fixed(wl_fixed_from_double(-1.49)) == -1);
     assert(woodland_xwindow_control_round_fixed(wl_fixed_from_double(0.49)) == 0);
     assert(woodland_xwindow_control_round_fixed(wl_fixed_from_double(-0.49)) == 0);
+    /* Dock 用 wl_fixed_from_double 传小数，原始值会进 wctl 的 *_fixed 字段 */
+    assert(woodland_xwindow_control_round_fixed(wl_fixed_from_double(12.25)) == 12);
+    assert(woodland_xwindow_control_round_fixed(wl_fixed_from_double(-3.75)) == -4);
+    assert(wl_fixed_from_double(12.25) == 3136);
+    assert(wl_fixed_from_double(-3.75) == -960);
 
     /* 24.8 定点的极值转 int 不会溢出 */
     assert(woodland_xwindow_control_round_fixed(INT32_MAX) == 8388608);
@@ -81,6 +88,29 @@ static void test_target(void)
     assert(x == INT32_MAX && y == INT32_MIN);
 }
 
+static void test_target_x11_range(void)
+{
+    /* wlr_xwayland_surface_configure() 收 int16_t：端点合法，越一格就失败 */
+    assert(woodland_xwindow_target_in_x11_range(0, 0));
+    assert(woodland_xwindow_target_in_x11_range(INT16_MAX, INT16_MIN));
+    assert(woodland_xwindow_target_in_x11_range(INT16_MIN, INT16_MAX));
+    assert(!woodland_xwindow_target_in_x11_range(INT16_MAX + 1, 0));
+    assert(!woodland_xwindow_target_in_x11_range(0, INT16_MIN - 1));
+    assert(!woodland_xwindow_target_in_x11_range(INT32_MAX, INT32_MIN));
+
+    /* 协议允许的大偏移：目标饱和到 INT32 后仍必须被判为越界，不能进 configure */
+    int x = 0, y = 0;
+    woodland_xwindow_control_target(0, 0, wl_fixed_from_int(40000),
+                                    wl_fixed_from_int(-40000), &x, &y);
+    assert(x == 40000 && y == -40000);
+    assert(!woodland_xwindow_target_in_x11_range(x, y));
+
+    /* anchor 本身在边界上、偏移为 0 时仍合法 */
+    woodland_xwindow_control_target(INT16_MAX, INT16_MIN, 0, 0, &x, &y);
+    assert(x == INT16_MAX && y == INT16_MIN);
+    assert(woodland_xwindow_target_in_x11_range(x, y));
+}
+
 static void test_status_defaults(void)
 {
     struct woodland_json json;
@@ -102,6 +132,7 @@ int main(void)
     test_outcome_names();
     test_round_fixed();
     test_target();
+    test_target_x11_range();
     test_status_defaults();
     printf("xwindow_control unit tests passed\n");
     return 0;

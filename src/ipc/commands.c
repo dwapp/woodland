@@ -114,11 +114,14 @@ static const struct ipc_field_doc get_tree_fields[] = {
      "last_engine (str|null), last_app_id (str|null), "
      "last_instance_id (str|null)"},
     {"xwindow_control", "obj",
-     "treeland-xwindow-control-v1: available (bool), bindings (int), "
-     "xwayland (bool: move hook wired), request_count, success_count, "
-     "failure_count (int), last_wid (int), last_dx/last_dy (int), "
+     "treeland-xwindow-control-v1: available (bool: global advertised), "
+     "bindings (int), xwayland (bool: move hook wired), request_count, "
+     "success_count, failure_count (int), last_wid (int), "
+     "last_dx/last_dy (int: rounded px), "
+     "last_dx_fixed/last_dy_fixed (int: raw 24.8 fixed, /256 for px), "
      "last_outcome (str: none|moved|no_xwayland|invalid_anchor|no_window|"
-     "callback_failed), last_anchor (int[2]|null), last_target (int[2]|null), "
+     "out_of_range|callback_failed), last_anchor (int[2]|null), "
+     "last_target (int[2]|null), "
      "last_target_kind (str|null: managed|unmanaged), last_view_id (int)"},
     {"focus", "obj", "same fields as get_focus"},
     {"snap_preview", "obj",

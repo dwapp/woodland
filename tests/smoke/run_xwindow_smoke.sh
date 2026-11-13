@@ -81,8 +81,7 @@ expect_xw() {
 # ---------------------------------------------------------------- 初始状态
 _tree="$(wctl_cmd get_tree)" || smoke_fail "initial get_tree failed"
 printf '%s' "$_tree" | jq -e \
-    '.xwindow_control.available == true
-     and .xwindow_control.request_count == 0
+    '.xwindow_control.request_count == 0
      and .xwindow_control.success_count == 0
      and .xwindow_control.failure_count == 0
      and .xwindow_control.last_wid == 0
@@ -91,9 +90,33 @@ printf '%s' "$_tree" | jq -e \
      and .xwindow_control.last_target == null' >/dev/null \
     || smoke_fail "protocol state was not exposed: $_tree"
 
+AVAILABLE="$(printf '%s' "$_tree" | jq -r '.xwindow_control.available')"
 XWAYLAND="$(printf '%s' "$_tree" | jq -r '.xwindow_control.xwayland')"
-# 没有 Xwayland（编译期关掉或 lazy 未起）时，请求一律回 no_xwayland；
-# 这也让本脚本能在 build-noxwl 里照样验证协议接线。
+
+# 编译期关闭 XWayland 时该 global 不该广播（与上游 DISABLE_XWAYLAND 一致）：
+# DDE Dock 用 isActive() 判通道可用性，广播一个永远回 done(1) 的 global 会
+# 让它一直发请求、不再回退到 X11 原生 reparent 路径。
+if [ "$AVAILABLE" != "true" ]; then
+    printf '%s' "$_tree" | jq -e \
+        '.xwindow_control.available == false
+         and .xwindow_control.xwayland == false
+         and .xwindow_control.request_count == 0
+         and .xwindow_control.last_outcome == "none"' >/dev/null \
+        || smoke_fail "noxwl protocol state unexpected: $_tree"
+    _out="$(probe --no-global)"
+    printf '%s' "$_out" | grep -q '^no global ok$' \
+        || smoke_fail "noxwl build must not advertise xwindow-control: $_out"
+    grep -q 'global not advertised' "$SMOKE_LOG" \
+        || smoke_fail "noxwl build did not log the skipped global"
+    _check="$(wctl_cmd self_check)" || smoke_fail "self_check failed: $_check"
+    printf '%s' "$_check" | jq -e '.ok == true' >/dev/null \
+        || smoke_fail "self_check invariants broken: $_check"
+    echo "xwindow-control smoke passed (noxwl: global absent, Dock can fall back)"
+    exit 0
+fi
+
+# 运行期 Xwayland 层没建起来（编译开启但 lazy 未起 / 启动失败）时，请求一律
+# 回 no_xwayland；global 仍在，属可诊断的降级。
 if [ "$XWAYLAND" = "true" ]; then
     BARE_OUTCOME=invalid_anchor
     NOWID_OUTCOME=no_window
@@ -268,13 +291,62 @@ printf '%s' "$_tree" | jq -e --argjson vid "$VID" --argjson tx "$TX" --argjson t
      | any' >/dev/null \
     || smoke_fail "managed view content did not move to ($TX,$TY): $_tree"
 
+# ---- 小数偏移：原始 24.8 值进 wctl，取整策略可独立核对 ----
+# DDE Dock 用 wl_fixed_from_double 传 QML 布局坐标，经常带小数。
+_out="$(probe --move mapped "$MANAGED_WID" 12.25 -3.75)"
+printf '%s' "$_out" | grep -q '^callback:0$' \
+    || smoke_fail "fractional offset should succeed: $_out"
+_tree="$(wctl_cmd get_tree)" || smoke_fail "get_tree failed"
+printf '%s' "$_tree" | jq -e \
+    '.xwindow_control.last_outcome == "moved"
+     and .xwindow_control.last_dx == 12
+     and .xwindow_control.last_dy == -4
+     and .xwindow_control.last_dx_fixed == 3136
+     and .xwindow_control.last_dy_fixed == -960
+     and .xwindow_control.success_count == 3
+     and .xwindow_control.request_count == 5
+     and .xwindow_control.last_target
+         == [(.xwindow_control.last_anchor[0] + 12),
+             (.xwindow_control.last_anchor[1] - 4)]' >/dev/null \
+    || smoke_fail "fractional offset not recorded honestly: $_tree"
+TX="$(printf '%s' "$_tree" | jq -r '.xwindow_control.last_target[0]')"
+TY="$(printf '%s' "$_tree" | jq -r '.xwindow_control.last_target[1]')"
+printf '%s' "$_tree" | jq -e --argjson vid "$VID" --argjson tx "$TX" --argjson ty "$TY" \
+    '[.views[] | select(.id == $vid) | (.content[0] == $tx and .content[1] == $ty)]
+     | any' >/dev/null \
+    || smoke_fail "fractional offset did not move the view to ($TX,$TY): $_tree"
+
+# ---- 超出 X11 int16 坐标范围：回 done(1)，且窗口一动不动 ----
+# 40000 是协议值域内的合法 fixed 值，以前会被 (int16_t) 截断成 -25536，
+# 回 done(0) 之后 X server 的 ConfigureNotify 又会把 scene 节点拉回去。
+_out="$(probe --move mapped "$MANAGED_WID" 40000 0)"
+printf '%s' "$_out" | grep -q '^callback:1$' \
+    || smoke_fail "out-of-range target should fail: $_out"
+_tree="$(wctl_cmd get_tree)" || smoke_fail "get_tree failed"
+printf '%s' "$_tree" | jq -e --argjson vid "$VID" --argjson tx "$TX" --argjson ty "$TY" \
+    '.xwindow_control.last_outcome == "out_of_range"
+     and .xwindow_control.last_target == null
+     and .xwindow_control.success_count == 3
+     and .xwindow_control.failure_count == 3
+     and .xwindow_control.request_count == 6
+     and ([.views[] | select(.id == $vid)
+           | (.content[0] == $tx and .content[1] == $ty)] | any)' >/dev/null \
+    || smoke_fail "out-of-range target moved or was misreported: $_tree"
+_scene="$(wctl_cmd dump_scene)" || smoke_fail "dump_scene failed"
+printf '%s' "$_scene" | jq -e \
+    '[.. | objects | select(.type? == "tree" and (.x? > 32767))] | length == 0' \
+    >/dev/null || smoke_fail "a scene tree was placed beyond the X11 int16 range: $_scene"
+
 _trace="$(wctl_cmd get_trace)" || smoke_fail "get_trace failed"
 printf '%s' "$_trace" | jq -e \
-    '[.entries[] | select(.what == "xwindow" and (.detail | contains("-> moved")))] | length == 2' \
+    '[.entries[] | select(.what == "xwindow" and (.detail | contains("-> moved")))] | length == 3' \
     >/dev/null || smoke_fail "successful moves missing from trace: $_trace"
+printf '%s' "$_trace" | jq -e \
+    '[.entries[] | select(.what == "xwindow" and (.detail | contains("-> out_of_range")))] | length == 1' \
+    >/dev/null || smoke_fail "out-of-range rejection missing from trace: $_trace"
 
 _check="$(wctl_cmd self_check)" || smoke_fail "self_check failed: $_check"
 printf '%s' "$_check" | jq -e '.ok == true' >/dev/null \
     || smoke_fail "self_check invariants broken: $_check"
 
-echo "xwindow-control smoke passed (bind/destroy/failures + unmanaged/managed moves)"
+echo "xwindow-control smoke passed (bind/destroy/failures + unmanaged/managed/fractional moves + range rejection)"
