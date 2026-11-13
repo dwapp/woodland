@@ -271,6 +271,51 @@ if get_option('test').enabled()
          timeout: 60)
   endif
 
+  # treeland-xwindow-control-v1：bind / destroy / 每条请求的 wl_callback.done、
+  # 失败路径如实记账，以及（有 Xwayland + xoverride 时）按 wid 真摆位。
+  # 探针要建一个 mapped 的 xdg toplevel 当 anchor，所以除仓库内 XML 外还要
+  # 系统 wayland-protocols 的 xdg-shell；custom_target 输出名加前缀避免和
+  # deco/ftl/shortcut 探针的 xdg-shell 目标撞名。
+  xwindow_xml = meson.project_source_root() / 'protocols' / 'treeland' / 'treeland-xwindow-control-unstable-v1.xml'
+  xwindow_xdg_xml = wp_datadir / 'stable' / 'xdg-shell' / 'xdg-shell.xml'
+  if wayland_client_dep.found() and wp_dep.found() and wayland_scanner.found() and fs.exists(xwindow_xml) and fs.exists(xwindow_xdg_xml)
+    xwindow_probe_srcs = [
+      'smoke/xwindow_probe.c',
+      custom_target('xwindow-control-client-header',
+        input: xwindow_xml,
+        output: 'treeland-xwindow-control-unstable-v1-client-protocol.h',
+        command: [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@']),
+      custom_target('xwindow-control-client-code',
+        input: xwindow_xml,
+        output: 'treeland-xwindow-control-unstable-v1-protocol.c',
+        command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@']),
+      custom_target('xwindow-xdg-shell-client-header',
+        input: xwindow_xdg_xml,
+        output: 'xwindow-xdg-shell-client-protocol.h',
+        command: [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@']),
+      custom_target('xwindow-xdg-shell-client-code',
+        input: xwindow_xdg_xml,
+        output: 'xwindow-xdg-shell-protocol.c',
+        command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@']),
+    ]
+    xwindow_probe = executable('xwindow_probe', xwindow_probe_srcs,
+                               dependencies: [wayland_client_dep])
+    # xcb 没装时 xoverride_bin 是 disabler，脚本会跳过真 X11 摆位那一段
+    xwindow_xoverride = ''
+    if not is_disabler(xoverride_bin)
+      xwindow_xoverride = xoverride_bin.full_path()
+    endif
+    test('smoke-xwindow-control',
+         find_program('sh'),
+         args: [meson.current_source_dir() / 'smoke' / 'run_xwindow_smoke.sh',
+                woodland_bin.full_path(),
+                xwindow_probe.full_path(),
+                wctl_bin.full_path(),
+                xwindow_xoverride],
+         is_parallel: false,
+         timeout: 120)
+  endif
+
 
   # output-management 的事件顺序回归（apply 的 succeeded 必须先于新一轮
   # configuration + done）。协议 xml 属于 wlr-protocols（不在

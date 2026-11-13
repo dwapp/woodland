@@ -46,7 +46,7 @@ bool woodland_trace_enabled(void);
  *   map / unmap / destroy / focus / focus_none / layer_focus / place /
  *   workspace / output_add / output_remove / cfg_apply / deco / bg_effect /
  *   action / appearance / shortcut / ftl / tearing / vt / snap / dnd /
- *   sec_ctx
+ *   sec_ctx / xwindow
  *
  * detail 只写**决策依据**（哪个分支、算了什么、为什么），不要重复
  * get_tree 已经能查到的状态——轨迹的价值在"为什么"，不在"是什么"。

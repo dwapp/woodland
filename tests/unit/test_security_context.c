@@ -328,6 +328,7 @@ static void test_pure_functions(void)
         "treeland_shortcut_manager_v3",
         "treeland_foreign_toplevel_manager_v3",
         "treeland_appearance_manager_v1",
+        "treeland_xwindow_control_v1",
     };
 
     for (size_t i = 0; i < sizeof(expected_privileged) / sizeof(expected_privileged[0]); i++) {
@@ -507,6 +508,12 @@ static void test_server_integration(void)
     for (size_t i = 0; i < sizeof(must_see_normal) / sizeof(must_see_normal[0]); i++) {
         assert(state_saw(&parent_state, must_see_normal[i]));
     }
+#if WOODLAND_HAVE_XWAYLAND
+    assert(state_saw(&parent_state, "treeland_xwindow_control_v1"));
+#else
+    /* 编译期关闭 Xwayland 时不广播该 global，Dock 才会回退到 X11 原生路径 */
+    assert(!state_saw(&parent_state, "treeland_xwindow_control_v1"));
+#endif
 #if WOODLAND_HAVE_XWAYLAND
     if (xwl_ok) {
         assert(!state_saw(&parent_state, "xwayland_shell_v1"));

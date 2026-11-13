@@ -20,6 +20,7 @@
  *   appearance.c  用户级外观（treeland-appearance / -manager：观测 + 特权配置）
  *   shortcut.c    全局快捷键与一次性捕获（treeland-shortcut-manager-v3）
  *   foreign_toplevel.c 窗口列表（treeland-foreign-toplevel-manager-v3）
+ *   xwindow_control.c X11 摆位（treeland-xwindow-control-v1）
  * 分层的原因不是"文件太大了"：这几块的状态机各不相干，混在一个文件里时
  * init 的失败回滚和 finish 的逆序拆除要横跨十几组监听器，漏一行就是悬挂
  * 指针；拆开之后每族的建立与回收在同一个文件里，加协议只动一处。
@@ -148,6 +149,11 @@ bool woodland_protocol_init(struct woodland_server *server) {
     if (!woodland_proto_security_context_init(proto)) {
         return false;
     }
+    /* X11 摆位：只经 server->xwindow_move_hook 反向找窗口，谁都不依赖它。
+     * 放在最后，让沙箱的 global 过滤器先就位再广播这个特权 global。 */
+    if (!woodland_proto_xwindow_control_init(proto)) {
+        return false;
+    }
 
     /* 已有输出可能早于本模块建好，补一次广播让客户端看到初始状态 */
     woodland_proto_output_broadcast(proto);
@@ -176,6 +182,7 @@ void woodland_protocol_finish(struct woodland_server *server)
     }
 
     /* 逆序拆：与 init 对称，后建的先摘 */
+    woodland_proto_xwindow_control_finish(proto);
     woodland_proto_security_context_finish(proto);
     woodland_proto_wallpaper_finish(proto);
     woodland_proto_bg_effect_finish(proto);

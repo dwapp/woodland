@@ -42,4 +42,23 @@ void woodland_xwayland_restack_view(struct woodland_view *view);
 bool woodland_xwayland_initial_position_hint(const struct wlr_xwayland_surface *xsurface,
                                             int16_t *x, int16_t *y);
 
+/**
+ * 按 X11 window id 把**已映射**的 XWayland 窗口左上角摆到布局坐标 (x,y)。
+ *
+ * 受管理的顶层窗口（server->views）与 override-redirect 窗口
+ * （server->xwayland_unmanaged）都算——Dock 的 XEmbed 托盘图标常是后者。
+ * 两处都同步 set_position 与 wlr_xwayland_surface_configure()：只挪 scene
+ * 节点会被下一次 X11 set_geometry 弹回去，只 configure 则画面不会立刻动。
+ *
+ * view_id 写命中的受管理视图 id（unmanaged 时为 0），unmanaged 写是否为
+ * override-redirect 窗口；找不到 wid 或窗口尚未映射时返回 false，两个出参
+ * 都会被清零（不代表"出错"，协议据此回 callback.done(1)）。
+ *
+ * 这是 server->xwindow_move_hook 的实现，由本协议族之外的模块**不要**直接调：
+ * 编译期关掉 xwayland 时 xwayland.c 根本不参与链接。
+ */
+bool woodland_xwayland_move_by_wid(struct woodland_server *server, uint32_t wid,
+                                   int x, int y, uint32_t *view_id,
+                                   bool *unmanaged);
+
 #endif /* WOODLAND_XWAYLAND_H */

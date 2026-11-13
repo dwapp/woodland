@@ -34,6 +34,8 @@ struct wlr_output;
  *   shortcut.c 全局快捷键与一次性捕获：treeland-shortcut-manager-v3
  *   foreign_toplevel.c 窗口列表：treeland-foreign-toplevel-manager-v3
  *   security_context.c 沙箱隔离与特权过滤：wp-security-context-v1（对齐 labwc）
+ *   xwindow_control.c X11 摆位：treeland-xwindow-control-v1（按 X11 wid 相对
+ *                     anchor surface 定位 XWayland 窗口）
  *   protocol.c 只管按序建立、逆序回收，以及下面这几个转发入口。
  *
  * 按语义完备程度分档，档位决定了它是否真的改变行为：
@@ -52,7 +54,14 @@ struct wlr_output;
  *             仅对沙箱引擎通过 create_listener + commit 建立的私有 socket 连接生效，
  *             X11/Xwayland 应用与沙盒内直连主 WAYLAND_DISPLAY 的进程不受限；
  *             新增任何暴露给客户端的 global 时必须同步更新 security_context.c 的
- *             allowed_protocols / privileged_protocols 分类）
+ *             allowed_protocols / privileged_protocols 分类）、
+ *             treeland-xwindow-control-v1（bind 限同 uid 且非沙箱；按 wid 找到
+ *             已映射的 XWayland 窗口——受管理视图与 override-redirect 都算——
+ *             摆到 anchor surface 左上角 + (dx,dy)，并同步 X11 侧 configure；
+ *             目标超出 X11 int16 坐标范围时回 done(1) 且不动窗口；每条请求
+ *             回一个 wl_callback.done(0/1)。编译期关闭 Xwayland 时**不广播**
+ *             global（与上游一致，让 DDE Dock 判通道不可用后回退 X11 原生
+ *             reparent）；运行期 Xwayland 层没建起来时请求回 1 并记 no_xwayland）
  *             —— 客户端请求会真的影响合成器行为。
  *   委派实现：treeland-wallpaper-shell / -manager / -notifier
  *             —— 配置、场景托管、播放控制都在合成器里，但**解码不在**：
@@ -384,4 +393,60 @@ woodland_protocol_view_security_context(struct woodland_server *server,
  */
 void woodland_protocol_security_context_status(struct woodland_server *server,
                                                struct woodland_json *out);
+
+/* ==================== treeland-xwindow-control-v1 ==================== */
+
+/*
+ * 每条 set_xwindow_position_relative 的处置结果。名字是稳定字符串，冒烟脚本
+ * 按它断言；档位与协议族实现共用这一份枚举，别在两处各写一遍。
+ */
+enum woodland_xwindow_outcome {
+    WOODLAND_XWINDOW_NONE = 0,       /* 还没有收到过请求 */
+    WOODLAND_XWINDOW_MOVED,          /* 找到窗口并摆好，callback.done(0) */
+    WOODLAND_XWINDOW_NO_XWAYLAND,    /* 运行期 Xwayland 层没建起来 */
+    WOODLAND_XWINDOW_INVALID_ANCHOR, /* anchor 不属于本 client / 不在场景里 */
+    WOODLAND_XWINDOW_NO_WINDOW,      /* wid 找不到，或窗口尚未映射 */
+    WOODLAND_XWINDOW_OUT_OF_RANGE,   /* 目标超出 X11 int16 坐标，不能截断后假装成功 */
+    WOODLAND_XWINDOW_CALLBACK_FAILED,/* 连 wl_callback 都分配不出来 */
+};
+
+/*
+ * 权限边界（P2-4）：woodland 没有 DDE 的 app_id / 签名授权服务，"同 uid 且非
+ * 沙箱"只保证调用方是本机同一个用户，不等价于上游要求 target 与 anchor 同
+ * session 的隔离。也就是说任何同 uid 的非沙箱进程都能按 X11 window id 挪动
+ * 别人的窗口。这是当前权限模型的真实边界，别把 bind 校验误读成已等价实现
+ * DDE 特权授权。
+ */
+
+/** 稳定字符串（unknown 值返回 "unknown"）。 */
+const char *woodland_xwindow_outcome_name(enum woodland_xwindow_outcome outcome);
+
+/*
+ * dx/dy 是协议的 wl_fixed_t（24.8 定点，typedef int32_t）。这里用 int32_t
+ * 收口，公开头就不必为了两个纯函数引入 wayland 头。
+ * 取整按"四舍五入、远离 0"，和 treeland 用 double 平移后交给场景的观感一致。
+ */
+int woodland_xwindow_control_round_fixed(int32_t value);
+
+/**
+ * 目标位置 = anchor 左上角 + 取整后的偏移。
+ *
+ * 64 位中间量 + int32 饱和：anchor 本身来自场景布局，客户端却能通过 fixed
+ * 传入很大的偏移，直接 int 相加会 UB。饱和后的值只用于诊断/记账，真正落到
+ * X11 之前必须过 woodland_xwindow_target_in_x11_range()。纯函数，单测直接调。
+ */
+void woodland_xwindow_control_target(int anchor_x, int anchor_y,
+                                     int32_t dx, int32_t dy,
+                                     int *out_x, int *out_y);
+
+/**
+ * X11 的 wlr_xwayland_surface_configure() 收 int16_t x/y；超范围时强转会把
+ * 窗口配到完全不同的坐标，随后 X server 回 ConfigureNotify 又会把 scene 节点
+ * 拉回去，两份真相同时错。调用摆位钩子前先验一次，越界直接回 done(1)。
+ */
+bool woodland_xwindow_target_in_x11_range(int x, int y);
+
+/** 全局诊断（bind 数、累计/成败计数、最近一次请求怎么处置）写进 get_tree。 */
+void woodland_protocol_xwindow_control_status(struct woodland_server *server,
+                                              struct woodland_json *out);
 #endif

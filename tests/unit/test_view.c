@@ -25,11 +25,14 @@
 #if WOODLAND_HAVE_XWAYLAND
 #include <wlr/xwayland.h>
 #endif
+#if WOODLAND_HAVE_XWAYLAND
+/* 只被下方 Xwayland 分支用到；noxwl 构建里留着会撞 -Werror=unused-function */
 static int mock_restack_calls = 0;
 static void mock_test_restack_hook(struct woodland_view *v) {
     (void)v;
     mock_restack_calls++;
 }
+#endif
 
 
 int main(void)
@@ -326,6 +329,7 @@ int main(void)
     wl_list_remove(&ft_view.ft_request_close.link);
     wlr_foreign_toplevel_handle_v1_destroy(ft_view.toplevel_handle);
     wlr_scene_node_destroy(&ft_view.scene_tree->node);
+#if WOODLAND_HAVE_XWAYLAND
     /* Xwayland 视图的缩放滤波 (scale_filter) 验证 */
     struct woodland_view x11_view = {0};
     x11_view.server = &server;
@@ -386,6 +390,7 @@ int main(void)
     server.xwayland_scale_filter_hook = NULL;
 
     wlr_scene_node_destroy(&x11_view.scene_tree->node);
+#endif
 
 
     /* ---------- 贴边预览（snap preview）测试 ---------- */
