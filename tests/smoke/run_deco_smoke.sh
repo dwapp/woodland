@@ -265,6 +265,23 @@ EOF
     stop_probe
 fi
 
+echo "== 窄窗口：三个按钮放不下时整组收起 =="
+# 120px 宽放不下"图标 + 标题 + 3x32 按钮"，按钮必须整组不画——不收的话最左那个
+# 会压在应用图标上，两个都点不准。布局照常摆位（节点还在），关不关由
+# ssd_apply_state 决定，所以这里查的是节点的 enabled。
+scenario narrow --size 120 200
+NARROW_SCENE="$("$WCTL" -s "$SOCK" dump_scene)" || smoke_fail "dump_scene failed (narrow window)"
+# 标题文字是 70x32、应用图标 20x20，按 32x32 筛出来的正好是那三个符号；
+# 数量先卡成 3，万一字体把标题量成 32 宽也会在这里暴露，而不是悄悄放过。
+echo "$NARROW_SCENE" | jq -e '
+    [.. | objects | select(.type == "buffer" and .y < 0 and .w == 32 and .h == 32)] as $b
+    | ($b | length) == 3 and ([$b[] | select(.enabled)] | length) == 0
+' >/dev/null || smoke_fail "buttons must be hidden when the titlebar cannot fit them"
+echo "$NARROW_SCENE" | jq -e '
+    [.. | objects | select(.type == "buffer" and .y < 0 and .enabled)] | length > 0
+' >/dev/null || smoke_fail "icon/title must still be drawn in a narrow titlebar"
+stop_probe
+
 echo "== 矮标题栏：按钮符号不溢出标题栏、不被压扁 =="
 # 按钮宽度来自 [decorations] button_width，高度跟标题栏走。两者不等时必须取
 # 短边并居中：旧实现只摆位、dest 停在创建时的 32x32，在 20px 标题栏里就从
