@@ -24,6 +24,23 @@ if [ -z "$WCTL" ] || [ ! -x "$WCTL" ]; then
 fi
 command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 125; }
 
+# 探针的参数解析自检。--dry-run 不连 X，所以在"X 连不上"的机器上也会执行——
+# 这条路径以前是坏的：开关模式用 atoi(argv[1]) 取 x，拿到的是 "--managed-window"
+# 的 0，窗口恒贴屏幕左边缘，再往后传几何还会整体错位一格。
+if [ -n "$XOVERRIDE" ] && [ -x "$XOVERRIDE" ]; then
+    dry="$("$XOVERRIDE" --dry-run --managed-window 10 20 300 200)" || {
+        echo "xoverride --dry-run failed" >&2
+        exit 1
+    }
+    case "$dry" in
+    *"mode=managed x=10 y=20 w=300 h=200"*) ;;
+    *)
+        echo "xoverride parses --managed-window geometry wrong: $dry" >&2
+        exit 1
+        ;;
+    esac
+fi
+
 unset WAYLAND_DISPLAY
 unset DISPLAY
 export XDG_RUNTIME_DIR="$(mktemp -d)"
@@ -274,12 +291,16 @@ done
 MANAGED_WID="$(parse_wid "$WORK/xmanaged.log" 2>/dev/null)"
 [ -n "$MANAGED_WID" ] || fail_no_wid "managed client" "$WORK/xmanaged.log"
 i=0
+_treed=""
 while [ "$i" -lt 60 ]; do
-    _tree2="$(wctl_cmd get_tree)"
-    printf '%s' "$_tree2" | jq -e '[.views[] | select(.kind == "x11" and .mapped)] | length > 0' \
+    _treed="$(wctl_cmd get_tree)"
+    printf '%s' "$_treed" | jq -e '[.views[] | select(.kind == "x11" and .mapped)] | length > 0' \
         >/dev/null 2>&1 && break
     sleep 0.1; i=$((i+1))
 done
+# 循环只 break 不断言的话，窗口压根没起来时会一路走到下面的 --move，最后报成
+# "no_window"——那是结果不是原因。在这里说清"窗口没出现"。
+[ "$i" -lt 60 ] || smoke_fail "managed X11 view never appeared in get_tree: $_treed"
 
 _out="$(probe --move mapped "$MANAGED_WID" 300 100)"
 printf '%s' "$_out" | grep -q '^callback:0$' \
