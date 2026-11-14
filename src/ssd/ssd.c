@@ -15,8 +15,13 @@
 #include "view.h"
 #include "woodland.h"
 #include "woodland_config.h"
-/* SSD 颜色（中性灰阶，对齐右键窗口菜单 window_menu.c 的配色；premultiplied RGBA float）
- * 原先的暖米色 #e1dedb 与菜单的近白浮层放一起明显割裂，这里统一成中性灰。 */
+/* SSD 颜色（中性灰阶，与右键窗口菜单 window_menu.c 同一套观感；premultiplied RGBA float）
+ * 原先的暖米色 #e1dedb 与菜单的近白浮层放一起明显割裂，这里统一成中性灰。
+ *
+ * 边框 0.80 / 文字 0.12 / 弱化 0.55 与菜单逐个相同；深色那一套也是逐个抄的。
+ * 只有激活底色 0.957 是**故意**比菜单浮层的 0.98 深一档：标题栏是常驻 chrome，
+ * 和浮层同亮度会失去层次；更实际的原因是浅色下激活/非激活只差 1/255 就分不出来了
+ * （非激活 0.976，若激活也用 0.98 就等于没有状态区分）。 */
 static const float COLOR_TITLEBAR_ACTIVE[4] = {0.957f, 0.957f, 0.957f, 1.0f};   /* #f4f4f4 */
 static const float COLOR_TITLEBAR_INACTIVE[4] = {0.976f, 0.976f, 0.976f, 1.0f}; /* #f9f9f9 */
 static const float COLOR_BORDER[4] = {0.800f, 0.800f, 0.800f, 1.0f};            /* #cccccc */
