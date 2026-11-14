@@ -382,6 +382,22 @@ int main(void)
     woodland_ssd_get_palette(&view, &pal);
     assert(!pal.dark);
     assert(pal.titlebar_active == 0xF4F4F4);
+
+    /*
+     * 客端覆盖边框：报的必须是"作者写的颜色"，不能被预乘拉暗。
+     * 这条带 alpha（0x80）的用例是 rgba_float_to_rgb 里除回 alpha 那一步的
+     * 唯一实际覆盖——不除的话 #3366CC 会报成 #1A3366 那种暗色，
+     * 而且 8 位量化之后肉眼基本看不出来是错的。
+     */
+    view.ssd_overrides.border_set = true;
+    view.ssd_overrides.border_rgba = 0x3366CC80;
+    woodland_ssd_get_palette(&view, &pal);
+    assert(pal.border_active == 0x3366CC);
+    assert(pal.border_inactive == 0x3366CC);
+    /* 覆盖的只是边框，标题栏不受影响 */
+    assert(pal.titlebar_active == 0xF4F4F4);
+    view.ssd_overrides.border_set = false;
+
     server.config = NULL;
 
     woodland_ssd_finish();
