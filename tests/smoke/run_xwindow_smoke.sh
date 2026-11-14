@@ -216,6 +216,17 @@ parse_wid() {
     sed -n 's/.*window \(0x[0-9a-fA-F][0-9a-fA-F]*\) at .*/\1/p' "$_log" | head -1
 }
 
+# 客户端没报出 wid 时，先把探针自己的输出打出来。
+# 最常见的失败根本不是"窗口没报号"，而是 X 连接没建成——比如这台机器上还跑着
+# 别的 X server（宿主的会话），同一个 display 号被它占着，客户端拿着对不上号的
+# cookie 去连，只得到一句 "cannot connect to X display"。只报
+# "did not report its X11 window id" 会把人往合成器那边引，实际跟它无关。
+fail_no_wid() {
+    echo "--- $1 log (DISPLAY=$DISPLAY):" >&2
+    cat "$2" >&2 2>/dev/null || :
+    smoke_fail "$1 did not report its X11 window id"
+}
+
 # ---- override-redirect（Dock 的 XEmbed 托盘图标就是这种） ----
 "$XOVERRIDE" 500 400 160 120 >"$WORK/xor.log" 2>&1 &
 xor_pid=$!
@@ -225,7 +236,7 @@ while [ -z "$(parse_wid "$WORK/xor.log" 2>/dev/null)" ] && [ "$i" -lt 50 ]; do
     sleep 0.1; i=$((i+1))
 done
 OR_WID="$(parse_wid "$WORK/xor.log" 2>/dev/null)"
-[ -n "$OR_WID" ] || smoke_fail "xoverride did not report its X11 window id"
+[ -n "$OR_WID" ] || fail_no_wid xoverride "$WORK/xor.log"
 wait_xwindow_scene || smoke_fail "override-redirect X11 window never appeared in the scene"
 
 _out="$(probe --move mapped "$OR_WID" 40 25)"
@@ -261,7 +272,7 @@ while [ -z "$(parse_wid "$WORK/xmanaged.log" 2>/dev/null)" ] && [ "$i" -lt 50 ];
     sleep 0.1; i=$((i+1))
 done
 MANAGED_WID="$(parse_wid "$WORK/xmanaged.log" 2>/dev/null)"
-[ -n "$MANAGED_WID" ] || smoke_fail "managed X11 client did not report its window id"
+[ -n "$MANAGED_WID" ] || fail_no_wid "managed client" "$WORK/xmanaged.log"
 i=0
 while [ "$i" -lt 60 ]; do
     _tree2="$(wctl_cmd get_tree)"
