@@ -28,6 +28,8 @@ subdir('ime')
 subdir('session_lock')
 subdir('server')
 subdir('wctl')
+# 客户端侧：非 DDE 会话下由合成器自动启动（见 src/server/server.c）
+subdir('shortcutd')
 
 woodland_bin = executable('woodland',
   'main.c',

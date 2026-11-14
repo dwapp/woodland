@@ -195,6 +195,18 @@ if get_option('test').enabled()
          timeout: 120)
   endif
 
+  # woodland-shortcutd：非 DDE 会话里由合成器自动拉起、绑定条数与配置一致、
+  # 第二个实例撞 occupied、DDE 会话里不启动。不需要额外的探针——被测的就是
+  # 真实的 woodland-shortcutd 二进制，通过 wctl 看合成器侧的状态。
+  test('smoke-shortcutd',
+       find_program('sh'),
+       args: [meson.current_source_dir() / 'smoke' / 'run_shortcutd_smoke.sh',
+              woodland_bin.full_path(),
+              shortcutd_bin.full_path(),
+              wctl_bin.full_path()],
+       is_parallel: false,
+       timeout: 120)
+
   # treeland-foreign-toplevel-manager-v3：窗口列表、handle 请求回灌、dock
   # preview 的校验路径。探针要建一个真 xdg 窗口（窗口列表里得有窗口），
   # 所以除仓库内 XML 外还要系统 wayland-protocols 的 xdg-shell；缺依赖就

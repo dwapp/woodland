@@ -31,6 +31,12 @@ smoke_cleanup() {
 
 smoke_init() {
     SMOKE_NAME="${1:-smoke}"
+    # 冒烟测试只针对合成器本身：默认不拉起 woodland-shortcutd。它会 acquire
+    # 全局快捷键管理器（协议只允许一个持有者）并把默认键位注册进去，
+    # "binding_count == 0"、occupied、last_outcome 这些断言全被它带偏。
+    # 专测自动启动的 run_shortcutd_smoke.sh 会自己覆盖这个变量。
+    : "${WOODLAND_SHORTCUTD:=off}"
+    export WOODLAND_SHORTCUTD
     if [ -n "${MESON_BUILD_ROOT:-}" ]; then
         SMOKE_DIR="$MESON_BUILD_ROOT/meson-logs/smoke/$SMOKE_NAME"
     else

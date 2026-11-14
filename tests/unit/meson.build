@@ -303,3 +303,23 @@ test_window_menu = executable('test_window_menu', 'test_window_menu.c',
   include_directories: woodland_inc,
   link_with: [shell_lib, output_lib, cursor_lib, workspace_lib, ssd_lib, effect_lib, layer_lib, session_lock_lib, capture_lib, util_lib, trace_lib, dnd_lib] + xwayland_libs)
 test('window_menu', test_window_menu)
+
+# 环境探测：只是字符串判断，但 woodland_desktop_is_dde() 决定合成器要不要
+# 在会话里拉 woodland-shortcutd（判错会抢走 DDE 的全局快捷键）。
+test_env = executable('test_env', 'test_env.c',
+  dependencies: [scene_deps, wayland_server],
+  include_directories: woodland_inc,
+  link_with: util_lib)
+test('env', test_env)
+
+# woodland-shortcutd 的配置层与命令启动器：不连 display，只测"用户写了什么、
+# 我们打算注册什么、命令怎么起"。协议交互由 smoke-shortcutd 覆盖。
+test_shortcutd_config = executable('test_shortcutd_config', 'test_shortcutd_config.c',
+  include_directories: woodland_inc,
+  link_with: shortcutd_core_lib)
+test('shortcutd_config', test_shortcutd_config)
+
+test_shortcutd_spawn = executable('test_shortcutd_spawn', 'test_shortcutd_spawn.c',
+  include_directories: woodland_inc,
+  link_with: shortcutd_core_lib)
+test('shortcutd_spawn', test_shortcutd_spawn)
