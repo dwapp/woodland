@@ -265,4 +265,28 @@ EOF
     stop_probe
 fi
 
+echo "== 矮标题栏：按钮符号不溢出标题栏、不被压扁 =="
+# 按钮宽度来自 [decorations] button_width，高度跟标题栏走。两者不等时必须取
+# 短边并居中：旧实现只摆位、dest 停在创建时的 32x32，在 20px 标题栏里就从
+# y=-20 一直画到 +12，等于压在客户端内容上；按 (bwn, bh) 设 dest 又会把
+# □ / × 压扁。这里读场景树实测，不靠肉眼。
+mkdir -p "$XDG_CONFIG_HOME/woodland"
+cat >"$XDG_CONFIG_HOME/woodland/config.toml" <<'EOF'
+[decorations]
+titlebar_height = 20
+EOF
+"$WCTL" -s "$SOCK" reload_config >/dev/null || smoke_fail "reload_config failed (titlebar_height = 20)"
+scenario short_titlebar
+SHORT_SCENE="$("$WCTL" -s "$SOCK" dump_scene)" || smoke_fail "dump_scene failed (short titlebar)"
+# 标题栏在负坐标上：任何 buffer 的"顶端 + 高度"越过 0 就是画进了内容区
+echo "$SHORT_SCENE" | jq -e '
+    [.. | objects | select(.type == "buffer" and .y < 0 and (.y + .h) > 0)] | length == 0
+' >/dev/null || smoke_fail "button glyphs must not spill out of a 20px titlebar"
+# 右侧三个按钮格子（宽度仍是 32）里的符号必须是方形，且不高于标题栏
+echo "$SHORT_SCENE" | jq -e '
+    [.. | objects | select(.type == "buffer" and .y < 0 and .x >= 300)] as $g
+    | ($g | length) == 3 and ([$g[] | select(.w != .h or .w > 20)] | length) == 0
+' >/dev/null || smoke_fail "button glyphs must stay square and fit a 20px titlebar"
+stop_probe
+
 echo "decoration smoke passed"

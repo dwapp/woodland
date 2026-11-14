@@ -5,6 +5,7 @@
 #include "text_buffer.h"
 #include "view.h"
 #include "woodland.h"
+#include "woodland_config.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,6 +16,38 @@
 #include <wlr/util/edges.h>
 
 /* 用栈上伪造的 view/xdg 结构测 SSD 纯几何逻辑，不依赖真实 client 连接 */
+
+/*
+ * 扫一遍"按钮区"里的 buffer 节点，检查 dest 是不是方形、有没有溢出标题栏。
+ *
+ * 不去戳 view->ssd（内部结构对测试不可见），而是遍历场景树：真实节点的
+ * dst_width / dst_height 就是最终画出来的尺寸，比断言中间变量更硬。
+ */
+struct glyph_scan {
+    struct woodland_view *view;
+    int count;  /* 按钮区里的 buffer 节点数 */
+    int square; /* 其中 dest 宽高相等的 */
+    int spill;  /* 其中"顶端 + 高度"越过内容原点的（即画到了客户端内容上） */
+};
+
+static void scan_glyphs(struct wlr_scene_buffer *buffer, int x, int y, void *data)
+{
+    struct glyph_scan *scan = data;
+    int ox = scan->view->scene_tree->node.x;
+    int oy = scan->view->scene_tree->node.y;
+    /* 按钮区 = 内容右端三个按钮宽。标题文字和应用图标都在左侧，不会命中 */
+    if (x < ox + 400 - 3 * WOODLAND_SSD_BUTTON_W || y >= oy) {
+        return;
+    }
+    scan->count++;
+    if (buffer->dst_width == buffer->dst_height) {
+        scan->square++;
+    }
+    if (y + buffer->dst_height > oy) {
+        scan->spill++;
+    }
+}
+
 int main(void)
 {
     struct woodland_server server = {0};
@@ -184,7 +217,7 @@ int main(void)
     woodland_ssd_get_margins(&view, &margins);
     assert(margins.left == 0 && margins.top == 0 && margins.right == 0 && margins.bottom == 0);
 
-    /* 恢复标题栏 + 不覆盖边框：回到配置默认（26 + 1） */
+    /* 恢复标题栏 + 不覆盖边框：回到配置默认（32 + 1） */
     view.ssd_overrides.titlebar_hidden = false;
     view.ssd_overrides.border_set = false;
     woodland_ssd_deco_changed(&view);
@@ -216,6 +249,39 @@ int main(void)
     assert(btn_2x->width == 52);
     assert(btn_2x->height == 52);
     wlr_buffer_drop(btn_2x);
+
+    /*
+     * 按钮符号必须是方形，且不能溢出格子。
+     *
+     * 宽度来自 [decorations] button_width，高度跟着标题栏走：默认 32/32 两者
+     * 恰好相等，把"按 (bwn, bh) 设 dest"的问题整个掩盖住了。这里把标题栏压到
+     * 20 逼出不等——不取短边的话，符号要么被纵向压扁，要么仍按 32 高画而溢出
+     * 到内容区（y 从 -20 一直到 +12）。
+     */
+    struct woodland_config tight_cfg = {0};
+    tight_cfg.ssd.enabled = true;
+    tight_cfg.ssd.titlebar_height = 20;
+    tight_cfg.ssd.button_width = WOODLAND_SSD_BUTTON_W;
+    server.config = &tight_cfg;
+
+    struct woodland_view tight = {0};
+    tight.server = &server;
+    tight.xdg_toplevel = &fake_toplevel;
+    tight.scene_tree = wlr_scene_tree_create(&server.scene->tree);
+    assert(tight.scene_tree);
+    wlr_scene_node_set_position(&tight.scene_tree->node, 600, 100);
+    woodland_ssd_create(&tight);
+    assert(tight.ssd != NULL);
+
+    struct glyph_scan scan = {.view = &tight};
+    wlr_scene_node_for_each_buffer(&tight.scene_tree->node, scan_glyphs, &scan);
+    assert(scan.count == 3);           /* close / max / min 三个符号 */
+    assert(scan.square == scan.count); /* dest 必须是方形，不能被压扁 */
+    assert(scan.spill == 0);           /* 不能越过内容原点画到客户端内容上 */
+
+    woodland_ssd_destroy(&tight);
+    wlr_scene_node_destroy(&tight.scene_tree->node);
+    server.config = NULL;
 
     /* destroy：view->ssd 置空，scene 树级联释放 */
     woodland_ssd_destroy(&view);

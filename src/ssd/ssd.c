@@ -144,14 +144,16 @@ static int ssd_button_width(const struct woodland_view *view)
 }
 
 /*
- * 按钮高度。
+ * 按钮格子的高度。
  *
- * 默认与标题栏等高（撑满）——按钮图标是方形 buffer，dest_size 必须也是方形，
- * 否则 □ / × 会被纵向压扁。
- * 但客户端可以通过协议把标题栏调矮（treeland-decoration set_titlebar_height），
- * 矮到比 BUTTON_H 还小时必须跟着缩，否则按钮会画到标题栏外面：
- * 布局（ssd_layout）和命中测试（ssd_ssd_at）各算一遍的话，一旦漏改就会出现
- * "看得见但点不到"。所以高度只在这里算一次，两处都调它。
+ * 默认与标题栏等高（撑满）。客户端可以通过协议把标题栏调矮
+ * （treeland-decoration set_titlebar_height），矮到比 BUTTON_H 还小时必须
+ * 跟着缩，否则按钮会画到标题栏外面：布局（ssd_layout）和命中测试
+ * （ssd_hit_relative）各算一遍的话，一旦漏改就会出现"看得见但点不到"。
+ * 所以格子高度只在这里算一次，两处都调它。
+ *
+ * 注意这只是**格子**的高度，符号边长另算（ssd_button_glyph_size）：格子可以
+ * 是扁的，符号不能是。
  */
 static int ssd_button_height(int th)
 {
@@ -160,6 +162,40 @@ static int ssd_button_height(int th)
         bh = th;
     }
     return bh;
+}
+
+/*
+ * 按钮符号的方形边长：取按钮格子的短边。
+ *
+ * 符号是 cairo 按 px×px 画的方形 buffer（见 woodland_button_icon_buffer），
+ * dest 必须也是方形，否则 □ / × 会被拉伸。两个方向本来各自独立：宽度来自
+ * [decorations] button_width（1~199 可配），高度跟标题栏走（协议能压到几十
+ * 像素）。默认 32/32 时两者恰好相等，把问题完全掩盖住了——一旦不等，按
+ * (bwn, bh) 设 dest 就会横向或纵向压扁；矮标题栏下还会溢出格子，把图标
+ * 画到客户端内容上。所以只认短边。
+ *
+ * 栅格化（woodland_button_icon_buffer）和摆位（ssd_place_glyph）必须取同一个
+ * 值：按 A 画、按 B 摆会拉伸发虚。所以这里和 ssd_button_height 一样，只留
+ * 一个入口，别在调用点各写一遍 MIN。
+ */
+static int ssd_button_glyph_size(int bwn, int bh)
+{
+    int side = bwn < bh ? bwn : bh;
+    return side > 0 ? side : 1;
+}
+
+/*
+ * 把第 idx 个按钮符号摆进以 (x, y) 为左上角、bwn×bh 的格子：方形 dest + 居中。
+ *
+ * 底色 rect 和命中区仍然占满整格（见 ssd_layout / ssd_hit_relative），所以
+ * 图标变小不会让"能点的范围"跟着缩水——只是点下去看不到的那圈空白也响应。
+ */
+static void ssd_place_glyph(struct woodland_ssd *ssd, int idx, int x, int y, int bwn, int bh)
+{
+    int side = ssd_button_glyph_size(bwn, bh);
+    wlr_scene_buffer_set_dest_size(ssd->button[idx], side, side);
+    wlr_scene_node_set_position(&ssd->button[idx]->node, x + (bwn - side) / 2,
+                                y + (bh - side) / 2);
 }
 
 /*
@@ -486,13 +522,13 @@ static void ssd_update_buttons(struct woodland_ssd *ssd)
 
     /* 关闭按钮悬停/按压时切换为鲜明的白色图标 */
     bool close_active = (hovered == BUTTON_CLOSE || pressed == BUTTON_CLOSE);
-    int bwn = ssd_button_width(ssd->view);
-    int bh = ssd_button_height(ssd_titlebar_height(ssd->view));
+    int side = ssd_button_glyph_size(
+        ssd_button_width(ssd->view), ssd_button_height(ssd_titlebar_height(ssd->view)));
     struct wlr_buffer *close_buf =
-        woodland_button_icon_buffer(WOODLAND_SSD_ICON_CLOSE, bwn, close_active, ssd->scale);
+        woodland_button_icon_buffer(WOODLAND_SSD_ICON_CLOSE, side, close_active, ssd->scale);
     if (close_buf) {
         wlr_scene_buffer_set_buffer(ssd->button[BUTTON_CLOSE], close_buf);
-        wlr_scene_buffer_set_dest_size(ssd->button[BUTTON_CLOSE], bwn, bh);
+        wlr_scene_buffer_set_dest_size(ssd->button[BUTTON_CLOSE], side, side);
         wlr_buffer_drop(close_buf);
     }
 }
@@ -548,10 +584,10 @@ static void ssd_layout(struct woodland_ssd *ssd)
     int x = w - gap - bwn;
     for (int i = 0; i < BUTTON_COUNT; i++) {
         int idx = button_order[i];
-        /* 底色在图标之下，位置与图标完全重合 */
+        /* 底色铺满整格（也是命中区），符号在格子里居中 */
         wlr_scene_node_set_position(&ssd->button_bg[idx]->node, x, by);
         wlr_scene_rect_set_size(ssd->button_bg[idx], bwn, bh);
-        wlr_scene_node_set_position(&ssd->button[idx]->node, x, by);
+        ssd_place_glyph(ssd, idx, x, by, bwn, bh);
         x -= gap + bwn;
     }
 
@@ -666,15 +702,18 @@ void woodland_ssd_create(struct woodland_view *view)
         }
     }
 
-    /* 按钮符号（—/□/×，黑色，对齐 labwc 默认黑色按钮图标） */
+    /* 按钮符号（—/□/×，黑色，对齐 labwc 默认黑色按钮图标）。
+     * 边长走 ssd_button_glyph_size：方块格子（默认 32/32）之外，宽度可配、
+     * 标题栏高度可被协议压矮，两个方向必须取同一个方形边长。 */
     ssd->scale = ssd_view_scale(view);
-    int btn_w = ssd_button_width(view);
+    int btn_side = ssd_button_glyph_size(ssd_button_width(view),
+                                         ssd_button_height(ssd_titlebar_height(view)));
     ssd->button[BUTTON_CLOSE] =
-        woodland_button_icon_create(ssd->tree, WOODLAND_SSD_ICON_CLOSE, btn_w, ssd->scale);
+        woodland_button_icon_create(ssd->tree, WOODLAND_SSD_ICON_CLOSE, btn_side, ssd->scale);
     ssd->button[BUTTON_MAXIMIZE] =
-        woodland_button_icon_create(ssd->tree, WOODLAND_SSD_ICON_MAXIMIZE, btn_w, ssd->scale);
+        woodland_button_icon_create(ssd->tree, WOODLAND_SSD_ICON_MAXIMIZE, btn_side, ssd->scale);
     ssd->button[BUTTON_MINIMIZE] =
-        woodland_button_icon_create(ssd->tree, WOODLAND_SSD_ICON_ICONIFY, btn_w, ssd->scale);
+        woodland_button_icon_create(ssd->tree, WOODLAND_SSD_ICON_ICONIFY, btn_side, ssd->scale);
 
     ssd->title_text = woodland_text_buffer_create(ssd->tree);
 
@@ -782,11 +821,11 @@ void woodland_ssd_update(struct woodland_view *view)
         enum woodland_ssd_button_icon icon =
             max ? WOODLAND_SSD_ICON_RESTORE : WOODLAND_SSD_ICON_MAXIMIZE;
         int bwn = ssd_button_width(view);
-        int bh = ssd_button_height(ssd_titlebar_height(view));
-        struct wlr_buffer *buf = woodland_button_icon_buffer(icon, bwn, false, ssd->scale);
+        int side = ssd_button_glyph_size(bwn, ssd_button_height(ssd_titlebar_height(view)));
+        struct wlr_buffer *buf = woodland_button_icon_buffer(icon, side, false, ssd->scale);
         if (buf) {
             wlr_scene_buffer_set_buffer(ssd->button[BUTTON_MAXIMIZE], buf);
-            wlr_scene_buffer_set_dest_size(ssd->button[BUTTON_MAXIMIZE], bwn, bh);
+            wlr_scene_buffer_set_dest_size(ssd->button[BUTTON_MAXIMIZE], side, side);
             wlr_buffer_drop(buf);
         }
         if (scale_changed) {
@@ -798,17 +837,17 @@ void woodland_ssd_update(struct woodland_view *view)
             bool close_active = (ssd->hover_part == WOODLAND_SSD_BUTTON_CLOSE ||
                                  ssd->pressed_part == WOODLAND_SSD_BUTTON_CLOSE);
             struct wlr_buffer *min_buf =
-                woodland_button_icon_buffer(WOODLAND_SSD_ICON_ICONIFY, bwn, false, ssd->scale);
+                woodland_button_icon_buffer(WOODLAND_SSD_ICON_ICONIFY, side, false, ssd->scale);
             if (min_buf) {
                 wlr_scene_buffer_set_buffer(ssd->button[BUTTON_MINIMIZE], min_buf);
-                wlr_scene_buffer_set_dest_size(ssd->button[BUTTON_MINIMIZE], bwn, bh);
+                wlr_scene_buffer_set_dest_size(ssd->button[BUTTON_MINIMIZE], side, side);
                 wlr_buffer_drop(min_buf);
             }
             struct wlr_buffer *close_buf = woodland_button_icon_buffer(
-                WOODLAND_SSD_ICON_CLOSE, bwn, close_active, ssd->scale);
+                WOODLAND_SSD_ICON_CLOSE, side, close_active, ssd->scale);
             if (close_buf) {
                 wlr_scene_buffer_set_buffer(ssd->button[BUTTON_CLOSE], close_buf);
-                wlr_scene_buffer_set_dest_size(ssd->button[BUTTON_CLOSE], bwn, bh);
+                wlr_scene_buffer_set_dest_size(ssd->button[BUTTON_CLOSE], side, side);
                 wlr_buffer_drop(close_buf);
             }
         }

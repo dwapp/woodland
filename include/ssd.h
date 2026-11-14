@@ -12,9 +12,9 @@ struct wlr_scene_tree;
 /* SSD 几何常量（对齐 kylin-wayland-compositor 默认主题的密度：32 标题栏 + 32 按钮，
  * 与右键窗口菜单的视觉比例保持一致）。
  *
- * 按钮高度故意等于标题栏高度：按钮图标是**方形 buffer**（见 text_buffer.c 的
- * woodland_button_icon_buffer），dest_size 一旦不是方形就会把 □ / × 压扁。
- * 想给按钮留上下留白，得先让图标支持非方形，别只改这个宏。 */
+ * 按钮高度默认撑满标题栏，但不是必须相等：符号本身是**方形 buffer**（见 text_buffer.c
+ * 的 woodland_button_icon_buffer），格子非方形时取短边栅格化再居中（ssd.c 的
+ * ssd_button_glyph_size / ssd_place_glyph），不会把 □ / × 压扁。 */
 #define WOODLAND_SSD_TITLEBAR_H 32
 #define WOODLAND_SSD_BORDER_W 1
 #define WOODLAND_SSD_BUTTON_W 32
