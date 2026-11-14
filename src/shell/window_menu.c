@@ -19,6 +19,7 @@
 #include <linux/input-event-codes.h>
 #include <xkbcommon/xkbcommon.h>
 
+#include "effect.h"
 #include "scene.h"
 #include "output.h"
 #include "placement.h"
@@ -283,18 +284,36 @@ static void window_menu_render_level(struct woodland_window_menu *menu,
         hover_bg_rgba[3] = 0.92f;
     }
 
-    /* 圆角半径与窗口保持一致：同样来自 [effects] corner_radius（默认 4）。
-     * 效果关闭时窗口是直角，菜单也跟随为直角——否则会出现"方窗口 + 圆菜单"。
-     * 上限 12 与窗口侧观感对齐（比 1000 的协议上限更克制）。 */
-    double corner_r = 0.0;
-    if (menu->server->config && menu->server->config->effects.enabled) {
-        corner_r = (double)menu->server->config->effects.corner_radius;
-        if (corner_r < 0.0) {
-            corner_r = 0.0;
-        }
-        if (corner_r > 12.0) {
-            corner_r = 12.0;
-        }
+    /*
+     * 圆角跟**目标窗口实际画出来的角**走，不再自己读配置算一遍。
+     *
+     * 早先这里直接取 config->effects.corner_radius 再夹到 12，与窗口侧有两条
+     * 分叉：客户端用 treeland-decoration 设了自己的 corner_radius 时（窗口侧
+     * 优先取它），以及半径大于 12 时——都会变成"窗口和菜单各圆各的"。
+     *
+     * woodland_effect_frame_corners() 是窗口侧的唯一入口：effect 关掉返回 0、
+     * 优先逐窗口覆盖、最大化/全屏归零、贴边那一侧单独归零。菜单是浮层，取四角
+     * 最大值——贴边窗口靠内那侧的角还是圆的，菜单跟着它走。
+     *
+     * 最后按自身尺寸夹一下：半径超过短边一半时 cairo 与 scenefx 阴影都没有
+     * 明确行为，而窗口侧同样会被自己的矩形裁掉，所以夹在这里不影响一致性。
+     */
+    struct woodland_effect_corners view_corners;
+    woodland_effect_frame_corners(menu->view, &view_corners);
+    int radius = view_corners.top_left;
+    if (view_corners.top_right > radius) {
+        radius = view_corners.top_right;
+    }
+    if (view_corners.bottom_right > radius) {
+        radius = view_corners.bottom_right;
+    }
+    if (view_corners.bottom_left > radius) {
+        radius = view_corners.bottom_left;
+    }
+    double corner_r = (double)(radius < 0 ? 0 : radius);
+    double max_r = (level->width < level->height ? level->width : level->height) / 2.0;
+    if (corner_r > max_r) {
+        corner_r = max_r;
     }
 
     cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
