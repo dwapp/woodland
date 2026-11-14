@@ -172,7 +172,9 @@ void woodland_output_workarea(struct woodland_output *output, struct wlr_box *ou
     }
     /* layout box 是输出在全局布局里的位置，usable_area 是输出局部坐标，
      * 必须加布局偏移才是"布局坐标下的工作区"。 */
-    wlr_output_layout_get_box(output->server->output_layout, output->wlr_output, out);
+    if (output->server && output->server->output_layout) {
+        wlr_output_layout_get_box(output->server->output_layout, output->wlr_output, out);
+    }
     if (output->usable_area_valid) {
         out->x += output->usable_area.x;
         out->y += output->usable_area.y;

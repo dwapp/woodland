@@ -39,6 +39,7 @@ struct woodland_ime_relay;
 struct woodland_session_lock;
 struct wlr_pointer_constraints_v1;
 struct wlr_pointer_constraint_v1;
+struct woodland_window_menu;
 /* 贴边铺满预览（拖动窗口靠近屏幕边缘时显示的半透明目标区域预览） */
 struct woodland_snap_preview {
     struct woodland_server *server;
@@ -171,7 +172,10 @@ struct woodland_server {
     double drag_start_x, drag_start_y; // 本次拖动起点（判断是否真的拖动了）
     struct wlr_box grab_geobox;
     uint32_t resize_edges;
+    bool interactive_click_to_finish;
+    struct wlr_box interactive_initial_geo;
     struct woodland_snap_preview snap_preview;
+    struct woodland_window_menu *window_menu;
     /* 前置抓取上下文（按下时记录，避免客户端 request_move 的 RPC 往返丢失初速度） */
     struct {
         struct woodland_view *view;

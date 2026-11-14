@@ -17,7 +17,7 @@
 #include "scene.h"
 #include <wlr/types/wlr_seat.h>
 #include <wlr/types/wlr_pointer_constraints_v1.h>
-
+#include <linux/input-event-codes.h>
 #include "cursor.h"
 #include "dnd.h"
 #include "focus.h"
@@ -26,6 +26,7 @@
 #include "shell_internal.h"
 #include "ssd.h"
 #include "view.h"
+#include "window_menu.h"
 #include "woodland.h"
 
 /* ==================== SSD 按钮 hover / pressed ==================== */
@@ -102,6 +103,7 @@ static void ssd_button_release(struct woodland_server *server)
 void woodland_cursor_process_motion(struct woodland_server *server, uint32_t time)
 {
     if (woodland_session_lock_is_locked(server)) {
+        woodland_window_menu_hide(server);
         if (server->cursor_mode != WOODLAND_CURSOR_PASSTHROUGH) {
             woodland_cursor_reset_mode(server);
         }
@@ -116,6 +118,12 @@ void woodland_cursor_process_motion(struct woodland_server *server, uint32_t tim
             wlr_seat_pointer_clear_focus(server->seat);
             woodland_cursor_set(server, "default");
         }
+        return;
+    }
+    if (woodland_window_menu_is_active(server)) {
+        woodland_window_menu_handle_motion(server, server->cursor->x, server->cursor->y);
+        woodland_cursor_set(server, "default");
+        wlr_seat_pointer_notify_clear_focus(server->seat);
         return;
     }
 
@@ -273,6 +281,7 @@ static void server_cursor_button(struct wl_listener *listener, void *data)
         return;
     }
     if (woodland_session_lock_is_locked(server)) {
+        woodland_window_menu_hide(server);
         double sx = 0, sy = 0;
         struct wlr_surface *surface = NULL;
         woodland_session_lock_surface_at(server, server->cursor->x, server->cursor->y, &surface,
@@ -285,6 +294,13 @@ static void server_cursor_button(struct wl_listener *listener, void *data)
             wlr_seat_pointer_clear_focus(server->seat);
         }
         return;
+    }
+    /* 窗口菜单处于激活态时，指针事件优先交由窗口菜单处理 */
+    if (woodland_window_menu_is_active(server)) {
+        if (woodland_window_menu_handle_button(server, event->button, event->state,
+                                              server->cursor->x, server->cursor->y)) {
+            return;
+        }
     }
 
     /*
@@ -310,6 +326,9 @@ static void server_cursor_button(struct wl_listener *listener, void *data)
     }
 
     if (event->state == WL_POINTER_BUTTON_STATE_RELEASED) {
+        if (server->interactive_click_to_finish) {
+            return;
+        }
         server->grab_context.active = false;
         server->grab_context.view = NULL;
         /* 拖动结束：先决定是否贴边铺满，再清抓取状态（铺满要用 grabbed_view） */
@@ -321,6 +340,16 @@ static void server_cursor_button(struct wl_listener *listener, void *data)
     } else {
         /* 新的按下：先清掉上一次遗留的按下态 */
         ssd_clear_pressed(server);
+        if (server->interactive_click_to_finish &&
+            (server->cursor_mode == WOODLAND_CURSOR_MOVE ||
+             server->cursor_mode == WOODLAND_CURSOR_RESIZE)) {
+            server->interactive_click_to_finish = false;
+            if (server->cursor_mode == WOODLAND_CURSOR_MOVE && server->grabbed_view) {
+                shell_view_apply_snap(server->grabbed_view);
+            }
+            woodland_cursor_reset_mode(server);
+            return;
+        }
         double sx, sy;
         struct wlr_surface *surface = NULL;
         struct woodland_view *view =
@@ -377,6 +406,17 @@ static void server_cursor_button(struct wl_listener *listener, void *data)
                     woodland_ssd_set_pressed(ssd_view, ssd_part);
                     break;
                 case WOODLAND_SSD_TITLEBAR:
+                    if (event->button == BTN_RIGHT) {
+                        woodland_window_menu_show(ssd_view, server->cursor->x, server->cursor->y);
+                        return;
+                    }
+                    {
+                        double rx = server->cursor->x - ssd_view->scene_tree->node.x;
+                        if (event->button == BTN_LEFT && rx >= 0 && rx <= 28) {
+                            woodland_window_menu_show(ssd_view, server->cursor->x, server->cursor->y);
+                            return;
+                        }
+                    }
                     woodland_view_begin_interactive(ssd_view, WOODLAND_CURSOR_MOVE, 0);
                     break;
                 case WOODLAND_SSD_BORDER_LEFT:

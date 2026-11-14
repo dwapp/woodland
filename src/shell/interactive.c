@@ -20,12 +20,14 @@
 #include "shell_internal.h"
 #include "ssd.h"
 #include "view.h"
+#include "window_menu.h"
 #include "woodland.h"
 #include "woodland_config.h"
 #include <wlr/types/wlr_foreign_toplevel_management_v1.h>
 #include "scene.h"
 #include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/util/edges.h>
+#include <xkbcommon/xkbcommon.h>
 
 /* ==================== 吸附候选边 ==================== */
 
@@ -195,11 +197,17 @@ void woodland_view_begin_interactive(struct woodland_view *view, enum woodland_c
     server->grabbed_view = view;
     server->cursor_mode = mode;
 
-    double cur_x = server->cursor->x;
-    double cur_y = server->cursor->y;
+    double cur_x = server->cursor ? server->cursor->x : 0;
+    double cur_y = server->cursor ? server->cursor->y : 0;
     int node_x = view->scene_tree ? view->scene_tree->node.x : 0;
     int node_y = view->scene_tree ? view->scene_tree->node.y : 0;
 
+    /* 记录初始几何以便 Escape 恢复 */
+    struct wlr_box content;
+    woodland_view_content_box(view, &content);
+    server->interactive_initial_geo = content;
+    server->interactive_initial_geo.x += node_x;
+    server->interactive_initial_geo.y += node_y;
     /* 若存在按下时记录的前置抓取上下文且匹配本视图，复用它以消除 RPC 往返延迟带来的漂移 */
     if (server->grab_context.active && server->grab_context.view == view) {
         cur_x = server->grab_context.cursor_x;
@@ -431,9 +439,11 @@ void shell_process_cursor_resize(struct woodland_server *server)
 void woodland_cursor_reset_mode(struct woodland_server *server)
 {
     woodland_snap_preview_destroy(server);
+    woodland_window_menu_hide(server);
     server->cursor_mode = WOODLAND_CURSOR_PASSTHROUGH;
     server->grabbed_view = NULL;
     server->resize_edges = 0;
+    server->interactive_click_to_finish = false;
     woodland_cursor_set(server, "default");
     server->grab_context.active = false;
     server->grab_context.view = NULL;
@@ -445,4 +455,47 @@ void shell_interactive_attach(struct woodland_view *view)
                               xdg_toplevel_request_move, "interactive.request_move");
     woodland_listener_connect(&view->request_resize, &view->xdg_toplevel->events.request_resize,
                               xdg_toplevel_request_resize, "interactive.request_resize");
+}
+
+bool woodland_interactive_handle_key(struct woodland_server *server, xkb_keysym_t sym,
+                                     uint32_t modifiers)
+{
+    if (!server || (server->cursor_mode != WOODLAND_CURSOR_MOVE &&
+                    server->cursor_mode != WOODLAND_CURSOR_RESIZE)) {
+        return false;
+    }
+
+    if (sym == XKB_KEY_Return || sym == XKB_KEY_KP_Enter || sym == XKB_KEY_space) {
+        if (server->cursor_mode == WOODLAND_CURSOR_MOVE && server->grabbed_view) {
+            shell_view_apply_snap(server->grabbed_view);
+        }
+        woodland_cursor_reset_mode(server);
+        return true;
+    }
+
+    if (sym == XKB_KEY_Escape) {
+        if (server->grabbed_view && server->interactive_initial_geo.width > 0) {
+            shell_view_apply_geometry(server->grabbed_view, &server->interactive_initial_geo);
+        }
+        woodland_cursor_reset_mode(server);
+        return true;
+    }
+
+    int step = (modifiers & WLR_MODIFIER_SHIFT) ? 50 : 10;
+    int dx = (sym == XKB_KEY_Right) ? step : ((sym == XKB_KEY_Left) ? -step : 0);
+    int dy = (sym == XKB_KEY_Down) ? step : ((sym == XKB_KEY_Up) ? -step : 0);
+
+    if (dx != 0 || dy != 0) {
+        if (server->cursor) {
+            wlr_cursor_move(server->cursor, NULL, dx, dy);
+            if (server->cursor_mode == WOODLAND_CURSOR_MOVE) {
+                shell_process_cursor_move(server);
+            } else if (server->cursor_mode == WOODLAND_CURSOR_RESIZE) {
+                shell_process_cursor_resize(server);
+            }
+        }
+        return true;
+    }
+
+    return true;
 }

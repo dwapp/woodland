@@ -298,3 +298,8 @@ test_dnd = executable('test_dnd', 'test_dnd.c',
   include_directories: woodland_inc,
   link_with: [dnd_lib, trace_lib, util_lib])
 test('dnd', test_dnd)
+test_window_menu = executable('test_window_menu', 'test_window_menu.c',
+  dependencies: [scene_deps, wayland_server, pangocairo, cairo, xkbcommon],
+  include_directories: woodland_inc,
+  link_with: [shell_lib, output_lib, cursor_lib, workspace_lib, ssd_lib, effect_lib, layer_lib, session_lock_lib, capture_lib, util_lib, trace_lib, dnd_lib] + xwayland_libs)
+test('window_menu', test_window_menu)

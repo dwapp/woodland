@@ -42,6 +42,7 @@
 #include "trace.h"
 #include "view.h"
 #include "woodland.h"
+#include "window_menu.h"
 #include "workspace.h"
 
 /* ==================== 双后端访问器 ==================== */
@@ -266,6 +267,7 @@ void woodland_view_unmap(struct woodland_view *view)
     if (view == view->server->grabbed_view) {
         woodland_cursor_reset_mode(view->server);
     }
+    woodland_window_menu_hide_for_view(view);
     if (view == view->server->grab_context.view) {
         view->server->grab_context.active = false;
         view->server->grab_context.view = NULL;
@@ -329,6 +331,7 @@ void woodland_view_destroy(struct woodland_view *view)
     if (view == view->server->grabbed_view) {
         woodland_cursor_reset_mode(view->server);
     }
+    woodland_window_menu_hide_for_view(view);
     if (view == view->server->grab_context.view) {
         view->server->grab_context.active = false;
         view->server->grab_context.view = NULL;
@@ -425,6 +428,7 @@ static void xdg_toplevel_destroy(struct wl_listener *listener, void *data)
     wl_list_remove(&view->request_maximize.link);
     wl_list_remove(&view->request_fullscreen.link);
     wl_list_remove(&view->request_minimize.link);
+    wl_list_remove(&view->request_show_window_menu.link);
     wl_list_remove(&view->set_title.link);
     wl_list_remove(&view->set_app_id.link);
     wl_list_remove(&view->set_parent.link);
@@ -713,6 +717,7 @@ bool woodland_shell_init(struct woodland_server *server)
                                   server_new_toplevel_decoration, "shell.new_toplevel_decoration");
     }
     woodland_snap_preview_init(server);
+    woodland_window_menu_init(server);
     server->pointer_constraint_is_focused_hook = shell_pointer_constraint_is_focused;
     /* dnd 是 shell 的下游，不能反过来调 selfcheck（会成环），走钩子 */
     server->selfcheck_schedule_hook = woodland_selfcheck_schedule;
@@ -730,6 +735,7 @@ void woodland_shell_finish(struct woodland_server *server)
         wl_list_remove(&server->new_toplevel_decoration.link);
     }
     woodland_snap_preview_finish(server);
+    woodland_window_menu_finish(server);
     server->pointer_constraint_is_focused_hook = NULL;
     server->selfcheck_schedule_hook = NULL;
 }
