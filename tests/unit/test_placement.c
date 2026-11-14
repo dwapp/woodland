@@ -60,8 +60,12 @@ int main(void) {
     woodland_output_workarea(o1, &area);
     assert(area.x == 0 && area.y == 0 && area.width == 800 && area.height == 600);
 
+    /* 与真实 SSD 边距保持一致（边框 1 + 标题栏），避免测试里写死一个过期的高度 */
     struct woodland_ssd_margins margins = {
-        .left = 1, .top = 27, .right = 1, .bottom = 1,
+        .left = WOODLAND_SSD_BORDER_W,
+        .top = WOODLAND_SSD_BORDER_W + WOODLAND_SSD_TITLEBAR_H,
+        .right = WOODLAND_SSD_BORDER_W,
+        .bottom = WOODLAND_SSD_BORDER_W,
     };
 
     /* ---------- 贴边铺满 ---------- */
@@ -127,16 +131,17 @@ int main(void) {
     /* ---------- 放置策略 ---------- */
     struct wlr_box place;
     /*
-     * 居中：外框 402x328 居中 → 原点 (199,136)，
-     * 内容原点再加左上边距 (1,27) = (200,163)
+     * 居中：外框 (400+左+右) x (300+上+下) 居中 → 外框原点，
+     * 内容原点再加左上边距 (margins.left, margins.top)
      */
     woodland_placement_center(&area, 400, 300, &margins, &place);
-    assert(place.x == 200 && place.y == 163);
+    assert(place.x == (800 - (400 + margins.left + margins.right)) / 2 + margins.left);
+    assert(place.y == (600 - (300 + margins.top + margins.bottom)) / 2 + margins.top);
     assert(place.width == 400 && place.height == 300);
 
     /* 光标处：外框左上角贴光标 */
     woodland_placement_cursor(&area, 100, 120, 300, 200, &margins, &place);
-    assert(place.x == 101 && place.y == 147);
+    assert(place.x == 100 + margins.left && place.y == 120 + margins.top);
     /* 光标贴右下角：整体拉回工作区内 */
     woodland_placement_cursor(&area, 790, 590, 300, 200, &margins, &place);
     assert(place.x + place.width + margins.right <= 800);

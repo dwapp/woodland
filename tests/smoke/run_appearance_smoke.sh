@@ -92,8 +92,13 @@ grep -q '^cursor_size 24 24$' "$OBS_INIT" || smoke_fail "initial cursor size wro
 grep -qi '^font sans$' "$OBS_INIT" || smoke_fail "initial font wrong: $(cat "$OBS_INIT")"
 grep -q '^font_size 100$' "$OBS_INIT" || smoke_fail "initial font size (10pt*10) wrong: $(cat "$OBS_INIT")"
 grep -q '^color_scheme 0$' "$OBS_INIT" || smoke_fail "initial scheme should be light: $(cat "$OBS_INIT")"
-grep -q '^titlebar_height 26$' "$OBS_INIT" || smoke_fail "initial titlebar height wrong: $(cat "$OBS_INIT")"
-grep -q '^corner_radius 0$' "$OBS_INIT" || smoke_fail "initial corner radius wrong: $(cat "$OBS_INIT")"
+grep -q '^titlebar_height 32$' "$OBS_INIT" || smoke_fail "initial titlebar height wrong: $(cat "$OBS_INIT")"
+# 默认圆角 4；无渲染后端时 appearance 如实报 0（见 appearance_corner_radius）
+if [ "$EFFECTS" = "true" ]; then
+    grep -q '^corner_radius 4$' "$OBS_INIT" || smoke_fail "initial corner radius wrong: $(cat "$OBS_INIT")"
+else
+    grep -q '^corner_radius 0$' "$OBS_INIT" || smoke_fail "initial corner radius wrong (no backend): $(cat "$OBS_INIT")"
+fi
 grep -q '^window_opacity 1.000$' "$OBS_INIT" || smoke_fail "initial opacity wrong: $(cat "$OBS_INIT")"
 
 # wctl 侧同样是"已就绪但没有请求"的样子

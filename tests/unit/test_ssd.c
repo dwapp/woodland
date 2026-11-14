@@ -38,19 +38,19 @@ int main(void)
     woodland_ssd_create(&view);
     assert(view.ssd != NULL);
 
-    /* titlebar 命中：布局坐标 (150, 88) → 相对 (50, -12) 在标题栏内（高 26） */
+    /* titlebar 命中：布局坐标 (150, 88) → 相对 (50, -12) 在标题栏内（高 32） */
     uint32_t edges = 0;
     enum woodland_ssd_part part = woodland_ssd_at(&view, 150, 88, &edges);
     assert(part == WOODLAND_SSD_TITLEBAR);
 
-    /* 按钮：宽 26、间距 0，自右向左 close/max/iconify，占 [400-78, 400) */
-    /* 关闭按钮：相对 x∈[374,400) */
+    /* 按钮：宽 32、间距 0，自右向左 close/max/iconify，占 [400-96, 400) */
+    /* 关闭按钮：相对 x∈[368,400) */
     part = woodland_ssd_at(&view, 100 + 380, 100 - 12, &edges);
     assert(part == WOODLAND_SSD_BUTTON_CLOSE);
-    /* 最大化：相对 x∈[348,374) */
+    /* 最大化：相对 x∈[336,368) */
     part = woodland_ssd_at(&view, 100 + 360, 100 - 12, &edges);
     assert(part == WOODLAND_SSD_BUTTON_MAXIMIZE);
-    /* 最小化：相对 x∈[322,348) */
+    /* 最小化：相对 x∈[304,336) */
     part = woodland_ssd_at(&view, 100 + 330, 100 - 12, &edges);
     assert(part == WOODLAND_SSD_BUTTON_MINIMIZE);
 
@@ -59,12 +59,12 @@ int main(void)
     assert(part == WOODLAND_SSD_BORDER_LEFT);
     assert(edges == WLR_EDGE_LEFT);
 
-    /* 顶部边框命中：相对 y∈[-27,-26) */
-    part = woodland_ssd_at(&view, 100 + 200, 100 - 26.5, &edges);
+    /* 顶部边框命中：相对 y∈[-(th+1), -th) */
+    part = woodland_ssd_at(&view, 100 + 200, 100 - (WOODLAND_SSD_TITLEBAR_H + 0.5), &edges);
     assert(part == WOODLAND_SSD_BORDER_TOP);
     assert(edges == WLR_EDGE_TOP);
 
-    /* 边框必须包住标题栏：标题栏高度处的左边框（相对 y∈[-26,0)）也要命中，
+    /* 边框必须包住标题栏：标题栏高度处的左边框（相对 y∈[-th,0)）也要命中，
      * 且四角不留空隙（顶边框横向跨满到 x=-1 / x=400） */
     part = woodland_ssd_at(&view, 100 - 0.5, 100 - 12, &edges);
     assert(part == WOODLAND_SSD_BORDER_LEFT);
@@ -72,7 +72,7 @@ int main(void)
     part = woodland_ssd_at(&view, 100 + 400.5, 100 - 12, &edges);
     assert(part == WOODLAND_SSD_BORDER_RIGHT);
     assert(edges == WLR_EDGE_RIGHT);
-    part = woodland_ssd_at(&view, 100 - 0.5, 100 - 26.5, &edges);
+    part = woodland_ssd_at(&view, 100 - 0.5, 100 - (WOODLAND_SSD_TITLEBAR_H + 0.5), &edges);
     assert(part == WOODLAND_SSD_BORDER_TOP);
     assert(edges == WLR_EDGE_TOP);
     part = woodland_ssd_at(&view, 100 - 0.5, 100 + 300.5, &edges);
@@ -93,7 +93,7 @@ int main(void)
     assert(part == WOODLAND_SSD_BORDER_BOTTOM);
     assert(edges == WLR_EDGE_BOTTOM);
 
-    part = woodland_ssd_at(&view, 100 + 200, 100 - 30.0, &edges);
+    part = woodland_ssd_at(&view, 100 + 200, 100 - (WOODLAND_SSD_TITLEBAR_H + 4.0), &edges);
     assert(part == WOODLAND_SSD_BORDER_TOP);
     assert(edges == WLR_EDGE_TOP);
 
@@ -117,7 +117,7 @@ int main(void)
     /* 标题栏/边框不是按钮：传 NONE 清除高亮 */
     woodland_ssd_set_hover(&view, WOODLAND_SSD_NONE);
 
-    /* 外边距：普通窗口 = 边框 1 + 标题栏 26（顶 27） */
+    /* 外边距：普通窗口 = 边框 1 + 标题栏 32（顶 33） */
     struct woodland_ssd_margins margins = {0};
     woodland_ssd_get_margins(&view, &margins);
     assert(margins.left == WOODLAND_SSD_BORDER_W);

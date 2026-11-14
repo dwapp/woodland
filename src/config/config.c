@@ -81,12 +81,13 @@ void woodland_config_default_init(struct woodland_config *config)
     config->ssd.border_width = WOODLAND_SSD_BORDER_W;
     config->ssd.button_width = WOODLAND_SSD_BUTTON_W;
     config->ssd.resize_grab_width = WOODLAND_SSD_RESIZE_GRAB_W;
-    /* 默认直角；半径只从 [effects] corner_radius 或协议覆盖来 */
+    /* 圆角半径只从 [effects] corner_radius 或协议覆盖来（见下方 effects 段） */
     config->ssd.font = strdup("sans 10");
-    config->ssd.active_title_color = 0xFFE1DEDB;    /* #e1dedb */
-    config->ssd.inactive_title_color = 0xFFF7F6F4;  /* #f7f6f4 */
-    config->ssd.active_border_color = 0xFFAAAAAA;   /* #aaaaaa */
-    config->ssd.inactive_border_color = 0xFFAAAAAA; /* #aaaaaa */
+    /* 中性灰阶，与右键窗口菜单（window_menu.c）统一，避免"米黄标题栏 + 白菜单" */
+    config->ssd.active_title_color = 0xFFF4F4F4;    /* #f4f4f4 */
+    config->ssd.inactive_title_color = 0xFFF9F9F9;  /* #f9f9f9 */
+    config->ssd.active_border_color = 0xFFCCCCCC;   /* #cccccc */
+    config->ssd.inactive_border_color = 0xFFCCCCCC; /* #cccccc */
 
     /* [input.keyboard] */
     config->keyboard.layout = NULL;
@@ -117,7 +118,10 @@ void woodland_config_default_init(struct woodland_config *config)
     config->effects.blur_brightness = 1.0;
     config->effects.blur_contrast = 1.0;
     config->effects.blur_saturation = 1.0;
-    config->effects.corner_radius = 0;
+    /* 默认 4：与右键窗口菜单同为圆角，窗口与菜单观感一致；4px 足够交代
+     * "圆角窗口"，再大就开始吃掉内容区了。想要直角窗口就在 [effects] 里
+     * 显式写 corner_radius = 0。 */
+    config->effects.corner_radius = 4;
     config->effects.shadow = false;
     config->effects.shadow_radius = 20;
     config->effects.shadow_offset_x = 0;

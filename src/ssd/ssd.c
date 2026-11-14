@@ -15,14 +15,15 @@
 #include "view.h"
 #include "woodland.h"
 #include "woodland_config.h"
-/* SSD 颜色（对齐 labwc 默认主题 theme_builtin()，premultiplied RGBA float） */
-static const float COLOR_TITLEBAR_ACTIVE[4] = {0.882f, 0.871f, 0.859f, 1.0f};   /* #e1dedb */
-static const float COLOR_TITLEBAR_INACTIVE[4] = {0.965f, 0.961f, 0.957f, 1.0f}; /* #f6f5f4 */
-static const float COLOR_BORDER[4] = {0.667f, 0.667f, 0.667f, 1.0f};            /* #aaaaaa */
-static const float COLOR_TITLE_TEXT_ACTIVE[4] = {0.188f, 0.188f, 0.188f,
-                                                 1.0f}; /* #303030 Deepin 优雅暗灰 */
-static const float COLOR_TITLE_TEXT_INACTIVE[4] = {0.588f, 0.588f, 0.588f,
-                                                   1.0f}; /* #969696 非激活弱化 */
+/* SSD 颜色（中性灰阶，对齐右键窗口菜单 window_menu.c 的配色；premultiplied RGBA float）
+ * 原先的暖米色 #e1dedb 与菜单的近白浮层放一起明显割裂，这里统一成中性灰。 */
+static const float COLOR_TITLEBAR_ACTIVE[4] = {0.957f, 0.957f, 0.957f, 1.0f};   /* #f4f4f4 */
+static const float COLOR_TITLEBAR_INACTIVE[4] = {0.976f, 0.976f, 0.976f, 1.0f}; /* #f9f9f9 */
+static const float COLOR_BORDER[4] = {0.800f, 0.800f, 0.800f, 1.0f};            /* #cccccc */
+static const float COLOR_TITLE_TEXT_ACTIVE[4] = {0.12f, 0.12f, 0.12f,
+                                                 1.0f}; /* #1f1f1f 与菜单文字一致 */
+static const float COLOR_TITLE_TEXT_INACTIVE[4] = {0.55f, 0.55f, 0.55f,
+                                                   1.0f}; /* #8c8c8c 非激活弱化 */
 
 /*
  * 深色配色方案的内置调色板。
@@ -32,12 +33,12 @@ static const float COLOR_TITLE_TEXT_INACTIVE[4] = {0.588f, 0.588f, 0.588f,
  * 就是"我要这个颜色"，控制中心的一次请求不该把它盖掉。两个色板都取整数灰阶，
  * 和浅色板一样只用一种色相，避免和客户端的主题打架。
  */
-static const float COLOR_TITLEBAR_ACTIVE_DARK[4] = {0.169f, 0.169f, 0.169f, 1.0f};   /* #2b2b2b */
+static const float COLOR_TITLEBAR_ACTIVE_DARK[4] = {0.161f, 0.161f, 0.161f, 1.0f};   /* #292929 对齐菜单深色底 */
 static const float COLOR_TITLEBAR_INACTIVE_DARK[4] = {0.125f, 0.125f, 0.125f, 1.0f}; /* #202020 */
-static const float COLOR_BORDER_DARK[4] = {0.239f, 0.239f, 0.239f, 1.0f};            /* #3d3d3d */
-static const float COLOR_TITLE_TEXT_ACTIVE_DARK[4] = {0.902f, 0.902f, 0.902f, 1.0f}; /* #e6e6e6 */
-static const float COLOR_TITLE_TEXT_INACTIVE_DARK[4] = {0.549f, 0.549f, 0.549f,
-                                                        1.0f}; /* #8c8c8c */
+static const float COLOR_BORDER_DARK[4] = {0.322f, 0.322f, 0.322f, 1.0f};            /* #525252 对齐菜单深色边框 */
+static const float COLOR_TITLE_TEXT_ACTIVE_DARK[4] = {0.92f, 0.92f, 0.92f, 1.0f};    /* #ebebeb 对齐菜单深色文字 */
+static const float COLOR_TITLE_TEXT_INACTIVE_DARK[4] = {0.50f, 0.50f, 0.50f,
+                                                        1.0f}; /* #808080 */
 
 /* 按钮态高亮覆盖层：GXDE/Deepin 风格，关闭按钮悬停警示红，最小化/最大化轻量暗色半透明 */
 static const float COLOR_BUTTON_HOVER[4] = {0.0f, 0.0f, 0.0f, 0.08f};
@@ -140,6 +141,44 @@ static int ssd_button_width(const struct woodland_view *view)
         return view->server->config->ssd.button_width;
     }
     return WOODLAND_SSD_BUTTON_W;
+}
+
+/*
+ * 按钮高度。
+ *
+ * 默认与标题栏等高（撑满）——按钮图标是方形 buffer，dest_size 必须也是方形，
+ * 否则 □ / × 会被纵向压扁。
+ * 但客户端可以通过协议把标题栏调矮（treeland-decoration set_titlebar_height），
+ * 矮到比 BUTTON_H 还小时必须跟着缩，否则按钮会画到标题栏外面：
+ * 布局（ssd_layout）和命中测试（ssd_ssd_at）各算一遍的话，一旦漏改就会出现
+ * "看得见但点不到"。所以高度只在这里算一次，两处都调它。
+ */
+static int ssd_button_height(int th)
+{
+    int bh = WOODLAND_SSD_BUTTON_H;
+    if (th > 0 && bh > th) {
+        bh = th;
+    }
+    return bh;
+}
+
+/*
+ * 左侧应用图标边长，随标题栏高度走：比标题栏矮 12px，限制在 [16, 24]。
+ *
+ * 栅格化（ssd_update_icon）和摆位（ssd_layout）必须用同一个值：buffer 按 A
+ * 画、dest_size 按 B 摆，A < B 时图标会被拉伸发虚。所以只保留这一个入口，
+ * 不要在别处再写一遍阈值。
+ */
+static int ssd_icon_size(int th)
+{
+    int size = th - 12;
+    if (size > 24) {
+        size = 24;
+    }
+    if (size < 16) {
+        size = 16;
+    }
+    return size;
 }
 
 static void color_to_rgba_float(uint32_t argb, float out[4])
@@ -448,7 +487,7 @@ static void ssd_update_buttons(struct woodland_ssd *ssd)
     /* 关闭按钮悬停/按压时切换为鲜明的白色图标 */
     bool close_active = (hovered == BUTTON_CLOSE || pressed == BUTTON_CLOSE);
     int bwn = ssd_button_width(ssd->view);
-    int bh = WOODLAND_SSD_BUTTON_H;
+    int bh = ssd_button_height(ssd_titlebar_height(ssd->view));
     struct wlr_buffer *close_buf =
         woodland_button_icon_buffer(WOODLAND_SSD_ICON_CLOSE, bwn, close_active, ssd->scale);
     if (close_buf) {
@@ -502,7 +541,7 @@ static void ssd_layout(struct woodland_ssd *ssd)
         BUTTON_MAXIMIZE,
         BUTTON_MINIMIZE,
     };
-    int bh = WOODLAND_SSD_BUTTON_H;
+    int bh = ssd_button_height(th);
     int bwn = ssd_button_width(ssd->view);
     int gap = WOODLAND_SSD_BUTTON_GAP;
     int by = -th + (th - bh) / 2;
@@ -516,8 +555,8 @@ static void ssd_layout(struct woodland_ssd *ssd)
         x -= gap + bwn;
     }
 
-    /* 左侧应用图标：垂直居中于标题栏 */
-    int icon_size = th >= 32 ? 22 : 16;
+    /* 左侧应用图标：垂直居中于标题栏（32px 标题栏配 20px 图标） */
+    int icon_size = ssd_icon_size(th);
     int icon_pad = 8;
     if (ssd->title_icon) {
         int icon_y = -th + (th - icon_size) / 2;
@@ -563,7 +602,7 @@ static void ssd_update_icon(struct woodland_ssd *ssd)
     ssd->icon_key = strdup(key);
 
     int th = ssd_titlebar_height(view);
-    int icon_size = th >= 32 ? 22 : 16;
+    int icon_size = ssd_icon_size(th);
     struct wlr_buffer *icon_buf = woodland_ssd_get_icon_buffer(view, icon_size, ssd->scale);
     if (icon_buf) {
         if (ssd->title_icon) {
@@ -743,7 +782,7 @@ void woodland_ssd_update(struct woodland_view *view)
         enum woodland_ssd_button_icon icon =
             max ? WOODLAND_SSD_ICON_RESTORE : WOODLAND_SSD_ICON_MAXIMIZE;
         int bwn = ssd_button_width(view);
-        int bh = WOODLAND_SSD_BUTTON_H;
+        int bh = ssd_button_height(ssd_titlebar_height(view));
         struct wlr_buffer *buf = woodland_button_icon_buffer(icon, bwn, false, ssd->scale);
         if (buf) {
             wlr_scene_buffer_set_buffer(ssd->button[BUTTON_MAXIMIZE], buf);
@@ -872,7 +911,7 @@ static enum woodland_ssd_part ssd_hit_relative(struct woodland_ssd *ssd, double 
     /* 标题栏（含按钮） */
     if (rx >= 0 && rx < w && ry >= -th && ry < 0) {
         /* 按钮区（右侧） */
-        int bh = WOODLAND_SSD_BUTTON_H;
+        int bh = ssd_button_height(th);
         int bwn = ssd_button_width(ssd->view);
         int gap = WOODLAND_SSD_BUTTON_GAP;
         int by = -th + (th - bh) / 2;

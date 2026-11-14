@@ -283,10 +283,15 @@ static void window_menu_render_level(struct woodland_window_menu *menu,
         hover_bg_rgba[3] = 0.92f;
     }
 
-    double corner_r = 8.0;
-    if (menu->server->config && menu->server->config->effects.enabled &&
-        menu->server->config->effects.corner_radius > 0) {
+    /* 圆角半径与窗口保持一致：同样来自 [effects] corner_radius（默认 4）。
+     * 效果关闭时窗口是直角，菜单也跟随为直角——否则会出现"方窗口 + 圆菜单"。
+     * 上限 12 与窗口侧观感对齐（比 1000 的协议上限更克制）。 */
+    double corner_r = 0.0;
+    if (menu->server->config && menu->server->config->effects.enabled) {
         corner_r = (double)menu->server->config->effects.corner_radius;
+        if (corner_r < 0.0) {
+            corner_r = 0.0;
+        }
         if (corner_r > 12.0) {
             corner_r = 12.0;
         }

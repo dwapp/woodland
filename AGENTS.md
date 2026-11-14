@@ -57,7 +57,7 @@ meson test -C build --print-errorlogs  # 跑全部测试
 
 1. **`.c` 里只 `#include "scene.h"`，不要直接 include `wlr/types/wlr_scene.h` 或 `scenefx/...`。** `include/scene.h` 是唯一入口，按 `WOODLAND_HAVE_EFFECTS` 宏切入正确的场景头文件。
 2. **宏判断必须在 `#include "config.h"` 之后。** 避免未定义宏直接参与 `#if` 判断被当作 0 处理。
-3. **场景节点坐标是"相对父节点"的，算位置时只累计子节点的偏移。** `view->scene_tree` 的原点就是内容原点（SSD 的标题栏/边框在负坐标上），把 tree 自己的 `x/y` 也加进去等于把标题栏高度算两遍——blur 节点会整体下沉一个标题栏（27px）。
+3. **场景节点坐标是"相对父节点"的，算位置时只累计子节点的偏移。** `view->scene_tree` 的原点就是内容原点（SSD 的标题栏/边框在负坐标上），把 tree 自己的 `x/y` 也加进去等于把标题栏高度算两遍——blur 节点会整体下沉一个标题栏（32px）。
 4. **启用 effects 时 `server->renderer` 必须是 `fx_renderer_create()`。** scenefx 的 `wlr_scene_output_commit()` 把 render pass 强转成自己的 `fx_render_pass`，塞 wlroots 的 pixman/gles2 renderer 进去会在 `fx_get_render_pass` 里断言死。未启用 effects 构建时则走 `wlr_renderer_autocreate()` 直出 pixman/gles2。
 5. **别在 1px 细条上设圆角。** `corner_radii` 按 rect 自身尺寸裁剪，1px 宽/高的边框条会把半径 clamp 掉，角上不是没线就是留直角尖角。圆角描边在 effects 构建下用覆盖整个外框的 rect + `clipped_region` 挖空内框：外半径 `R+b`、内半径 `R`，见 `src/ssd/ssd.c:ssd_apply_frame_corners()`。
 6. **scenefx 0.5 的 blur 节点渲染不使用 clipped_region。** 局部模糊（ext-background-effect 非全屏区域）要把 blur 节点自身摆在 region 矩形上，且此时不能挂内容 buffer 作为 transparency mask（mask 会被拉伸挤压）；只有盖满全 surface 时才按全窗口尺寸摆节点并挂 mask。

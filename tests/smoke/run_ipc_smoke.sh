@@ -88,10 +88,10 @@ echo "$TREE" | jq -e '.views[0] | (.outer[2] > 0) and (.outer[3] > 0)' >/dev/nul
     || smoke_fail "outer box is empty"
 echo "$TREE" | jq -e '.views[0].ssd.present and .views[0].ssd.active' >/dev/null \
     || smoke_fail "SSD should exist and be active for the focused view"
-echo "$TREE" | jq -e '.views[0].ssd.margins[1] == 27' >/dev/null \
-    || smoke_fail "expected a 27px titlebar margin"
-# 内容框必须落在外框之内（标题栏 27px 不能盖住内容）
-echo "$TREE" | jq -e '.views[0] | (.content[1] == .outer[1] + 27)' >/dev/null \
+echo "$TREE" | jq -e '.views[0].ssd.margins[1] == 33' >/dev/null \
+    || smoke_fail "expected a 33px titlebar margin"
+# 内容框必须落在外框之内（标题栏 33px 不能盖住内容）
+echo "$TREE" | jq -e '.views[0] | (.content[1] == .outer[1] + 33)' >/dev/null \
     || smoke_fail "content should start one titlebar below the outer box"
 echo "$TREE" | jq -e '.outputs[0].workarea[2] == 1280 and .outputs[0].workarea[3] == 720' >/dev/null \
     || smoke_fail "unexpected headless workarea"

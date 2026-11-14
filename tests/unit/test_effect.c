@@ -38,9 +38,9 @@ int main(void)
     struct woodland_view view = {0};
     view.server = &server;
 
-    /* ---- 1) 半径来源：默认 0，配置生效 ---- */
-    assert(config->effects.corner_radius == 0);
-    assert(woodland_effect_corner_radius(&view) == 0);
+    /* ---- 1) 半径来源：默认 4（与菜单一致），配置生效 ---- */
+    assert(config->effects.corner_radius == 4);
+    assert(woodland_effect_corner_radius(&view) == 4);
     config->effects.corner_radius = 12;
     assert(woodland_effect_corner_radius(&view) == 12);
 
