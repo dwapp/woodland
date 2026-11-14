@@ -117,7 +117,7 @@ woodland 是 Wayland 合成器：主循环会**正常阻塞在 `ep_poll`** 等�
 
 1. **功能验证靠测试**：`meson test -C build --print-errorlogs`（冒烟测试脚本自己会后台启动 + 发 SIGTERM + 收退出码，不需要你手动跑二进制）。
 2. **查运行时状态用 `wctl`**：`wctl get_tree` / `get_focus` / `self_check`（见上一节），比截图和推理都可靠。
-3. **要看运行日志**：`WLR_BACKENDS=headless ./build/src/woodland 2>&1` 直接看 wlr_log 输出（前台阻塞是正常的，看完 `Ctrl-C` 或另发 SIGTERM 即可）。没有 DRM 节点时它会自动落到 llvmpipe，日志里第一条 `no DRM render node, retrying with llvmpipe` 属于正常。
+3. **要看运行日志**：`WLR_BACKENDS=headless ./build/src/woodland 2>&1` 直接看 wlr_log 输出（前台阻塞是正常的，看完 `Ctrl-C` 或另发 SIGTERM 即可）。没有 DRM 节点时它会自动落到 llvmpipe，日志里第一条 `fx renderer creation failed, retrying with llvmpipe` 属于正常（注意即使这样也未必起得来，见上面"CI 只跑 -Deffects=disabled"那条）。
 4. **要排查崩溃**：用 ASan（`build-asan`）+ 崩溃时 ASan 会自动打印栈，或者给 wlr_log 加日志/读代码推理。**不要 attach gdb 到阻塞的事件循环上等它"出问题"**。
 5. **确需 gdb 时**：只对**已崩溃的 core dump** 做 `gdb ./woodland core`（事后分析，不是 `run`），或对纯函数（不跑事件循环）的单元测试用 gdb。
 
@@ -125,6 +125,16 @@ woodland 是 Wayland 合成器：主循环会**正常阻塞在 `ep_poll`** 等�
 `AddressSanitizer:DEADLYSIGNAL` 然后卡住不返回（`--help` 都跑不完），看起来像崩溃循环，
 实际是 ASan 与该内核的高熵 ASLR 不兼容，和代码无关。用 `setarch $(uname -m) -R ./xxx` 关掉
 ASLR 就正常了。**别把这种 DEADLYSIGNAL 当成自己的 bug 去修**，先关 ASLR 复现一次再说。
+
+**跑 `build-asan` 的 `meson test` 要关泄漏检测，否则一半变红。** mesa 退出时不释放
+DRI/EGL 的进程级缓存（栈上是 `driCreateNewScreen3` / `driCreateContextAttribs` /
+`drmGetDeviceNameFromFd2` / `FcFontRenderPrepare`），而 meson 给每个测试注入
+`ASAN_OPTIONS=halt_on_error=1:abort_on_error=1`，LSan 就在退出时 `abort()`（信号 6、
+rc=134）。这不是我们的泄漏：`ASAN_OPTIONS=detect_leaks=0` 之后那批"失败"的单测全过、
+0 条 AddressSanitizer/UBSan 报告。结论有两条——要看真正的内存错误用
+`ASAN_OPTIONS=detect_leaks=0 meson test -C build-asan`；以及**别把 rc=134 当崩溃**，
+`tests/smoke/run_headless.sh` 里"起不来也必须干净退出"那条断言就因此在消毒器构建下
+整段跳过（退出码被 LSan 污染，分不清是谁的锅）。
 
 ## ⚠️ wlroots 语义陷阱（接协议时最容易踩）
 

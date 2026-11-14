@@ -45,14 +45,22 @@ wait "$pid"
 #
 # 无 effects 构建里同一条命令是能起来的（pixman/gles2 有 shm 路径），那样会被
 # timeout 收成 124 —— 两种结果都合法，都落在"不是信号"里。
+#
+# 消毒器构建下这条判不了：LSan 会因为 mesa 在退出时不释放的 DRI 缓存 abort()
+# （rc=134），和"我们崩了"在退出码上无法区分。跳过，别给假警报——ASan 构建下
+# 真正的内存错误由 ASan 自己打栈（halt_on_error=1）。
 # ---------------------------------------------------------------------------
-FAIL_LOG="$(mktemp)"
-fail_rc=0
-WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1 WLR_RENDERER_FORCE_SOFTWARE=1 \
-    timeout 3 "$BIN" >"$FAIL_LOG" 2>&1 || fail_rc=$?
-if [ "$fail_rc" -ge 128 ]; then
-    echo "--- startup-failure log:" >&2
-    tail -5 "$FAIL_LOG" >&2 || :
-    smoke_fail "woodland died by signal on a failed startup (rc=$fail_rc)"
+if [ -n "${ASAN_OPTIONS:-}" ]; then
+    echo "  (sanitizer build: exit code is polluted by LSan, skipping)"
+else
+    FAIL_LOG="$(mktemp)"
+    fail_rc=0
+    WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1 WLR_RENDERER_FORCE_SOFTWARE=1 \
+        timeout 3 "$BIN" >"$FAIL_LOG" 2>&1 || fail_rc=$?
+    if [ "$fail_rc" -ge 128 ]; then
+        echo "--- startup-failure log:" >&2
+        tail -5 "$FAIL_LOG" >&2 || :
+        smoke_fail "woodland died by signal on a failed startup (rc=$fail_rc)"
+    fi
+    rm -f "$FAIL_LOG"
 fi
-rm -f "$FAIL_LOG"
