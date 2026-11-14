@@ -82,6 +82,32 @@ struct woodland_ssd_margins {
     int bottom;
 };
 
+/*
+ * 一个窗口最终会画出来的 SSD 颜色（0xRRGGBB，非预乘）。
+ *
+ * 存在的理由：调色板有三层来源（客户端覆盖 / 配色方案 / 配置文件 / 内置默认），
+ * 最终值只有 ssd.c 自己说得准。像素断言（tests/smoke/run_xwayland_smoke.sh）
+ * 需要"应该是什么颜色"这个基准，以前是在脚本里抄一份十六进制常量，改色板就
+ * 静默不同步——CI 红在"No SSD titlebar pixels"上，看着像 SSD 没画，其实只是
+ * 换了色。现在由合成器自报，脚本断言"屏幕上的像素 == 自报的颜色"。
+ */
+struct woodland_ssd_palette {
+    uint32_t titlebar_active;
+    uint32_t titlebar_inactive;
+    uint32_t border_active;
+    uint32_t border_inactive;
+    bool dark; /* 内置深色板是否生效 */
+};
+
+/**
+ * 取该窗口当前生效的 SSD 调色板。
+ *
+ * 不依赖 SSD 是否已创建：颜色只由 view->server->config / view->ssd_overrides 决定，
+ * map 之前问也是一样的答案。
+ */
+void woodland_ssd_get_palette(const struct woodland_view *view,
+                              struct woodland_ssd_palette *palette);
+
 /** 创建 SSD 并挂到 view->scene_tree（lower_to_bottom）。 */
 void woodland_ssd_create(struct woodland_view *view);
 

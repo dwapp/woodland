@@ -248,13 +248,26 @@ static void rgba_to_rgba_float(uint32_t rgba, float out[4])
     out[3] = a;
 }
 
+/*
+ * 内置深色板生效的条件：配色方案是深色，且用户没有显式配 SSD 颜色。
+ *
+ * 标题文字不走这个判断（它没有单独的配置键，只看配色方案），所以别把文字
+ * 颜色的分支并进来。抽成函数是因为标题栏和边框两处原来各写一遍，而
+ * woodland_ssd_get_palette() 还要用第三次。
+ */
+static bool ssd_uses_dark_palette(const struct woodland_view *view)
+{
+    const struct woodland_config *cfg = (view && view->server) ? view->server->config : NULL;
+    return cfg && cfg->appearance.color_scheme_set && cfg->appearance.dark &&
+           !cfg->ssd.colors_specified;
+}
+
 static void ssd_get_titlebar_color(const struct woodland_view *view, bool active, float out[4])
 {
     const struct woodland_config *cfg = (view && view->server) ? view->server->config : NULL;
 
     /* 深色方案优先于内置浅色板，但排在用户显式颜色之后 */
-    if (cfg && cfg->appearance.color_scheme_set && cfg->appearance.dark &&
-        !cfg->ssd.colors_specified) {
+    if (ssd_uses_dark_palette(view)) {
         const float *dark = active ? COLOR_TITLEBAR_ACTIVE_DARK : COLOR_TITLEBAR_INACTIVE_DARK;
         memcpy(out, dark, sizeof(float) * 4);
         return;
@@ -297,8 +310,7 @@ static void ssd_get_border_color(const struct woodland_view *view, bool active, 
         accent_to_rgba_float(cfg->appearance.accent_rgb, out);
         return;
     }
-    if (cfg && cfg->appearance.color_scheme_set && cfg->appearance.dark &&
-        !cfg->ssd.colors_specified) {
+    if (ssd_uses_dark_palette(view)) {
         memcpy(out, COLOR_BORDER_DARK, sizeof(float) * 4);
         return;
     }
@@ -308,6 +320,53 @@ static void ssd_get_border_color(const struct woodland_view *view, bool active, 
         return;
     }
     memcpy(out, COLOR_BORDER, sizeof(float) * 4);
+}
+
+static unsigned channel_byte(float v)
+{
+    if (!(v > 0.0f)) { /* 顺手挡掉 NaN：!(v > 0) 对 NaN 为真 */
+        return 0;
+    }
+    if (v > 255.0f) {
+        return 255;
+    }
+    return (unsigned)(v + 0.5f);
+}
+
+/*
+ * premultiplied RGBA float → 0xRRGGBB。
+ *
+ * 除回 alpha 是为了报出"作者写的颜色"而不是预乘后的暗色：边框覆盖值带
+ * alpha 时预乘过的分量直接取 8 位会偏暗。SSD 自己的色板都是不透明的，
+ * 这条分支只对客端覆盖有意义。
+ */
+static uint32_t rgba_float_to_rgb(const float c[4])
+{
+    if (c[3] <= 0.0f) {
+        return 0;
+    }
+    float inv = 255.0f / c[3];
+    return (channel_byte(c[0] * inv) << 16) | (channel_byte(c[1] * inv) << 8) |
+           channel_byte(c[2] * inv);
+}
+
+void woodland_ssd_get_palette(const struct woodland_view *view,
+                              struct woodland_ssd_palette *palette)
+{
+    if (!palette) {
+        return;
+    }
+    float c[4];
+
+    ssd_get_titlebar_color(view, true, c);
+    palette->titlebar_active = rgba_float_to_rgb(c);
+    ssd_get_titlebar_color(view, false, c);
+    palette->titlebar_inactive = rgba_float_to_rgb(c);
+    ssd_get_border_color(view, true, c);
+    palette->border_active = rgba_float_to_rgb(c);
+    ssd_get_border_color(view, false, c);
+    palette->border_inactive = rgba_float_to_rgb(c);
+    palette->dark = ssd_uses_dark_palette(view);
 }
 
 /* 标题文字颜色：跟随配色方案（配置里没有单独的标题文字色键） */

@@ -140,7 +140,9 @@ static const struct ipc_field_doc get_tree_fields[] = {
      "activated, focusable, scene_visible, tearing, parent, "
      "foreign_toplevel{tracked,identifier,handles,icon_geometry}, "
      "outer[x,y,w,h], content[x,y,w,h], "
-     "ssd{present,active,margins}, "
+     "ssd{present,active,margins,"
+     "palette{dark,titlebar_active,titlebar_inactive,"
+     "border_active,border_inactive}}, "
      "deco{managed,titlebar,border_width,border_rgba,"
      "corner_radius,shadow_radius,shadow_offset,"
      "shadow_rgba,rendered[]}, "
@@ -255,6 +257,14 @@ static void obj_box(struct woodland_json_obj *obj, const char *key, const struct
     int values[4] = {box->x, box->y, box->width, box->height};
     woodland_json_obj_key(obj, key);
     woodland_json_int_array(obj->json, values, 4);
+}
+
+/* 颜色写成 #rrggbb：jq 里能直接喂给 ImageMagick / CSS，比十进制好读 */
+static void obj_hex(struct woodland_json_obj *obj, const char *key, uint32_t rgb)
+{
+    char buf[8];
+    snprintf(buf, sizeof(buf), "#%06x", rgb & 0xFFFFFFu);
+    woodland_json_obj_str(obj, key, buf);
 }
 
 /* 视图引用：写成 id，没有则 null（比指针好读，也能跨进程用） */
@@ -459,6 +469,22 @@ static void append_view_details(struct woodland_server *server, struct woodland_
     int margin_values[4] = {margins.left, margins.top, margins.right, margins.bottom};
     woodland_json_obj_key(&ssd, "margins");
     woodland_json_int_array(out, margin_values, 4);
+
+    /*
+     * 最终生效的 SSD 颜色。像素断言拿它当基准，不在脚本里抄十六进制——
+     * 抄一份就得靠人肉同步，改色板时 CI 会红在"找不到标题栏像素"上。
+     */
+    struct woodland_ssd_palette palette = {0};
+    woodland_ssd_get_palette(view, &palette);
+    woodland_json_obj_key(&ssd, "palette");
+    struct woodland_json_obj pal;
+    woodland_json_obj_open(&pal, out);
+    woodland_json_obj_bool(&pal, "dark", palette.dark);
+    obj_hex(&pal, "titlebar_active", palette.titlebar_active);
+    obj_hex(&pal, "titlebar_inactive", palette.titlebar_inactive);
+    obj_hex(&pal, "border_active", palette.border_active);
+    obj_hex(&pal, "border_inactive", palette.border_inactive);
+    woodland_json_obj_close(&pal);
     woodland_json_obj_close(&ssd);
 
     /*

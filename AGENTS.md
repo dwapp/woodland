@@ -47,6 +47,8 @@ meson test -C build --print-errorlogs  # 跑全部测试
   `tests/smoke/run_shortcutd_smoke.sh`：它自己覆盖这个变量，并靠
   `wctl get_trace` 里 `spawn` 标签的 detail 断言"起了 / 为什么没起"。
 - **冒烟脚本一律先 `. tests/smoke/lib.sh` 再 `smoke_init <名字>`。** 失败时它把现场落到 `build/meson-logs/smoke/<名字>/`：`compositor.log`、`meta.txt`（参数 / socket / 退出码），有 `WCTL` 和 `SOCK` 时还会抓 `get_tree` / `get_focus` / `self_check` / `get_trace` / `dump_scene` 的 JSON 和一张 `screenshot.png`。脚本自己的收尾写成 `smoke_cleanup()`（dump 之后才调用），断言失败用 `smoke_fail "..."`。**不要再用 `cat 日志; exit 1`**——那正是"只有一行结论、没有现场"的老写法。
+- **`smoke-xwayland` 是全仓库唯一做像素颜色断言的用例，而且依赖不齐时会直接 SKIP。** 它要 `Xwayland` + `grim` + `lswt` + `convert` + `jq` + `xterm` 或 `xlogo`；没装 xterm/xlogo 的机器上整条 exit 77，标题栏底色那两个断言一次都不跑。后果很隐蔽：`OK` 和 `SKIP` 在"没红"这件事上一样，看着全绿、push 上去才红。跑完 `meson test` 请**看 SKIP 名单**而不是只看成功数。
+- **像素断言的期望色从 `wctl get_tree` 的 `ssd.palette` 取，不要在脚本里抄十六进制。** `ssd.palette` 报的是该窗口**最终生效**的标题栏/边框颜色（`titlebar_active` / `titlebar_inactive` / `border_active` / `border_inactive` + `dark`），由 `woodland_ssd_get_palette()` 统一算出——调色板有三层来源（客户端覆盖 / 配色方案 / 配置文件 / 内置默认），只有 `ssd.c` 说得准。抄一份常量就得人肉同步，改色板会导致 CI 红在 `no SSD titlebar pixels` 上（看着像 SSD 没画，其实只是换了色，2026-11 踩过）。内置默认值本身由 `tests/unit/test_ssd.c` 钉住——色板是有意的设计决定，改它要连单测一起改。
 - **自写的 Wayland 探针要 roundtrip 两次，收事件要走 prepare_read。** 第一次 roundtrip 只拿到 global 列表：registry 回调里发的 `bind` 被排进出站缓冲，但同一批事件里那个 sync 回调已经把 roundtrip 的 `done` 置上了，dispatch 循环立刻退出，缓冲里剩下的 `bind` 没人 flush——合成器根本没看见 bind，也就一条事件都不会推。第二次 roundtrip 开头那次 flush 才把 bind 发出去。同理，收广播不能只调 `wl_display_dispatch_pending()`（它只分发已进内存队列的事件，socket 不读）：要 `wl_display_prepare_read()` → `poll()` → `wl_display_read_events()` → `wl_display_dispatch_pending()` 这套。`tests/smoke/appearance_probe.c` 是现成样例。
 - **CI 跑在 `archlinux:base-devel`，不要换回 `debian:stable`。** wlroots 0.20 要 wayland >= 1.24、libdrm >= 2.4.129、xkbcommon >= 1.8、pixman >= 0.43，bookworm 一个都不满足，meson 会退到 wrap 里逐个编 fallback，链条断在第一个 wayland 子项目（`Dependency "expat" not found`）。缺 expat 只是表象，补它只会把失败推到下一个依赖。
 - **顶层 `meson.build` 里给 `wlroots` 包的那层 `declare_dependency` 别删。** wlroots 作为子项目构建时，`wayland-scanner` 生成的协议头落在 `build/subprojects/wlroots/protocol/`，而它自己只导出 `include/`，于是 `wlr/types/wlr_layer_shell_v1.h` 里 `#include "wlr-layer-shell-unstable-v1-protocol.h"` 直接编译失败。系统装过 wlroots 的机器上 `/usr/include` 有这个头，问题会被掩盖——**本地能编不代表能编**。
@@ -72,6 +74,7 @@ meson test -C build --print-errorlogs  # 跑全部测试
 ```bash
 wctl get_tree   | jq '.views[] | {id,title,focused,activated,outer,snapped}'
 wctl get_tree   | jq '.views[] | {id, margins: .ssd.margins, deco}'
+wctl get_tree   | jq '.views[] | {id, palette: .ssd.palette}'  # 实际会画出来的标题栏/边框色
 wctl get_focus  | jq .        # 焦点在谁身上（recorded_view vs keyboard_view）
 wctl get_tree   | jq '.snap_preview'   # 贴边预览：active / edges / box / output
 wctl get_tree   | jq '.dnd'            # 拖拽：active / dropped / icon{w,h,visible} / target

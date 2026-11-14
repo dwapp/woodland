@@ -360,7 +360,9 @@ if get_option('test').enabled()
          find_program('sh'),
          args: [meson.current_source_dir() / 'smoke' / 'run_xwayland_smoke.sh',
                 woodland_bin.full_path(),
-                xoverride_bin.full_path()],
+                xoverride_bin.full_path(),
+                # 标题栏底色的期望值由合成器自报（ssd.palette），脚本不再抄常量
+                wctl_bin.full_path()],
          is_parallel: false,
          timeout: 90)
   endif
