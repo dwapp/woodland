@@ -24,7 +24,7 @@
  *   --caps                       打印 CAPS <flags>（bit0 = blur）
  *   --alpha <0-255>              buffer 用 ARGB8888，按该 alpha 预乘
  *   --pattern                    buffer 画彩条（不画纯灰：纯色模糊前后一样，看不出效果）
- *   --pad <n>                    边缘 n 像素全透明（客户端"声明得比画得大"的样子）
+ *   --pad <n>                    边缘 n 像素全透明（客户端"声明得比画得大"的样子）\n *   --size <w> <h>               窗口尺寸（默认 400x300；窄窗口用来走 SSD 隐藏按钮那条路）
  *   --layer                      不建顶层窗口，改建一个 layer surface（面板/Dock 的形态）
  *
  * 退出码：0 = 正常；1 = 环境/协商失败；3 = 收到了协议错误（dup 用例）。
@@ -58,6 +58,10 @@ static struct zxdg_decoration_manager_v1 *xdg_deco_manager;
 static struct treeland_decoration_manager_v1 *deco_manager;
 static struct ext_background_effect_manager_v1 *bg_effect_manager;
 static uint32_t bg_caps;
+/* 窗口尺寸：默认 WIDTH x HEIGHT，--size 可改。窄窗口要靠它构造——
+ * SSD 的按钮在放不下时会整组收起，那条路径只有真客户端才走得到。 */
+static int surf_w = WIDTH;
+static int surf_h = HEIGHT;
 static int want_caps;
 
 static struct wl_surface *surface;
@@ -265,8 +269,8 @@ static int pump(int ms)
 
 static struct wl_buffer *create_buffer(void)
 {
-    int stride = WIDTH * 4;
-    int size = stride * HEIGHT;
+    int stride = surf_w * 4;
+    int size = stride * surf_h;
     int fd = memfd_create("deco-probe", MFD_CLOEXEC);
     if (fd < 0) {
         return NULL;
@@ -283,13 +287,13 @@ static struct wl_buffer *create_buffer(void)
     /* 纯灰：内容本身不重要，重要的是有一块真 buffer 让窗口 map 上来；
      * pattern 画彩条（模糊前后差别明显），alpha 用来做半透明窗口 */
     uint32_t *pixels = data;
-    for (int y = 0; y < HEIGHT; y++) {
-        for (int x = 0; x < WIDTH; x++) {
+    for (int y = 0; y < surf_h; y++) {
+        for (int x = 0; x < surf_w; x++) {
             if (buffer_pad > 0 &&
-                (x < buffer_pad || y < buffer_pad || x >= WIDTH - buffer_pad ||
-                 y >= HEIGHT - buffer_pad)) {
+                (x < buffer_pad || y < buffer_pad || x >= surf_w - buffer_pad ||
+                 y >= surf_h - buffer_pad)) {
                 /* 整像素 0（预乘 ARGB 的全透明）：客户端声明了区域但没画这块 */
-                pixels[y * WIDTH + x] = 0;
+                pixels[y * surf_w + x] = 0;
                 continue;
             }
             uint32_t r = 0x80, g = 0x80, b = 0x80;
@@ -312,14 +316,14 @@ static struct wl_buffer *create_buffer(void)
             r = r * a / 255;
             g = g * a / 255;
             b = b * a / 255;
-            pixels[y * WIDTH + x] = (a << 24) | (r << 16) | (g << 8) | b;
+            pixels[y * surf_w + x] = (a << 24) | (r << 16) | (g << 8) | b;
         }
     }
     munmap(data, (size_t)size);
 
     struct wl_shm_pool *pool = wl_shm_create_pool(shm, fd, size);
     struct wl_buffer *buffer = wl_shm_pool_create_buffer(
-        pool, 0, WIDTH, HEIGHT, stride,
+        pool, 0, surf_w, surf_h, stride,
         buffer_alpha < 255 ? WL_SHM_FORMAT_ARGB8888 : WL_SHM_FORMAT_XRGB8888);
     wl_shm_pool_destroy(pool);
     close(fd);
@@ -381,6 +385,16 @@ int main(int argc, char *argv[])
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--layer") == 0) {
             use_layer = 1;
+        } else if (strcmp(argv[i], "--size") == 0 && i + 2 < argc) {
+            surf_w = atoi(argv[i + 1]);
+            surf_h = atoi(argv[i + 2]);
+            /* 小于按钮宽度的窗口没有意义，也容易把布局算到下界之外 */
+            if (surf_w < 16) {
+                surf_w = 16;
+            }
+            if (surf_h < 16) {
+                surf_h = 16;
+            }
         }
     }
 
@@ -396,7 +410,7 @@ int main(int argc, char *argv[])
         zwlr_layer_surface_v1_set_anchor(layer_surface_handle,
                                          ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP |
                                              ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT);
-        zwlr_layer_surface_v1_set_size(layer_surface_handle, WIDTH, HEIGHT);
+        zwlr_layer_surface_v1_set_size(layer_surface_handle, surf_w, surf_h);
         /* 不要 exclusive zone、不要键盘：纯背景块 */
         zwlr_layer_surface_v1_set_exclusive_zone(layer_surface_handle, 0);
         zwlr_layer_surface_v1_set_keyboard_interactivity(
@@ -450,8 +464,8 @@ int main(int argc, char *argv[])
             if (buffer_pad < 0) {
                 buffer_pad = 0;
             }
-            if (buffer_pad > WIDTH / 4) {
-                buffer_pad = WIDTH / 4;
+            if (buffer_pad > surf_w / 4) {
+                buffer_pad = surf_w / 4;
             }
         }
     }
@@ -491,6 +505,8 @@ int main(int argc, char *argv[])
             i++;
         } else if (strcmp(argv[i], "--pad") == 0 && i + 1 < argc) {
             i++;
+        } else if (strcmp(argv[i], "--size") == 0 && i + 2 < argc) {
+            i += 2; /* 已在上面预扫描时生效 */
         } else if (strcmp(argv[i], "blur") == 0 && i + 4 < argc) {
             /*
              * 背景模糊：不依赖装饰上下文（协议是独立的 surface 扩展），所以
@@ -597,7 +613,7 @@ int main(int argc, char *argv[])
         return 1;
     }
     wl_surface_attach(surface, buffer, 0, 0);
-    wl_surface_damage_buffer(surface, 0, 0, WIDTH, HEIGHT);
+    wl_surface_damage_buffer(surface, 0, 0, surf_w, surf_h);
     wl_surface_commit(surface);
 
     /* 让合成器处理完 map，再让脚本开始查状态 */
