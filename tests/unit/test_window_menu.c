@@ -6,6 +6,7 @@
 #include "view.h"
 #include "window_menu.h"
 #include "woodland.h"
+#include "woodland_config.h"
 #include "workspace.h"
 
 #include <assert.h>
@@ -20,7 +21,35 @@
 #include <wlr/render/allocator.h>
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/types/wlr_xdg_shell.h>
+#include <wlr/types/wlr_buffer.h>
 #include <xkbcommon/xkbcommon.h>
+
+/*
+ * 取菜单浮层 (5,5) 处的 alpha。
+ *
+ * 选这个点是有讲究的：它要能区分"半径 20"和"半径 8"，而不只是"圆 vs 方"。
+ * 左上圆弧的圆心在 (0.5+r, 0.5+r)，(5.5,5.5) 到圆心的距离要小于 r 才在形内：
+ * r=8 时 4.2 < 8（不透明），r=20 时 21.2 > 20（完全透明）。所以这一点的 alpha
+ * 就是半径大小的直接读数，不依赖内部字段，也不受 1px 描边影响。
+ */
+static unsigned menu_corner_alpha(const struct woodland_window_menu *menu)
+{
+    if (!menu || !menu->root.scene_buffer || !menu->root.scene_buffer->buffer) {
+        return 0;
+    }
+    struct wlr_buffer *buf = menu->root.scene_buffer->buffer;
+    void *data = NULL;
+    uint32_t format = 0;
+    size_t stride = 0;
+    if (!wlr_buffer_begin_data_ptr_access(buf, 0, &data, &format, &stride)) {
+        return 0;
+    }
+    uint32_t px = 0;
+    memcpy(&px, (const char *)data + 5 * stride + 5 * 4, sizeof(px));
+    wlr_buffer_end_data_ptr_access(buf);
+    return px >> 24; /* ARGB8888 小端：alpha 在高字节 */
+}
+
 
 int main(void)
 {
@@ -219,6 +248,50 @@ int main(void)
     assert(woodland_window_menu_is_active(&server));
     woodland_window_menu_hide_for_view(&view);
     assert(!woodland_window_menu_is_active(&server));
+
+    /*
+     * 11. 菜单圆角跟目标窗口"实际画出来的角"走
+     *
+     * 曾经这里只读 config->effects.corner_radius 再夹到 12，与窗口侧有两条分叉：
+     * 客户端用 treeland-decoration 覆盖半径时（窗口侧优先取它），以及半径超过
+     * 12 时。两者都会变成"窗口和菜单各圆各的"。
+     */
+    struct woodland_config fx_cfg = {0};
+    fx_cfg.ssd.enabled = true;
+    fx_cfg.ssd.titlebar_height = WOODLAND_SSD_TITLEBAR_H;
+    fx_cfg.ssd.button_width = WOODLAND_SSD_BUTTON_W;
+    fx_cfg.effects.enabled = true;
+    fx_cfg.effects.corner_radius = 8;
+    server.config = &fx_cfg;
+
+    /* 全局 8，客户端把窗口覆盖成 20：菜单也得是 20，不受旧的 12 上限约束。
+     * (5,5) 在 r=20 的弧外、在 r=8 的弧内，所以这条断言同时否掉了
+     * "只读全局配置"和"夹到 12"两种旧行为。 */
+    view.ssd_overrides.corner_radius_set = true;
+    view.ssd_overrides.corner_radius = 20;
+    woodland_window_menu_show(&view, 200, 100);
+    assert(menu_corner_alpha(server.window_menu) == 0);
+    woodland_window_menu_hide(&server);
+
+    /* 覆盖成 0：窗口是直角，菜单不能还是圆的 */
+    view.ssd_overrides.corner_radius = 0;
+    woodland_window_menu_show(&view, 200, 100);
+    assert(menu_corner_alpha(server.window_menu) > 0);
+    woodland_window_menu_hide(&server);
+
+    /* 去掉覆盖：回到全局 8，(5,5) 又落在弧内 */
+    view.ssd_overrides.corner_radius_set = false;
+    woodland_window_menu_show(&view, 200, 100);
+    assert(menu_corner_alpha(server.window_menu) > 0);
+    woodland_window_menu_hide(&server);
+
+    /* 效果整体关掉：窗口和菜单一起变直角 */
+    fx_cfg.effects.enabled = false;
+    woodland_window_menu_show(&view, 200, 100);
+    assert(menu_corner_alpha(server.window_menu) > 0);
+    woodland_window_menu_hide(&server);
+
+    server.config = NULL;
 
     woodland_window_menu_finish(&server);
     assert(server.window_menu == NULL);

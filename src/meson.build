@@ -7,13 +7,15 @@ subdir('cursor')
 # shell 的光标层拿 active 做守卫），而它只依赖 scene 与 trace。
 subdir('dnd')
 subdir('capture')
+# ssd / effect 排在 shell 之前：窗口菜单的圆角直接问
+# woodland_effect_frame_corners()，不再自己读一遍配置（两套算法必然分叉）。
+# effect 只依赖 ssd（读标题栏可见性/矩形），两者都不依赖 shell，挪上来不成环。
+subdir('ssd')
+subdir('effect')
 subdir('shell')
 subdir('seat')
 subdir('workspace')
 subdir('layer')
-subdir('ssd')
-# effect 只依赖 ssd（读标题栏可见性/矩形），放在它后面
-subdir('effect')
 # -Dxwayland=disabled 会同时关掉 wlroots 子项目的 xwayland 支持，
 # 此时 shell 里的 X11 分支也一并编译掉，不能引用 xwayland 符号
 xwayland_libs = []
