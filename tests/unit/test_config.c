@@ -29,13 +29,13 @@ static void test_default_config(void)
     assert(cfg->general.snap_preview_border_width == 2);
 
     assert(cfg->ssd.enabled);
-    assert(cfg->ssd.titlebar_height == 26);
+    assert(cfg->ssd.titlebar_height == 32);
     assert(cfg->ssd.border_width == 1);
-    assert(cfg->ssd.button_width == 26);
+    assert(cfg->ssd.button_width == 32);
     assert(cfg->ssd.resize_grab_width == 8);
     assert(strcmp(cfg->ssd.font, "sans 10") == 0);
-    assert(cfg->ssd.active_title_color == 0xFFE1DEDB);
-    assert(cfg->ssd.inactive_title_color == 0xFFF7F6F4);
+    assert(cfg->ssd.active_title_color == 0xFFF4F4F4);
+    assert(cfg->ssd.inactive_title_color == 0xFFF9F9F9);
 
     assert(cfg->keyboard.layout == NULL);
     assert(cfg->keyboard.repeat_rate == 25);
@@ -55,7 +55,7 @@ static void test_default_config(void)
     assert(!cfg->effects.blur_optimized);
     assert(cfg->effects.blur_passes == 3);
     assert(cfg->effects.blur_radius == 5);
-    assert(cfg->effects.corner_radius == 0);
+    assert(cfg->effects.corner_radius == 4);
     assert(!cfg->effects.shadow);
     assert(cfg->effects.shadow_radius == 20);
     assert(cfg->effects.shadow_offset_y == 4);
@@ -239,7 +239,7 @@ static void test_malformed_fallback(void)
     assert(cfg != NULL);
     assert(cfg->general.placement_policy == WOODLAND_PLACE_CASCADE);
     assert(cfg->general.workspace_count == 10);
-    assert(cfg->ssd.titlebar_height == 26);
+    assert(cfg->ssd.titlebar_height == 32);
     woodland_config_destroy(cfg);
 }
 
@@ -269,8 +269,8 @@ static void test_boundary_clamping(void)
     assert(!cfg->general.snap_preview_color_specified);
     assert(cfg->general.snap_preview_opacity == 0.25);
     assert(cfg->general.snap_preview_border_width == 2);
-    /* 非法高度/边框被忽略，保留默认 26/1 */
-    assert(cfg->ssd.titlebar_height == 26);
+    /* 非法高度/边框被忽略，保留默认 32/1 */
+    assert(cfg->ssd.titlebar_height == 32);
     assert(cfg->ssd.border_width == 1);
     /* 加速敏感度限制在 [-1.0, 1.0] */
     assert(cfg->touchpad.accel_speed == 1.0);
@@ -331,7 +331,7 @@ static void test_json_dump(void)
     assert(strstr(data, "\"placement_policy\":\"cascade\"") != NULL);
     assert(strstr(data, "\"workspace_count\":10") != NULL);
     assert(strstr(data, "\"decorations\":") != NULL);
-    assert(strstr(data, "\"titlebar_height\":26") != NULL);
+    assert(strstr(data, "\"titlebar_height\":32") != NULL);
     /* 预览样式也要能被 wctl get_config 看到（颜色 0xAARRGGBB、不透明度毫值） */
     assert(strstr(data, "\"snap_preview_color\":3204481279") != NULL);
     assert(strstr(data, "\"snap_preview_opacity_milli\":250") != NULL);

@@ -9,11 +9,16 @@ struct woodland_view;
 struct woodland_server;
 struct wlr_scene_tree;
 
-/* SSD 几何常量（对齐 labwc 默认主题，见 theme_builtin()） */
-#define WOODLAND_SSD_TITLEBAR_H 26
+/* SSD 几何常量（对齐 kylin-wayland-compositor 默认主题的密度：32 标题栏 + 32 按钮，
+ * 与右键窗口菜单的视觉比例保持一致）。
+ *
+ * 按钮高度故意等于标题栏高度：按钮图标是**方形 buffer**（见 text_buffer.c 的
+ * woodland_button_icon_buffer），dest_size 一旦不是方形就会把 □ / × 压扁。
+ * 想给按钮留上下留白，得先让图标支持非方形，别只改这个宏。 */
+#define WOODLAND_SSD_TITLEBAR_H 32
 #define WOODLAND_SSD_BORDER_W 1
-#define WOODLAND_SSD_BUTTON_W 26
-#define WOODLAND_SSD_BUTTON_H 26
+#define WOODLAND_SSD_BUTTON_W 32
+#define WOODLAND_SSD_BUTTON_H 32
 #define WOODLAND_SSD_BUTTON_GAP 0
 #define WOODLAND_SSD_RESIZE_GRAB_W 8
 #define WOODLAND_SSD_CORNER_W 16

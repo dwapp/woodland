@@ -84,7 +84,7 @@ blur 节点是 `view->scene_tree` 的子节点，`wlr_scene_node_set_position()`
 - 这个偏移必须**从 tree 的子节点开始算**，不能把 `view->scene_tree->node.x/y`
   自己加进去——那是 tree 相对场景根的位置，加上去等于把标题栏高度算两遍，
   模糊会整体下沉一个标题栏。这个 bug 真的发生过，靠 `dump_scene` 里
-  `blur pos` 与 `buffer pos` 对不上才逮到（差 27px = 标题栏高度）。
+  `blur pos` 与 `buffer pos` 对不上才逮到（差 32px = 标题栏高度）。
 
 ### 4.2 裁剪区域用 surface 局部坐标
 

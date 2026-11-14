@@ -78,23 +78,26 @@ int main(void)
     /*
      * 放置：外框（内容 + SSD 边距）整体落进工作区。
      * 内容原点必须让出左上边距，否则标题栏会顶到屏幕外。
+     *
+     * 边距直接由 SSD 宏构造、期望值全部写成 10 + margins.* 的形式：
+     * 标题栏高度再改一次也不用回来手抄数字（下面拖动用例的光标坐标同理）。
      */
     struct woodland_ssd_margins margins = {
-        .left = 1,
-        .top = 27,
-        .right = 1,
-        .bottom = 1,
+        .left = WOODLAND_SSD_BORDER_W,
+        .top = WOODLAND_SSD_BORDER_W + WOODLAND_SSD_TITLEBAR_H,
+        .right = WOODLAND_SSD_BORDER_W,
+        .bottom = WOODLAND_SSD_BORDER_W,
     };
     struct wlr_box place;
 
     /* 无层叠：内容原点 = 工作区原点 + (left, top) */
     woodland_view_placement(&max_geo2, 400, 300, &margins, 0, &place);
-    assert(place.x == 11 && place.y == 37);
+    assert(place.x == 10 + margins.left && place.y == 10 + margins.top);
     assert(place.width == 400 && place.height == 300);
 
     /* 层叠偏移 32：整体右移下移 32 */
     woodland_view_placement(&max_geo2, 400, 300, &margins, 32, &place);
-    assert(place.x == 43 && place.y == 69);
+    assert(place.x == 10 + margins.left + 32 && place.y == 10 + margins.top + 32);
 
     /* 偏移过大：回贴工作区右下，外框右/下边缘正好贴住工作区边界 */
     woodland_view_placement(&max_geo2, 400, 300, &margins, 1000, &place);
@@ -103,7 +106,7 @@ int main(void)
 
     /* 内容比工作区还大：贴回左上，不外溢到负坐标 */
     woodland_view_placement(&max_geo2, 1000, 800, &margins, 0, &place);
-    assert(place.x == 11 && place.y == 37);
+    assert(place.x == 10 + margins.left && place.y == 10 + margins.top);
 
     /*
      * 贴边吸附（单轴）：工作区 x∈[10,790]，阈值 20。
@@ -160,21 +163,24 @@ int main(void)
      * 越界贴回工作区内侧。
      */
     struct wlr_box parent_box = {.x = 200, .y = 150, .width = 400, .height = 300};
+    int outer_w = 200 + margins.left + margins.right;
+    int outer_h = 120 + margins.top + margins.bottom;
 
-    /* 居中：外框 202x148 → 父框中心 (400,300) → 外框原点 (299,226) */
+    /* 居中：外框 outer_w x outer_h → 父框内容中心 (400,300) → 外框原点 = 中心 - 半边 */
     woodland_view_center_on(&parent_box, 200, 120, &margins, &max_geo2, &place);
-    assert(place.x == 300 && place.y == 253);
+    assert(place.x == 400 - outer_w / 2 + margins.left);
+    assert(place.y == 300 - outer_h / 2 + margins.top);
     assert(place.width == 200 && place.height == 120);
 
     /* 父窗口贴右下角：居中会越界，贴回工作区右下 */
     parent_box = (struct wlr_box){.x = 770, .y = 560, .width = 400, .height = 300};
     woodland_view_center_on(&parent_box, 200, 120, &margins, &max_geo2, &place);
-    assert(place.x == 10 + 780 - 202 + 1);
-    assert(place.y == 10 + 580 - 148 + 27);
+    assert(place.x == 10 + 780 - outer_w + margins.left);
+    assert(place.y == 10 + 580 - outer_h + margins.top);
 
     /* 子窗口比工作区还大：贴左上，不产生负向越界 */
     woodland_view_center_on(&parent_box, 800, 600, &margins, &max_geo2, &place);
-    assert(place.x == 11 && place.y == 37);
+    assert(place.x == 10 + margins.left && place.y == 10 + margins.top);
 
     /*
      * 拖动吸附的端到端验证：伪造视图 + 光标位置，走
@@ -201,14 +207,15 @@ int main(void)
     server.grab_x = 0;
     server.grab_y = 0;
 
-    /* 窗口在 (50, 50)，向左上拖动试图穿出左边界 (lo=10) 与顶边界 (lo=10)：
-     * cursor=(5, 30) -> desired_outer=(4, 3)，在阻尼阈值内分别拦截在 (10, 10) */
+    /* 外框在 (50, 50)，向左上拖动试图穿出左边界 (lo=10) 与顶边界 (lo=10)。
+     * 光标摆在外框内侧 5px 处 -> desired_outer=(5,5)，穿透量 5 < 阻尼阈值 20，
+     * 两轴都被拦截在 (10, 10)。光标坐标同样由 margins 推导，标题栏高度改了不用改这里。 */
     wlr_scene_node_set_position(&drag_view.scene_tree->node, 50 + margins.left, 50 + margins.top);
-    server.cursor->x = 5;
-    server.cursor->y = 30;
+    server.cursor->x = 5 + margins.left;
+    server.cursor->y = 5 + margins.top;
     woodland_cursor_process_motion(&server, 0);
-    assert(drag_view.scene_tree->node.x == 10 + margins.left); /* 11 */
-    assert(drag_view.scene_tree->node.y == 10 + margins.top);  /* 37 */
+    assert(drag_view.scene_tree->node.x == 10 + margins.left);
+    assert(drag_view.scene_tree->node.y == 10 + margins.top);
 
     /* 中间空地：不穿透边界 -> 完全跟随光标，内容原点=光标位置 */
     server.cursor->x = 300;
