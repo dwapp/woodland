@@ -135,10 +135,14 @@ void woodland_workspace_switch_focus(struct woodland_server *server,
 
     struct woodland_workspace *from = server->active_workspace;
     wlr_scene_node_set_enabled(&server->active_workspace->tree->node, false);
-    wlr_ext_workspace_handle_v1_set_active(
-        server->active_workspace->ext_workspace, false);
+    if (server->active_workspace->ext_workspace) {
+        wlr_ext_workspace_handle_v1_set_active(
+            server->active_workspace->ext_workspace, false);
+    }
     wlr_scene_node_set_enabled(&target->tree->node, true);
-    wlr_ext_workspace_handle_v1_set_active(target->ext_workspace, true);
+    if (target->ext_workspace) {
+        wlr_ext_workspace_handle_v1_set_active(target->ext_workspace, true);
+    }
     server->active_workspace = target;
     woodland_trace_add("workspace", 0, "%s -> %s restore=%d",
                        from ? from->name : "-", target->name,
@@ -162,7 +166,7 @@ void woodland_workspace_switch_focus(struct woodland_server *server,
      * 用信号而不是直接调协议层：workspace 不该反向依赖协议（同
      * server->output_removed 的理由），单元测试里也只链接 workspace 库。
      */
-    wl_signal_emit_mutable(&server->workspace_changed, target);
+    woodland_signal_emit(&server->workspace_changed, target);
 }
 
 void woodland_workspace_switch(struct woodland_server *server,

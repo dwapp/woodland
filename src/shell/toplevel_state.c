@@ -33,6 +33,7 @@
 #include "shell_internal.h"
 #include "ssd.h"
 #include "view.h"
+#include "window_menu.h"
 #include "woodland.h"
 
 /* ==================== 几何落位 ==================== */
@@ -226,6 +227,15 @@ static void xdg_toplevel_request_minimize(struct wl_listener *listener, void *da
     struct woodland_view *view = wl_container_of(listener, view, request_minimize);
     woodland_view_set_minimized(view, view->xdg_toplevel->requested.minimized);
     (void)data;
+}
+
+static void xdg_toplevel_request_show_window_menu(struct wl_listener *listener, void *data)
+{
+    struct woodland_view *view = wl_container_of(listener, view, request_show_window_menu);
+    struct wlr_xdg_toplevel_show_window_menu_event *event = data;
+    double lx = (view->scene_tree ? view->scene_tree->node.x : 0) + event->x;
+    double ly = (view->scene_tree ? view->scene_tree->node.y : 0) + event->y;
+    woodland_window_menu_show(view, lx, ly);
 }
 
 /* ==================== 标题 / app_id / parent / tag ==================== */
@@ -648,6 +658,10 @@ void shell_toplevel_state_attach(struct woodland_view *view)
                               xdg_toplevel_request_fullscreen, "toplevel_state.request_fullscreen");
     woodland_listener_connect(&view->request_minimize, &view->xdg_toplevel->events.request_minimize,
                               xdg_toplevel_request_minimize, "toplevel_state.request_minimize");
+    woodland_listener_connect(&view->request_show_window_menu,
+                              &view->xdg_toplevel->events.request_show_window_menu,
+                              xdg_toplevel_request_show_window_menu,
+                              "toplevel_state.request_show_window_menu");
     woodland_listener_connect(&view->set_title, &view->xdg_toplevel->events.set_title,
                               xdg_toplevel_set_title, "toplevel_state.set_title");
     woodland_listener_connect(&view->set_app_id, &view->xdg_toplevel->events.set_app_id,

@@ -99,6 +99,8 @@ echo "$TREE" | jq -e '.placement_policy == "cascade"' >/dev/null \
     || smoke_fail "default placement policy should be cascade"
 echo "$TREE" | jq -e '.snap_preview.active == false' >/dev/null \
     || smoke_fail "snap_preview should be inactive initially"
+echo "$TREE" | jq -e '.window_menu.active == false' >/dev/null \
+    || smoke_fail "window_menu should be inactive initially"
 # 没拖动就不该有 edges / box / output：字段缺失是契约的一部分（消费端不用
 # 判"激活了但 box 还是 0"），也避免把上一轮的残值当当前状态读
 echo "$TREE" | jq -e '.snap_preview | (has("edges") or has("box") or has("output")) | not' >/dev/null \

@@ -37,6 +37,7 @@
 #include "view.h"
 #include "woodland.h"
 #include "woodland_config.h"
+#include "window_menu.h"
 #include "workspace.h"
 
 /* 场景树转储的递归深度与节点上限：防止一次 dump 输出几百 KB */
@@ -130,6 +131,8 @@ static const struct ipc_field_doc get_tree_fields[] = {
      "wl_data_device drag: active (bool), dropped (bool), "
      "icon{w,h,visible}, target (str|null: app_id, else title, else layer "
      "namespace — the surface under the cursor)"},
+    {"window_menu", "obj",
+     "window menu: active (bool), view (int), x, y"},
     {"views", "obj[]",
      "per view: id, kind, z, title, app_id, tag, workspace, "
      "output, mapped, placed, minimized, maximized, "
@@ -660,6 +663,8 @@ static void ipc_get_tree(struct woodland_server *server, struct woodland_json *o
     woodland_snap_preview_status(server, out);
     woodland_json_obj_key(&obj, "dnd");
     append_dnd(server, out);
+    woodland_json_obj_key(&obj, "window_menu");
+    woodland_window_menu_status(server, out);
 
 
     woodland_json_obj_key(&obj, "views");

@@ -7,6 +7,7 @@
 #include <wlr/types/wlr_foreign_toplevel_management_v1.h>
 #include <wlr/types/wlr_xdg_decoration_v1.h>
 #include <wlr/types/wlr_xdg_shell.h>
+#include <xkbcommon/xkbcommon.h>
 
 /* 位置管理与焦点管理的接口都按 struct woodland_view 定义，
  * 统一从这里带出去，调用方只需要 include "view.h"。 */
@@ -133,6 +134,7 @@ struct woodland_view {
     struct wl_listener request_maximize;
     struct wl_listener request_fullscreen;
     struct wl_listener request_minimize;
+    struct wl_listener request_show_window_menu;
     struct wl_listener set_title;
     struct wl_listener set_app_id;
     struct wl_listener set_parent;
@@ -246,6 +248,10 @@ void woodland_cursor_process_motion(struct woodland_server *server, uint32_t tim
 
 /** 结束交互式 move/resize。 */
 void woodland_cursor_reset_mode(struct woodland_server *server);
+
+/** 交互式 move/resize 期间的键盘处理（Enter确认、Escape取消、方向键移动）。返回 true 表示已消费。 */
+bool woodland_interactive_handle_key(struct woodland_server *server, xkb_keysym_t sym,
+                                     uint32_t modifiers);
 
 /** 接线 cursor 事件监听器（motion/button/axis/frame）。 */
 void woodland_cursor_init_events(struct woodland_server *server);

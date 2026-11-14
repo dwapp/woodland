@@ -22,6 +22,7 @@
 #include "view.h"
 #include "woodland.h"
 #include "woodland_config.h"
+#include "window_menu.h"
 #include "workspace.h"
 
 /* ==================== 键盘 ==================== */
@@ -170,6 +171,34 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data)
             wlr_seat_keyboard_notify_key(seat, event->time_msec, event->keycode, event->state);
         }
         return;
+    }
+
+    /* 窗口菜单处于激活态时，键盘事件优先由窗口菜单消费 */
+    if (woodland_window_menu_is_active(server)) {
+        if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+            for (int i = 0; i < nsyms; i++) {
+                if (woodland_window_menu_handle_key(server, syms[i])) {
+                    return;
+                }
+            }
+        } else {
+            return;
+        }
+    }
+
+    /* 处于交互式移动或缩放状态时（由菜单或键盘发起） */
+    if (server->cursor_mode == WOODLAND_CURSOR_MOVE ||
+        server->cursor_mode == WOODLAND_CURSOR_RESIZE) {
+        if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+            uint32_t modifiers = wlr_keyboard_get_modifiers(keyboard->wlr_keyboard);
+            for (int i = 0; i < nsyms; i++) {
+                if (woodland_interactive_handle_key(server, syms[i], modifiers)) {
+                    return;
+                }
+            }
+        } else {
+            return;
+        }
     }
 
     /*
