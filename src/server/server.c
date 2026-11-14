@@ -114,6 +114,18 @@ bool woodland_server_init(struct woodland_server *server)
     /* ipc_fd 的 0 是 stdin：先置 -1，避免 finish 里误关标准输入 */
     server->ipc_fd = -1;
     wl_list_init(&server->ipc_clients);
+    /*
+     * finish 会被 main 在 init **失败之后**无条件调用（`if (!init) { finish;
+     * return 1; }`），而它要遍历下面这两个链表。头是 {0} 时
+     * wl_list_for_each_safe 第一次就会解引用 NULL —— effects 构建在没有 DRM
+     * render node 的机器上（allocator 就在这之前失败）正是段错误退出，而不是
+     * 打印一句"起不来"。
+     *
+     * 各模块的 init 里还会再 wl_list_init 一次，对空链表是幂等的；反过来不能
+     * 只留模块那一份——单测直接调模块 init，删了它们自己就崩。
+     */
+    wl_list_init(&server->workspaces);
+    wl_list_init(&server->outputs);
     woodland_selfcheck_init(server);
 
     server->display = wl_display_create();
@@ -164,7 +176,12 @@ bool woodland_server_init(struct woodland_server *server)
 #if WOODLAND_HAVE_EFFECTS
     server->renderer = fx_renderer_create(server->backend);
     if (!server->renderer) {
-        wlr_log(WLR_INFO, "no DRM render node, retrying with llvmpipe");
+        /*
+         * 软件渲染再试一次。能救回来的是"有 DRM 节点、但 GPU 开不出 GLES2
+         * 上下文"：EGL 换 llvmpipe，buffer 照样从 gbm 出。没有 DRM 节点的机器
+         * 救不回来，原因见下面 allocator 那段的注释。
+         */
+        wlr_log(WLR_INFO, "fx renderer creation failed, retrying with llvmpipe");
         setenv("WLR_RENDERER_FORCE_SOFTWARE", "1", 1);
         server->renderer = fx_renderer_create(server->backend);
     }
@@ -181,6 +198,26 @@ bool woodland_server_init(struct woodland_server *server)
     server->allocator = wlr_allocator_autocreate(server->backend, server->renderer);
     if (!server->allocator) {
         wlr_log(WLR_ERROR, "failed to create allocator");
+#if WOODLAND_HAVE_EFFECTS
+        /*
+         * effects 构建没有软件缓冲路径可退，这是结构性的：fx renderer 只声明
+         * WLR_BUFFER_CAP_DMABUF（scenefx 的 render/fx_renderer/fx_renderer.c
+         * 里 wlr_renderer_init 的实参），于是 wlr_allocator_autocreate 里：
+         *   - shm 分支要求 renderer 也声明 SHM|DATA_PTR，声明里没有 → 跳过；
+         *   - udmabuf 分支只判能力位是否 overlap，会试一次，但没有 /dev/udmabuf
+         *     （内核模块默认不加载）就失败；
+         *   - 剩下只有 gbm，而 gbm 必须有 DRM render node。
+         * 所以没有 /dev/dri 的机器（CI runner 就是）上，上面那句 retrying with
+         * llvmpipe 顶多把 GL 换成软件实现，buffer 分配仍然过不去。
+         */
+        int drm_fd = wlr_backend_get_drm_fd(server->backend);
+        if (drm_fd < 0) {
+            drm_fd = wlr_renderer_get_drm_fd(server->renderer);
+        }
+        wlr_log(WLR_ERROR,
+                "effects build needs a DRM render node for buffer allocation "
+                "(fx renderer advertises DMABUF only; drm_fd=%d)", drm_fd);
+#endif
         return false;
     }
 
