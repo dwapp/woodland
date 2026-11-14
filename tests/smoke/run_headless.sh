@@ -32,3 +32,27 @@ if kill -0 "$pid" 2>/dev/null; then
 fi
 
 wait "$pid"
+
+# ---------------------------------------------------------------------------
+# 起不来的那条路也得体面：退出码不许 >= 128（信号）。
+#
+# WLR_RENDERER_FORCE_SOFTWARE=1 让 EGL 不依赖 DRM 节点也能起来，但 buffer 分配
+# 走不通：effects 构建的 fx renderer 只声明 DMABUF 能力位，唯一能用的 gbm
+# 分配器要有 DRM render node。于是这个进程必然在 allocator 那里失败。这条测的
+# 不是"能起来"，是"起不来时干净退出 1 而不是段错误"—— 曾经 finish 会无条件遍历
+# 还没初始化的 workspace/output 链表（头是 {0}，wl_list_for_each_safe 第一次就
+# 解引用 NULL），栈落在 woodland_workspace_finish。
+#
+# 无 effects 构建里同一条命令是能起来的（pixman/gles2 有 shm 路径），那样会被
+# timeout 收成 124 —— 两种结果都合法，都落在"不是信号"里。
+# ---------------------------------------------------------------------------
+FAIL_LOG="$(mktemp)"
+fail_rc=0
+WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1 WLR_RENDERER_FORCE_SOFTWARE=1 \
+    timeout 3 "$BIN" >"$FAIL_LOG" 2>&1 || fail_rc=$?
+if [ "$fail_rc" -ge 128 ]; then
+    echo "--- startup-failure log:" >&2
+    tail -5 "$FAIL_LOG" >&2 || :
+    smoke_fail "woodland died by signal on a failed startup (rc=$fail_rc)"
+fi
+rm -f "$FAIL_LOG"
