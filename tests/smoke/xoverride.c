@@ -6,11 +6,13 @@
  * woodland_view、不画 SSD、不参与焦点，位置由 X 侧坐标决定。
  *
  * 用法: xoverride [x] [y] [w] [h]，窗口底色为纯红，map 后打印窗口 id 并阻塞。
- *       xoverride --managed-window 另外建一个**受管理**的 X11 顶层窗口（不带
- *       override_redirect），供 treeland-xwindow-control 冒烟验证 managed 分支；
- *       --test-toggle 做 override_redirect 的双向迁移回归。
+ *       xoverride --managed-window [x y w h] 另外建一个**受管理**的 X11 顶层窗口
+ *       （不带 override_redirect），供 treeland-xwindow-control 冒烟验证 managed
+ *       分支；--test-toggle 做 override_redirect 的双向迁移回归。
+ *       三个开关可以和几何任意顺序给，加 --dry-run 只解析参数、不连 X。
  */
 #define _DEFAULT_SOURCE
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,7 +20,67 @@
 
 #include <xcb/xcb.h>
 
+enum probe_mode {
+    PROBE_OVERRIDE, /* 默认：override-redirect（unmanaged 路径） */
+    PROBE_MANAGED,  /* 普通顶层窗口（走 woodland_view + SSD） */
+    PROBE_TOGGLE,   /* override_redirect 双向迁移回归 */
+};
+
+static const char *mode_name(enum probe_mode mode)
+{
+    switch (mode) {
+    case PROBE_MANAGED:
+        return "managed";
+    case PROBE_TOGGLE:
+        return "toggle";
+    default:
+        return "override-redirect";
+    }
+}
+
 int main(int argc, char *argv[]) {
+    /*
+     * 参数解析放在连 X 之前。
+     *
+     * 原来这里是 `int x = argc > 1 ? atoi(argv[1]) : 200;`，而 argv[1] 是
+     * "--managed-window" / "--test-toggle" 时 atoi 得 0 —— 于是带开关的那两种
+     * 模式里 x 恒为 0（窗口贴在屏幕最左边），而"再往后传几何"会整体错位一格
+     * （x 吃 flag、y 吃 x……）。开关和几何分开解析，顺序也就不重要了。
+     */
+    enum probe_mode mode = PROBE_OVERRIDE;
+    int pos[4] = {200, 200, 160, 120};
+    int npos = 0;
+    bool dry_run = false;
+
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--managed-window") == 0) {
+            mode = PROBE_MANAGED;
+        } else if (strcmp(argv[i], "--test-toggle") == 0) {
+            mode = PROBE_TOGGLE;
+        } else if (strcmp(argv[i], "--dry-run") == 0) {
+            dry_run = true;
+        } else if (npos < 4) {
+            pos[npos++] = atoi(argv[i]);
+        } else {
+            fprintf(stderr, "用法: xoverride [--managed-window|--test-toggle]"
+                            " [--dry-run] [x y w h]\n");
+            return 2;
+        }
+    }
+
+    int x = pos[0], y = pos[1], w = pos[2], h = pos[3];
+    if (w <= 0 || h <= 0) {
+        /* 0 宽/高会让 CreateWindow 直接 BadValue，窗口根本不存在，
+         * 而调用方还在等一个永远不会出现的 view —— 宁可在本地就炸掉 */
+        fprintf(stderr, "窗口尺寸必须为正（拿到 %dx%d）\n", w, h);
+        return 2;
+    }
+
+    if (dry_run) {
+        printf("dry-run: mode=%s x=%d y=%d w=%d h=%d\n", mode_name(mode), x, y, w, h);
+        return 0;
+    }
+
     int screen_num = 0;
     xcb_connection_t *conn = xcb_connect(NULL, &screen_num);
     if (xcb_connection_has_error(conn)) {
@@ -31,11 +93,6 @@ int main(int argc, char *argv[]) {
         xcb_screen_next(&iter);
     }
     xcb_screen_t *screen = iter.data;
-
-    int x = argc > 1 ? atoi(argv[1]) : 200;
-    int y = argc > 2 ? atoi(argv[2]) : 200;
-    int w = argc > 3 ? atoi(argv[3]) : 160;
-    int h = argc > 4 ? atoi(argv[4]) : 120;
 
     /* 纯红底色，便于截图后按像素断言 */
     uint32_t red = screen->white_pixel;
@@ -50,7 +107,7 @@ int main(int argc, char *argv[]) {
     xcb_window_t win = xcb_generate_id(conn);
     uint32_t mask = XCB_CW_BACK_PIXEL | XCB_CW_OVERRIDE_REDIRECT;
 
-    if (argc > 1 && strcmp(argv[1], "--managed-window") == 0) {
+    if (mode == PROBE_MANAGED) {
         /* 普通顶层窗口：合成器会建 woodland_view / SSD，用于按 wid 摆位的
          * managed 分支。打印的 0x.. 就是协议要的 X11 window id。 */
         uint32_t val_managed[] = {red, 0};
@@ -62,7 +119,7 @@ int main(int argc, char *argv[]) {
         xcb_flush(conn);
         printf("managed window 0x%x at %d,%d %dx%d\n", win, x, y, w, h);
         fflush(stdout);
-    } else if (argc > 1 && strcmp(argv[1], "--test-toggle") == 0) {
+    } else if (mode == PROBE_TOGGLE) {
         /* 先以 managed (override_redirect = 0) 创建并 map */
         uint32_t val_managed[] = {red, 0};
         xcb_create_window(conn, XCB_COPY_FROM_PARENT, win, screen->root,
