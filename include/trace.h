@@ -46,7 +46,11 @@ bool woodland_trace_enabled(void);
  *   map / unmap / destroy / focus / focus_none / layer_focus / place /
  *   workspace / output_add / output_remove / cfg_apply / deco / bg_effect /
  *   action / appearance / shortcut / ftl / tearing / vt / snap / dnd /
- *   sec_ctx / xwindow / menu
+ *   sec_ctx / xwindow / menu / spawn
+ *
+ * spawn 专指"合成器要不要 / 有没有拉起外部进程"（startup_cmd、
+ * woodland-shortcutd）。别混进 action：那个标签是
+ * treeland-compositor-action 的动作执行轨迹，脚本按条数断言。
  *
  * detail 只写**决策依据**（哪个分支、算了什么、为什么），不要重复
  * get_tree 已经能查到的状态——轨迹的价值在"为什么"，不在"是什么"。

@@ -21,6 +21,10 @@
   不放代码、不改内容；同步办法见该目录的 `README.md`。CI 里没有
   `treeland-protocols` 包，所以**不要**改成从 `/usr/share` 取。
 - `docs/`：各协议与子系统的设计规格说明（`docs/architecture.md`、`docs/wallpaper-protocols.md` 等，清单见 `docs/README.md`）。
+- `src/shortcutd/`：**客户端**侧程序 `woodland-shortcutd`（`treeland_shortcut_manager_v3`
+  的注册方）。它不链合成器的任何代码，只依赖 `wayland-client`；非 DDE 会话里由
+  `src/server/server.c:start_shortcut_client()` 拉起，DDE 会话里必须留给 `dde-daemon`
+  （协议只允许一个客户端持有 manager）。设计见 `docs/shortcut-client.md`。
 
 模块职责划分以架构文档（`docs/architecture.md` §5）为准：`server`（backend/renderer/allocator/scene + 事件循环 + 渲染循环 + 输出热插拔）、`seat`（输入设备/光标/焦点）、`scene`（图层树）、`layout`（布局几何计算）等。
 
@@ -36,6 +40,12 @@ meson test -C build --print-errorlogs  # 跑全部测试
 - 特性开关在 `meson_options.txt`：`effects`（默认 true）、`tiling-layout`（默认 false）、`xwayland`（默认 true）、`test`（默认 false，跑测试要开）。
 - 特性开关经 `configure_file` 生成 `build/config.h`，用 `WOODLAND_HAVE_*` 宏。
 - 冒烟测试用 headless 后端：`tests/smoke/run_headless.sh` 内部以 `WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1` 后台启动 + `kill -TERM` + 等退出码 0。脚本里残留的 `WLR_RENDERER=pixman` 只在 `-Deffects=disabled` 构建生效——启用 effects 时 `fx_renderer_create()` 不读这个变量，按 `WLR_RENDERER_FORCE_SOFTWARE` / `WLR_RENDER_DRM_DEVICE` 找渲染节点。ASan 验证用 `meson setup build-asan -Db_sanitize=address,undefined -Dtest=enabled`。
+- **冒烟测试默认不启动 `woodland-shortcutd`**：`smoke_init()` 会把 `WOODLAND_SHORTCUTD`
+  置成 `off`。否则它会 `acquire` 全局快捷键管理器并注册默认键位，把
+  `binding_count == 0`、`occupied`、`last_outcome` 一类断言全带偏（`smoke-shortcut`
+  和 `smoke-compositor-action` 都踩过）。要测自动启动本身的看
+  `tests/smoke/run_shortcutd_smoke.sh`：它自己覆盖这个变量，并靠
+  `wctl get_trace` 里 `spawn` 标签的 detail 断言"起了 / 为什么没起"。
 - **冒烟脚本一律先 `. tests/smoke/lib.sh` 再 `smoke_init <名字>`。** 失败时它把现场落到 `build/meson-logs/smoke/<名字>/`：`compositor.log`、`meta.txt`（参数 / socket / 退出码），有 `WCTL` 和 `SOCK` 时还会抓 `get_tree` / `get_focus` / `self_check` / `get_trace` / `dump_scene` 的 JSON 和一张 `screenshot.png`。脚本自己的收尾写成 `smoke_cleanup()`（dump 之后才调用），断言失败用 `smoke_fail "..."`。**不要再用 `cat 日志; exit 1`**——那正是"只有一行结论、没有现场"的老写法。
 - **自写的 Wayland 探针要 roundtrip 两次，收事件要走 prepare_read。** 第一次 roundtrip 只拿到 global 列表：registry 回调里发的 `bind` 被排进出站缓冲，但同一批事件里那个 sync 回调已经把 roundtrip 的 `done` 置上了，dispatch 循环立刻退出，缓冲里剩下的 `bind` 没人 flush——合成器根本没看见 bind，也就一条事件都不会推。第二次 roundtrip 开头那次 flush 才把 bind 发出去。同理，收广播不能只调 `wl_display_dispatch_pending()`（它只分发已进内存队列的事件，socket 不读）：要 `wl_display_prepare_read()` → `poll()` → `wl_display_read_events()` → `wl_display_dispatch_pending()` 这套。`tests/smoke/appearance_probe.c` 是现成样例。
 - **CI 跑在 `archlinux:base-devel`，不要换回 `debian:stable`。** wlroots 0.20 要 wayland >= 1.24、libdrm >= 2.4.129、xkbcommon >= 1.8、pixman >= 0.43，bookworm 一个都不满足，meson 会退到 wrap 里逐个编 fallback，链条断在第一个 wayland 子项目（`Dependency "expat" not found`）。缺 expat 只是表象，补它只会把失败推到下一个依赖。
@@ -84,7 +94,7 @@ wctl --help
             {"seq":3,"ms":31,"obj":1,"what":"focus","detail":"prev=0 raise=1"}]}
 ```
 
-- `what` 是**稳定标签**（脚本会 grep），权威清单在 `include/trace.h`：`map` / `unmap` / `destroy` / `focus` / `focus_none` / `layer_focus` / `place` / `workspace` / `output_add` / `output_remove` / `cfg_apply` / `deco` / `bg_effect` / `action` / `shortcut` / `appearance` / `ftl` / `tearing` / `vt` / `snap` / `dnd` / `sec_ctx` / `xwindow` / `menu`。加新标签先改 trace.h 的清单，再发第一条轨迹。
+- `what` 是**稳定标签**（脚本会 grep），权威清单在 `include/trace.h`：`map` / `unmap` / `destroy` / `focus` / `focus_none` / `layer_focus` / `place` / `workspace` / `output_add` / `output_remove` / `cfg_apply` / `deco` / `bg_effect` / `action` / `shortcut` / `appearance` / `ftl` / `tearing` / `vt` / `snap` / `dnd` / `sec_ctx` / `xwindow` / `menu` / `spawn`。加新标签先改 trace.h 的清单，再发第一条轨迹。
 - `detail` 只写**决策依据**（走了哪个分支、策略名、抑制窗口），不要抄 `get_tree` 已有的数值。
 - 关闭时零分配零格式化；打开后也不分配（一次 calloc）。**它只依赖 `util/json`，不许反向依赖任何业务模块**——否则会成为依赖环的入口。
 - 环的语义：`seq` 全局单调，`total` 是累计条数，`dropped = total - count` 就是被覆盖掉的条数。第一个 entry 的 `seq` 一定等于 `dropped`。

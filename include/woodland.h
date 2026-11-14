@@ -337,6 +337,13 @@ struct woodland_server {
     const char *startup_cmd;        // -s 启动命令
     const char *config_path;        // -c 配置文件路径
     struct woodland_config *config; // 运行时配置
+    /*
+     * 不自动启动 woodland-shortcutd（--no-shortcut-client）。
+     * 非 DDE 会话默认启动、DDE 会话无论如何都不启动（判定见
+     * src/server/server.c:shortcut_client_wanted），这个开关只是给测试和
+     * "用户自己接管全局快捷键"留的出口。
+     */
+    bool no_shortcut_client;
 };
 
 /**

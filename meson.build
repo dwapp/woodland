@@ -39,6 +39,9 @@ scenefx = dependency('scenefx-0.5', fallback: 'scenefx',
                      required: get_option('effects'))
 
 wayland_server = dependency('wayland-server')
+# woodland-shortcutd 是同一个 libwayland 包里的客户端库，装 wayland-server
+# 的地方必然有它
+wayland_client = dependency('wayland-client')
 xkbcommon = dependency('xkbcommon')
 pangocairo = dependency('pangocairo')
 cairo = dependency('cairo')
@@ -54,6 +57,8 @@ conf_data.set10('WOODLAND_HAVE_XWAYLAND',
 conf_data.set10('WOODLAND_HAVE_EFFECTS',
                 get_option('effects').enabled() and scenefx.found())
 conf_data.set10('WOODLAND_HAVE_LIBRSVG', rsvg_dep.found())
+# 合成器启动快捷键客户端时按这个路径找可执行文件（见 server.c）
+conf_data.set_quoted('WOODLAND_BINDIR', get_option('prefix') / get_option('bindir'))
 configure_file(output: 'config.h', configuration: conf_data)
 
 # scene 走哪套实现由 effects 决定：scenefx 换掉 wlroots 的 scene 与 renderer，

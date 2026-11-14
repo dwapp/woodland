@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "util/listener.h"
+#include <errno.h>
+#include <limits.h>
 #include <signal.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <wlr/types/wlr_alpha_modifier_v1.h>
@@ -33,6 +38,8 @@
 #include "selfcheck.h"
 #include "server.h"
 #include "session_lock.h"
+#include "trace.h"
+#include "util/env.h"
 #include "view.h"
 #include "woodland.h"
 #include "woodland_config.h"
@@ -312,6 +319,143 @@ bool woodland_server_init(struct woodland_server *server)
     return true;
 }
 
+/* ==================== 默认快捷键客户端 ==================== */
+
+/*
+ * 非 DDE 会话里把全局快捷键补上：启动 woodland-shortcutd
+ * （src/shortcutd，treeland-shortcut-manager-v3 的客户端）。
+ *
+ * 为什么这件事必须由合成器来做，而且必须看 XDG_CURRENT_DESKTOP：
+ *
+ *   协议规定同一时刻只有一个客户端能持有 shortcut manager，第二个 acquire
+ *   直接 occupied 协议错误。DDE 会话里那个位置是 dde-daemon 的，woodland
+ *   要是抢先拉自己的客户端，DDE 的全局快捷键就整套失效——而且失败在对方
+ *   那一侧，用户只会看到"DDE 快捷键突然不好使"。
+ *
+ *   反过来，LXQt / noctalia / quickshell 这些壳体没有 DDE 的 keybinding
+ *   服务，桌面里没有任何人能注册快捷键；woodland 内置键位又只有 Alt+Tab
+ *   和 Alt+F1..F9，连"Super+Return 开终端"都没有。所以非 DDE 会话里补一个
+ *   默认客户端是必要的，而"是不是 DDE"只能靠会话的桌面名判断。
+ *
+ * 开关：--no-shortcut-client（合成器）、$WOODLAND_SHORTCUTD=off（环境）、
+ * 以及 shortcutd 自己配置里的 [general] enabled = false。
+ */
+static bool desktop_owns_shortcuts(void)
+{
+    /* 三个会话变量都看（见 util/env.h：漏设一个就误判，代价是废掉 DDE 键位） */
+    return woodland_session_is_dde();
+}
+
+static const char *env_or_dash(const char *name)
+{
+    const char *value = getenv(name);
+    return (value && *value) ? value : "-";
+}
+
+/*
+ * 找可执行文件的顺序：
+ *   1. $WOODLAND_SHORTCUTD  —— 冒烟测试和开发时直接指向 build 目录里的二进制
+ *   2. 与合成器自己同目录（装完同在 bindir；build 树里退一格是 src/shortcutd/）
+ *   3. 编译期 bindir
+ *   4. 都没有 → NULL，交给 execvp 搜 PATH
+ */
+static const char *shortcut_client_locate(char *buf, size_t len)
+{
+    const char *override = getenv("WOODLAND_SHORTCUTD");
+    if (override && *override && !woodland_env_is_off(override)) {
+        snprintf(buf, len, "%s", override);
+        if (access(buf, X_OK) == 0) {
+            return buf;
+        }
+        wlr_log(WLR_ERROR, "WOODLAND_SHORTCUTD=%s is not executable, falling back", override);
+    }
+
+    char exe[PATH_MAX];
+    ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+    if (n > 0) {
+        exe[n] = '\0';
+        char *slash = strrchr(exe, '/');
+        if (slash) {
+            *slash = '\0';
+            snprintf(buf, len, "%s/woodland-shortcutd", exe);
+            if (access(buf, X_OK) == 0) {
+                return buf;
+            }
+            snprintf(buf, len, "%s/shortcutd/woodland-shortcutd", exe);
+            if (access(buf, X_OK) == 0) {
+                return buf;
+            }
+        }
+    }
+
+    snprintf(buf, len, "%s/woodland-shortcutd", WOODLAND_BINDIR);
+    if (access(buf, X_OK) == 0) {
+        return buf;
+    }
+    return NULL;
+}
+
+static void start_shortcut_client(struct woodland_server *server)
+{
+    if (server->no_shortcut_client) {
+        woodland_trace_add("spawn", 0, "shortcut client: disabled by --no-shortcut-client");
+        return;
+    }
+    if (woodland_env_is_off(getenv("WOODLAND_SHORTCUTD"))) {
+        woodland_trace_add("spawn", 0, "shortcut client: disabled by WOODLAND_SHORTCUTD");
+        wlr_log(WLR_INFO, "shortcut client: disabled by WOODLAND_SHORTCUTD");
+        return;
+    }
+    if (desktop_owns_shortcuts()) {
+        woodland_trace_add("spawn", 0,
+                           "shortcut client: skipped (DDE session: current=%s session=%s legacy=%s)",
+                           env_or_dash("XDG_CURRENT_DESKTOP"),
+                           env_or_dash("XDG_SESSION_DESKTOP"),
+                           env_or_dash("DESKTOP_SESSION"));
+        wlr_log(WLR_INFO, "shortcut client: DDE session (XDG_CURRENT_DESKTOP=%s, "
+                          "XDG_SESSION_DESKTOP=%s, DESKTOP_SESSION=%s), "
+                          "leaving global shortcuts to the desktop",
+                env_or_dash("XDG_CURRENT_DESKTOP"), env_or_dash("XDG_SESSION_DESKTOP"),
+                env_or_dash("DESKTOP_SESSION"));
+        return;
+    }
+
+    char path[PATH_MAX];
+    const char *exe = shortcut_client_locate(path, sizeof(path));
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        wlr_log_errno(WLR_ERROR, "failed to fork for shortcut client");
+        return;
+    }
+    if (pid == 0) {
+        /* 和 xwayland 的 xinitrc 同一套模型：中间层立即退出，孙进程脱离会话，
+         * 这样 wsd 不会成为合成器的子进程（合成器崩了它也照常收尾），
+         * 也不会攒僵尸——父进程阻塞回收的只是这个壳。 */
+        setsid();
+        pid_t grandchild = fork();
+        if (grandchild < 0) {
+            _exit(127);
+        }
+        if (grandchild == 0) {
+            if (exe) {
+                execl(exe, "woodland-shortcutd", (char *)NULL);
+            } else {
+                execlp("woodland-shortcutd", "woodland-shortcutd", (char *)NULL);
+            }
+            _exit(127);
+        }
+        _exit(0);
+    }
+    while (waitpid(pid, NULL, 0) < 0 && errno == EINTR) {
+        /* 等壳退出，别被信号打断成僵尸 */
+    }
+
+    woodland_trace_add("spawn", 0, "shortcut client: started %s",
+                       exe ? exe : "woodland-shortcutd (PATH)");
+    wlr_log(WLR_INFO, "shortcut client: started %s", exe ? exe : "woodland-shortcutd");
+}
+
 bool woodland_server_start(struct woodland_server *server)
 {
     const char *socket = wl_display_add_socket_auto(server->display);
@@ -347,6 +491,12 @@ bool woodland_server_start(struct woodland_server *server)
             execl("/bin/sh", "/bin/sh", "-c", server->startup_cmd, (void *)NULL);
         }
     }
+
+    /*
+     * 放在最后：此时 socket / WAYLAND_DISPLAY / DISPLAY 都已就位，
+     * 客户端一连上来就能看到完整的 global 列表。
+     */
+    start_shortcut_client(server);
 
     return true;
 }
