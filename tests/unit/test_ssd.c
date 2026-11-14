@@ -349,6 +349,41 @@ int main(void)
     char *nonexistent = woodland_icon_find_path("nonexistent.app.xyz.123");
     assert(nonexistent == NULL);
 
+    /*
+     * SSD 调色板自报。
+     *
+     * 像素断言（tests/smoke/run_xwayland_smoke.sh）的期望值从这里来，所以内置
+     * 默认值在这里钉住：色板是有意的设计决定，改它就该连这条测试一起改，
+     * 而不是让一条像素用例在 CI 上莫名变红。三层来源里这里覆盖两档——
+     * 内置浅色板、内置深色板，以及"用户显式配色时深色板不接管"。
+     */
+    struct woodland_config pal_cfg = {0};
+    server.config = &pal_cfg;
+
+    struct woodland_ssd_palette pal = {0};
+    woodland_ssd_get_palette(&view, &pal);
+    assert(!pal.dark);
+    assert(pal.titlebar_active == 0xF4F4F4);
+    assert(pal.titlebar_inactive == 0xF9F9F9);
+    assert(pal.border_active == 0xCCCCCC);
+    assert(pal.border_inactive == 0xCCCCCC);
+
+    pal_cfg.appearance.color_scheme_set = true;
+    pal_cfg.appearance.dark = true;
+    woodland_ssd_get_palette(&view, &pal);
+    assert(pal.dark);
+    assert(pal.titlebar_active == 0x292929);
+    assert(pal.titlebar_inactive == 0x202020);
+    assert(pal.border_active == 0x525252);
+    assert(pal.border_inactive == 0x525252);
+
+    /* 显式配过 SSD 颜色的人，不该被深色方案盖掉（同 window_menu 的规矩） */
+    pal_cfg.ssd.colors_specified = true;
+    woodland_ssd_get_palette(&view, &pal);
+    assert(!pal.dark);
+    assert(pal.titlebar_active == 0xF4F4F4);
+    server.config = NULL;
+
     woodland_ssd_finish();
 
     wlr_scene_node_destroy(&view.scene_tree->node);

@@ -4,10 +4,11 @@
 #
 # 断言：
 #   1) xterm 出现在 ext-foreign-toplevel-list（说明建了正常的 view、进了窗口列表）
-#   2) 截图顶部 26px 有 SSD 标题栏底色（说明服务端装饰生效）
+#   2) 截图顶部 32px 有 SSD 标题栏底色（说明服务端装饰生效）；期望色取自
+#      wctl get_tree 的 ssd.palette，不在这里抄十六进制
 #   3) override-redirect 窗口不产生 toplevel（unmanaged 路径），但像素上可见（红）
 #
-# 用法: sh run_xwayland_smoke.sh <woodland> <xoverride>
+# 用法: sh run_xwayland_smoke.sh <woodland> <xoverride> [wctl]
 set -eu
 
 . "$(dirname "$0")/lib.sh"
@@ -15,9 +16,11 @@ smoke_init xwayland
 
 BIN="${1:-./build/src/woodland}"
 XOVERRIDE="${2:-./build/tests/xoverride}"
+WCTL="${3:-./build/src/wctl/wctl}"
 [ -x "$BIN" ] || { echo "binary not found: $BIN" >&2; exit 125; }
+[ -x "$WCTL" ] || { echo "wctl not found: $WCTL" >&2; exit 125; }
 
-for tool in Xwayland grim lswt convert identify file; do
+for tool in Xwayland grim lswt convert identify file jq; do
     command -v "$tool" >/dev/null 2>&1 || {
         echo "$tool not found, skip xwayland smoke" >&2
         exit 77
@@ -87,6 +90,11 @@ DISPLAY_NAME="$(sed -n 's/.*DISPLAY=\(:[0-9][0-9]*\)$/\1/p' "$WORK/comp.log" | h
 }
 export DISPLAY="$DISPLAY_NAME"
 
+# 调试 socket：下面要问合成器"你这个窗口的标题栏实际是什么颜色"，
+# 期望色不在脚本里抄常量（抄一份就靠人肉同步，改色板会让 CI 红在
+# "找不到标题栏像素"上，看着像 SSD 没画）。
+smoke_wait_socket 100 || smoke_fail "debug socket did not appear"
+
 # ---- 1) managed 的 X11 顶层窗口 ----
 # shellcheck disable=SC2086
 "$XAPP" $XAPP_ARGS >"$WORK/xapp.log" 2>&1 &
@@ -109,7 +117,41 @@ echo "$toplevels" | grep -q "\"$XAPP\"" || {
 count_before="$(echo "$toplevels" | grep -c '"app_id"' || true)"
 
 # ---- 2) SSD 标题栏底色 ----
+# 期望色由合成器自报（wctl get_tree 的 ssd.palette），脚本不抄十六进制：改色板
+# 不需要改测试，但"自报的颜色和屏幕上画的不一致"仍然会被抓住——这才是这条断言
+# 真正管的事。取当前激活窗口的调色板：调色板是全局外观，各窗口相同。
+palette_of() {
+    "$WCTL" -s "$SOCK" get_tree 2>/dev/null \
+        | jq -r --arg k "$1" \
+            'first(.views[] | select(.ssd.present and .activated) | .ssd.palette[$k]) // empty'
+}
+
+# 刚 map 的窗口可能还没被标成 activated（Xwayland 一路都是异步的），轮询一下。
+palette_wait() {
+    _i=0
+    while [ "$_i" -lt 20 ]; do
+        _v="$(palette_of "$1")"
+        [ -n "$_v" ] && { printf '%s' "$_v"; return 0; }
+        sleep 0.1
+        _i=$((_i + 1))
+    done
+    return 1
+}
+
 sleep 0.5
+TITLEBAR="$(palette_wait titlebar_active || true)"
+TITLEBAR_DIM="$(palette_wait titlebar_inactive || true)"
+[ -n "${TITLEBAR:-}" ] && [ -n "${TITLEBAR_DIM:-}" ] || {
+    echo "wctl did not report the SSD palette ($WCTL -s $SOCK get_tree)" >&2
+    exit 1
+}
+# 两态同色的话，下面"焦点唯一/焦点回退"两条断言就没有区分力了：它们靠
+# 颜色差判断哪个窗口是激活的。宁可在这里红，也不要留一条永远为真的断言。
+[ "$TITLEBAR" != "$TITLEBAR_DIM" ] || {
+    echo "active and inactive titlebar colors are identical ($TITLEBAR):" \
+         "focus assertions cannot tell them apart" >&2
+    exit 1
+}
 grim "$WORK/managed.png"
 
 color_count() {
@@ -132,12 +174,13 @@ color_count_near() {
         | sed -n 's/^ *\([0-9][0-9]*\):.*#FF00FF.*/\1/p' | head -1
 }
 
-TITLEBAR="#E1DEDB"       # labwc 激活态标题栏底色
-TITLEBAR_DIM="#F7F6F4"   # 非激活态（0.965*255 约为 246~247，按 renderer 差一位）
-n="$(color_count_near "$WORK/managed.png" "400x26+0+0" "$TITLEBAR" 1%)"
+n="$(color_count_near "$WORK/managed.png" "400x32+0+0" "$TITLEBAR" 1%)"
 [ -n "${n:-}" ] && [ "$n" -gt 1000 ] || {
-    echo "no SSD titlebar pixels at top of the X11 window (got '${n:-0}')" >&2
-    convert "$WORK/managed.png" -crop 400x26+0+0 +repage "$WORK/crop.png" || true
+    echo "no SSD titlebar pixels at top of the X11 window" \
+         "(got '${n:-0}' of $TITLEBAR, which wctl says this window uses)" >&2
+    echo "--- dominant colors in the top 400x32 strip:" >&2
+    convert "$WORK/managed.png" -crop 400x32+0+0 +repage -format %c histogram:info:- 2>/dev/null \
+        | sort -rn | head -5 >&2 || true
     exit 1
 }
 
@@ -201,7 +244,8 @@ grim "$WORK/focus-two.png"
 dim="$(identify -format '%wx%h' "$WORK/focus-two.png")"
 inactive_px="$(color_count_near "$WORK/focus-two.png" "$dim+0+0" "$TITLEBAR_DIM" 1%)"
 [ -n "${inactive_px:-}" ] && [ "$inactive_px" -gt 500 ] || {
-    echo "no inactive titlebar: focus is not exclusive (got '${inactive_px:-0}')" >&2
+    echo "no inactive titlebar: focus is not exclusive (got '${inactive_px:-0}'," \
+         "expected $TITLEBAR_DIM)" >&2
     exit 1
 }
 
@@ -211,7 +255,7 @@ grim "$WORK/focus-after.png"
 active_px="$(color_count_near "$WORK/focus-after.png" "$dim+0+0" "$TITLEBAR" 1%)"
 [ -n "${active_px:-}" ] && [ "$active_px" -gt 500 ] || {
     echo "focus did not fall back after closing the focused window" \
-         "(active pixels: '${active_px:-0}')" >&2
+         "(active pixels: '${active_px:-0}', expected $TITLEBAR)" >&2
     exit 1
 }
 
