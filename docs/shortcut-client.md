@@ -55,11 +55,19 @@ wsd 一起退出，也不会在进程表里攒僵尸。
 | --- | --- |
 | `--no-shortcut-client` | 不启动（测试 / 用户自己接管） |
 | `$WOODLAND_SHORTCUTD` 为 `off`/`0`/`false`/`no`/`none`/空串 | 不启动 |
-| `$XDG_CURRENT_DESKTOP` 含 `DDE`（token 相等）或 `deepin`（前缀） | 不启动，日志说明"留给桌面" |
+| 会话是 DDE（见下） | 不启动，日志说明"留给桌面" |
 | 其它（`woodland:wlroots`、`KDE`、`GNOME`、`LXQt`……） | 启动 |
 
-判定函数是 `util/env.c:woodland_desktop_is_dde()`：按 XDG 规范把取值当冒号分隔的 token
-列表处理，大小写不敏感，`Deepin` / `deepin-wayland` / `DDE:GNOME` 都认。
+"是不是 DDE"看**三个**会话变量，任一命中就算：`XDG_CURRENT_DESKTOP` /
+`XDG_SESSION_DESKTOP` / `DESKTOP_SESSION`。只看 `XDG_CURRENT_DESKTOP` 是不够的——
+显示管理器的会话（尤其 lightdm 的 deepin 会话、老的 `.desktop` 会话）不一定把它设上，
+漏判的代价正好是最坏的那种：dde-daemon 拿不到独占，整套 DDE 快捷键失效。反过来误判成
+DDE 只是不启动客户端，用户可以显式开回来，代价小得多。
+
+判定函数是 `util/env.c`：`woodland_session_is_dde()`（选变量）+
+`woodland_desktop_is_dde()`（按 XDG 规范把取值当冒号分隔的 token 列表处理，大小写不敏感，
+`Deepin` / `deepin-wayland` / `DDE:GNOME` 都认）。日志与 trace 会把三个变量的实际取值都
+打出来，能直接看出是哪一个触发的判定。
 
 启动点在 `woodland_server_start()` 的末尾——此时 socket、`WAYLAND_DISPLAY`、`DISPLAY`
 都已就位。可执行文件的查找顺序：
@@ -116,6 +124,12 @@ woodland-shortcutd: 合成器拒绝了绑定 "Ctrl+Shift+Q"（invalid_argument�
 单条写错只丢那一条（带 `[[shortcut]] #N` 的警告），整份文件语法错误才是硬失败。
 `--print-default-config` 的输出可以直接当配置文件用；用户复制的第一份配置就该是能跑的。
 
+**同一个 `key` 只留第一条**，重复的条目整条跳过并警告。这不是保守：合成器里一条组合只能
+有一条生效——同 `action` 的会被 `bind_key` 的 upsert 吞掉（并且保留先注册的 `name`，于是
+第二条的 `command` 永远不会执行），不同 `action` 的会并存但只有表里靠前的那条会命中。
+比较形式忽略大小写与空白（`meta+left` 与 `Meta+Left` 是同一个组合），因为合成器侧的
+PortableText 解析对这两者都不敏感。
+
 ## 5. 内置默认键位
 
 没有配置文件时用这一套（命令类按 `PATH` 挑第一个可用程序，一个候选都没有就跳过——
@@ -138,15 +152,20 @@ woodland-shortcutd: 合成器拒绝了绑定 "Ctrl+Shift+Q"（invalid_argument�
 2. `wl_display_connect` → `wl_registry` → 不出现 `treeland_shortcut_manager_v3` 就退出 4。
 3. `acquire` → 逐条 `bind_key` → 一次 `roundtrip`（既把请求真正发出去，也顺便收
    `bind_failure`）。
-4. 事件循环：手写 `poll` + `wl_display_prepare_read`，只有确认可读才 `read_events`；
-   信号不设 `SA_RESTART`，靠 `EINTR` 回到循环顶部。
+4. 事件循环：手写 `ppoll` + `wl_display_prepare_read`，只有确认可读才 `read_events`；
+   三个信号在等待之外保持阻塞，`ppoll` 的 sigmask 在等待期间原子地放开它们。
+   （用 `poll` 会在"读完 pending_signal、还没进 poll"之间丢信号：handler 已经置上标志，
+   `poll` 等的却是那次已经被消费掉的信号，于是再也醒不过来。丢一次 `SIGTERM` 就是一个
+   永远占着独占 manager 的进程，下一轮会话注册不上任何快捷键。）
 5. `activated` → 按名字查绑定 → `wsd_spawn_command()`。
 6. `SIGHUP` → 重新读配置：**先读成功**再 unbind 旧的、bind 新的（读失败保留现状，用户
-   改错了不该把手里的键位一起扔掉）。不放弃独占，不需要重新 `acquire`。
-7. 合成器断开（`POLLHUP`）→ 退出 0。
+   改错了不该把手里的键位一起扔掉）。不放弃独占，不需要重新 `acquire`。重载成空配置时
+   进程不退（合成器只在启动时拉一次，退掉就再也起不来了），但会明确警告"仍占着独占"。
+7. 合成器断开 → 退出 0。socket 关闭时 libwayland 报的是 `EPIPE`/`ECONNRESET`，那是
+   "会话结束"而不是错误，日志只留一行 info，退出码 0。
 
-退出码：`0` 正常 / `1` 配置或运行期错误 / `2` 用法错误 / `3` 连不上 display /
-`4` 合成器没有该协议 / `5` 协议错误（最常见是 `occupied`）。
+退出码：`0` 正常（含合成器退出）/ `1` 配置或运行期错误 / `2` 用法错误 / `3` 连不上
+display / `4` 合成器没有该协议 / `5` 协议错误（最常见是 `occupied`）。
 
 > 注意：合成器的 `SIGHUP` 只重载合成器自己的 `config.toml`。快捷键改完要
 > `pkill -HUP -x woodland-shortcutd`（或重启会话）。
@@ -155,10 +174,16 @@ woodland-shortcutd: 合成器拒绝了绑定 "Ctrl+Shift+Q"（invalid_argument�
 
 | 测试 | 覆盖 |
 | --- | --- |
-| `tests/unit/test_shortcutd_config.c` | action/flags 名表 0..45 往返、条目增删与重名、TOML 读取与坏条目跳过、`enabled=false`、缺文件、语法错误、PATH 探测挑程序、示例配置往返 |
+| `tests/unit/test_shortcutd_config.c` | action/flags 名表 0..45 往返、条目增删与 `key` 去重（含大小写/空白不同的同一组合）、TOML 读取与坏条目跳过、`enabled=false`、缺文件、语法错误、PATH 探测挑程序、示例配置往返 |
 | `tests/unit/test_shortcutd_spawn.c` | 命令真的被执行、空命令被拒、连起 20 条不留僵尸（`waitpid` 报 `ECHILD`） |
-| `tests/unit/test_env.c` | `XDG_CURRENT_DESKTOP` 判定（`DDE`/`Deepin`/`deepin-wayland`/`DDE:GNOME` 为真；`woodland:wlroots`/`KDE`/`ddex` 为假）、`is_off` 词表 |
-| `tests/smoke/run_shortcutd_smoke.sh` | 自动启动（非 DDE）→ `binding_count == 3` 且 key/action/flags 正确；第二个实例撞 `occupied` 非零退出；DDE 会话不启动且 trace/日志给出原因；示例配置可回读 |
+| `tests/unit/test_env.c` | 桌面名判定（`DDE`/`Deepin`/`deepin-wayland`/`DDE:GNOME` 为真；`woodland:wlroots`/`KDE`/`ddex` 为假）、三个会话变量各自单独出现、`is_off` 词表 |
+| `tests/smoke/run_shortcutd_smoke.sh` | 自动启动（非 DDE）→ `binding_count == 3` 且 key/action/flags 正确；第二个实例撞 `occupied` 非零退出；DDE 会话（含只有 `DESKTOP_SESSION=deepin`）不启动且 trace/日志给出原因；示例配置可回读；`SIGHUP` 重载后旧绑定撤掉、新绑定生效；退出释放独占；合成器退出时客户端退出 0 |
+
+**没被自动化覆盖的**：`activated` → `wsd_spawn_command()` 这一段需要真的产生一次按键
+（`tests/meson.build` 里的 wayland-protocols 没有 `virtual-keyboard-unstable-v1.xml`，
+造不出合成的键事件），目前只有两端各自被测：合成器侧 `smoke-shortcut` 验 `activated`
+事件与 `last_outcome`，客户端侧 `test_shortcutd_spawn` 验命令执行。中间那一步（按名字
+查绑定）只有代码评审，没有测试。
 
 冒烟测试里**默认不启动** wsd：`tests/smoke/lib.sh:smoke_init()` 会把
 `WOODLAND_SHORTCUTD` 置为 `off`。它会 `acquire` 全局快捷键管理器并注册默认键位，把
@@ -182,7 +207,10 @@ wctl get_tree | jq '.shortcut_manager'  # 合成器侧：acquired / binding_coun
   这类（配置里没有对应字段）。
 - **`occupied` 时 wsd 只报错退出**，不会重试：谁先拿到独占是会话层面的约定，抢是错的。
   真要在 DDE 会话里用它，先停掉 `dde-daemon` 的快捷键服务，再手动起。
-- **桌面名判定依赖会话环境**：`XDG_CURRENT_DESKTOP` 里既没有 `DDE` 也没有 `deepin` 的自定义
-  会话会被当成非 DDE（于是 wsd 会尝试 `acquire`，失败就退出，不影响桌面）。这种情况下用
-  `WOODLAND_SHORTCUTD=off` 明确关掉。
+- **桌面名判定依赖会话环境**：三个会话变量里既没有 `DDE` 也没有 `deepin` 的自定义会话会被
+  当成非 DDE（于是 wsd 会尝试 `acquire`，失败就退出，不影响桌面）。反过来，环境里残留一个
+  `DESKTOP_SESSION=deepin` 会让判定偏保守（不启动客户端），这种情况下用
+  `WOODLAND_SHORTCUTD=/path/to/woodland-shortcutd` 手动指定并自己起。注意路径形式的取值
+  优先于自动查找，但仍然要过 `[general] enabled` 与桌面判定（判定在合成器侧，指定路径
+  不会绕过它）。
 - 没有 GUI 键位编辑器，也没有 inotify 自动重载（`SIGHUP` 手动）。

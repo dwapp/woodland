@@ -247,29 +247,47 @@ void wsd_config_clear(struct wsd_config *cfg)
     cfg->enabled = enabled;
 }
 
-static bool name_taken(const struct wsd_config *cfg, const char *name)
+/*
+ * key 的比较形式：合成器侧的 PortableText 解析对修饰键与 keysym 名都是
+ * 大小写不敏感的（见 src/protocol/shortcut.c 的 token_is_modifier /
+ * xkb_keysym_from_name(CASE_INSENSITIVE)），所以 "meta+left" 与 "Meta+Left"
+ * 是同一个组合。空白在解析里会让整条非法，这里一并去掉——目的是让"看起来
+ * 不同、实际指同一条键"的两条也被认成重复。
+ */
+static void key_compare_form(const char *key, char *buf, size_t len)
 {
+    size_t j = 0;
+    for (const char *p = key; *p; p++) {
+        unsigned char c = (unsigned char)*p;
+        if (c == ' ' || c == '\t') {
+            continue;
+        }
+        if (c >= 'A' && c <= 'Z') {
+            c = (unsigned char)(c - 'A' + 'a');
+        }
+        if (j + 1 >= len) {
+            break; /* 截断：前 len-1 个字符足以区分实际配置里的 key */
+        }
+        buf[j++] = (char)c;
+    }
+    buf[j] = '\0';
+}
+
+bool wsd_config_has_key(const struct wsd_config *cfg, const char *key)
+{
+    if (!cfg || !key || !*key) {
+        return false;
+    }
+    char want[128];
+    key_compare_form(key, want, sizeof(want));
     for (size_t i = 0; i < cfg->count; i++) {
-        if (strcmp(cfg->bindings[i].name, name) == 0) {
+        char have[128];
+        key_compare_form(cfg->bindings[i].key, have, sizeof(have));
+        if (strcmp(want, have) == 0) {
             return true;
         }
     }
     return false;
-}
-
-/*
- * 名字默认就是 key 文本（wctl get_tree 里一眼能认出是哪条键位）。
- * 同一组合写两遍（比如一次 command、一次 action）时追加 #N 保证唯一——
- * 合成器对重名报 name_conflict，与其让第二条静默失败不如自己先区分开。
- */
-static char *make_unique_name(const struct wsd_config *cfg, const char *key)
-{
-    char buf[256];
-    snprintf(buf, sizeof(buf), "%s", key);
-    for (int n = 2; name_taken(cfg, buf) && n < 1000; n++) {
-        snprintf(buf, sizeof(buf), "%s#%d", key, n);
-    }
-    return xstrdup(buf);
 }
 
 bool wsd_config_add(struct wsd_config *cfg, const char *key, uint32_t action,
@@ -287,6 +305,10 @@ bool wsd_config_add(struct wsd_config *cfg, const char *key, uint32_t action,
     if (command && action != WSD_ACTION_NOTIFY) {
         return false;
     }
+    /* 重复的 key 在合成器里只有一条能生效，宁可不加也不要静默丢掉一条 */
+    if (wsd_config_has_key(cfg, key)) {
+        return false;
+    }
 
     if (cfg->count == cfg->capacity) {
         size_t capacity = cfg->capacity ? cfg->capacity * 2 : 16;
@@ -301,7 +323,7 @@ bool wsd_config_add(struct wsd_config *cfg, const char *key, uint32_t action,
 
     struct wsd_binding *binding = &cfg->bindings[cfg->count];
     memset(binding, 0, sizeof(*binding));
-    binding->name = make_unique_name(cfg, key);
+    binding->name = xstrdup(key);
     binding->key = xstrdup(key);
     binding->command = xstrdup(command);
     if (!binding->name || !binding->key || (command && !binding->command)) {
@@ -537,7 +559,14 @@ static void load_entry(struct wsd_config *cfg, const struct toml_table *tbl, siz
     }
 
     if (!wsd_config_add(cfg, key, action, flags, command)) {
-        entry_warn(index, key, "内存不足或字段非法，整条跳过");
+        if (wsd_config_has_key(cfg, key)) {
+            /* 不是"写错了"，而是这条按下去了也不会生效：说清楚而不是静默 */
+            entry_warn(index, key,
+                       "和前面的条目是同一个组合——合成器里一条组合只能有一条生效，"
+                       "整条跳过（要改行为请改前一条）");
+        } else {
+            entry_warn(index, key, "内存不足或字段非法，整条跳过");
+        }
     }
 }
 

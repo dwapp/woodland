@@ -342,7 +342,14 @@ bool woodland_server_init(struct woodland_server *server)
  */
 static bool desktop_owns_shortcuts(void)
 {
-    return woodland_desktop_is_dde(getenv("XDG_CURRENT_DESKTOP"));
+    /* 三个会话变量都看（见 util/env.h：漏设一个就误判，代价是废掉 DDE 键位） */
+    return woodland_session_is_dde();
+}
+
+static const char *env_or_dash(const char *name)
+{
+    const char *value = getenv(name);
+    return (value && *value) ? value : "-";
 }
 
 /*
@@ -400,12 +407,16 @@ static void start_shortcut_client(struct woodland_server *server)
         return;
     }
     if (desktop_owns_shortcuts()) {
-        const char *desktop = getenv("XDG_CURRENT_DESKTOP");
-        woodland_trace_add("spawn", 0, "shortcut client: skipped (desktop=%s)",
-                           desktop ? desktop : "-");
-        wlr_log(WLR_INFO, "shortcut client: DDE session (XDG_CURRENT_DESKTOP=%s), "
+        woodland_trace_add("spawn", 0,
+                           "shortcut client: skipped (DDE session: current=%s session=%s legacy=%s)",
+                           env_or_dash("XDG_CURRENT_DESKTOP"),
+                           env_or_dash("XDG_SESSION_DESKTOP"),
+                           env_or_dash("DESKTOP_SESSION"));
+        wlr_log(WLR_INFO, "shortcut client: DDE session (XDG_CURRENT_DESKTOP=%s, "
+                          "XDG_SESSION_DESKTOP=%s, DESKTOP_SESSION=%s), "
                           "leaving global shortcuts to the desktop",
-                desktop ? desktop : "-");
+                env_or_dash("XDG_CURRENT_DESKTOP"), env_or_dash("XDG_SESSION_DESKTOP"),
+                env_or_dash("DESKTOP_SESSION"));
         return;
     }
 

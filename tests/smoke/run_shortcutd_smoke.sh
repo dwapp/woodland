@@ -4,7 +4,9 @@
 #   2. 非 DDE 会话：合成器自动把它拉起来，绑定条数与配置一致
 #   3. 第二个实例撞上 occupied：必须非零退出，而不是静默占位失败
 #   4. DDE 会话（XDG_CURRENT_DESKTOP=Deepin）：合成器不启动它，快捷键留给桌面
+#   4b. 只有 DESKTOP_SESSION=deepin：同样按 DDE 处理（会话名有几个来源）
 #   5. 手动跑一个实例 + SIGHUP 重载：旧绑定要撤掉、新配置要生效、进程正常退出
+#   6. 合成器退出：客户端以 0 退出（会话结束不是错误）
 #
 # 用法: sh run_shortcutd_smoke.sh <woodland> <woodland-shortcutd> <wctl>
 set -eu
@@ -64,6 +66,12 @@ start_compositor() {
     export XDG_RUNTIME_DIR="$run_dir"
     export XDG_CONFIG_HOME="$run_dir/config"
     export XDG_DATA_HOME="$run_dir/data"
+    # 会话名还有另外两个来源（见 util/env.h:woodland_session_is_dde）。默认清掉，
+    # 让本脚本的 "$1" 是唯一变量；要专测那两个变量时用 SD_SESSION_DESKTOP 传入。
+    unset XDG_SESSION_DESKTOP DESKTOP_SESSION
+    if [ -n "${SD_SESSION_DESKTOP:-}" ]; then
+        export DESKTOP_SESSION="$SD_SESSION_DESKTOP"
+    fi
     mkdir -p "$XDG_CONFIG_HOME/woodland" "$XDG_DATA_HOME"
     cat >"$XDG_CONFIG_HOME/woodland/shortcuts.toml" <<'EOF'
 [general]
@@ -180,6 +188,19 @@ wctl_cmd get_trace | grep -q 'shortcut client: skipped' \
 grep -q 'DDE session' "$SMOKE_LOG" \
     || smoke_fail "compositor log did not mention the DDE session"
 
+# 4b. 只有 DESKTOP_SESSION=deepin（XDG_CURRENT_DESKTOP 不是 DDE）：同样不启动。
+# 显示管理器的会话不一定把 XDG_CURRENT_DESKTOP 设全，漏判的代价是 dde-daemon
+# 拿不到独占、整套 DDE 快捷键失效，所以三个变量都要看。
+SD_SESSION_DESKTOP=deepin start_compositor "woodland:wlroots"
+sleep 0.8
+_tree="$(wctl_cmd get_tree)" || smoke_fail "get_tree failed in the legacy-name session"
+printf '%s' "$_tree" | jq -e \
+    '.shortcut_manager.acquired == false and .shortcut_manager.binding_count == 0' >/dev/null \
+    || smoke_fail "DESKTOP_SESSION=deepin must also be treated as DDE: $_tree"
+grep -q 'DESKTOP_SESSION=deepin' "$SMOKE_LOG" \
+    || smoke_fail "compositor log did not name the deciding session variable"
+unset SD_SESSION_DESKTOP
+
 # ---- 5. 手动实例 + SIGHUP 重载 ----
 # 这一段自己管 wsd 的生命周期：合成器用 --no-shortcut-client 关掉自动启动，
 # 否则它先占了独占，手动这个就只能拿到 occupied。
@@ -220,5 +241,25 @@ sd_pid=""
 # 退出后独占要放开，否则下一个会话永远拿不到 manager
 _tree="$(wait_for '.shortcut_manager.acquired == false')" \
     || smoke_fail "manager was not released after shortcutd exited: ${_tree:-none}"
+
+# ---- 6. 合成器退出：要当"会话结束"退出 0，不是报连接错误 ----
+# 合成器关 socket 时 libwayland 把 EOF 报成 EPIPE。以前这条路径返回 1，
+# 于是每次正常结束会话都会在日志里留一行"连接断开"，按退出码判断健康状态的
+# 东西（systemd、启动脚本）会把正常收尾当崩溃。
+start_compositor "KDE" --no-shortcut-client
+"$SD" -c "$XDG_CONFIG_HOME/woodland/shortcuts.toml" >"$run_dir/sd-exit.log" 2>&1 &
+sd_pid=$!
+wait_for '.shortcut_manager.acquired == true' >/dev/null \
+    || smoke_fail "shortcutd did not acquire before the compositor shutdown"
+kill -TERM "$comp_pid"
+set +e
+wait "$comp_pid"
+comp_pid=""
+wait "$sd_pid"
+sd_rc=$?
+set -e
+sd_pid=""
+[ "$sd_rc" -eq 0 ] \
+    || smoke_fail "shortcutd should exit 0 when the compositor goes away, got $sd_rc: $(cat "$run_dir/sd-exit.log")"
 
 echo "shortcutd smoke: ok"

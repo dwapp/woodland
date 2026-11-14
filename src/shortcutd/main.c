@@ -29,6 +29,8 @@
  * SIGHUP 重新读配置（先 unbind 旧的再 bind 新的，不放弃独占）。
  */
 #define _POSIX_C_SOURCE 200809L
+/* ppoll(2) 在 glibc 的 <poll.h> 里只在 __USE_GNU 下声明，只开 POSIX 宏拿不到 */
+#define _GNU_SOURCE
 #include <errno.h>
 #include <getopt.h>
 #include <limits.h>
@@ -83,7 +85,6 @@ struct sd_state {
     struct treeland_shortcut_manager_v3 *manager;
     struct wsd_config config;
     const char *config_path; /* NULL 表示走默认路径 */
-    bool acquired;
     bool verbose;
     bool running;
     volatile sig_atomic_t pending_signal;
@@ -95,6 +96,12 @@ struct sd_state {
 /* ==================== 日志 ==================== */
 
 static bool g_verbose;
+
+/*
+ * 进入事件循环之前要阻塞的信号掩码的"原样"，ppoll 期间临时换回它。
+ * sd_run 开始阻塞、退出时恢复；进程只有一个实例，用文件作用域即可。
+ */
+static sigset_t g_wait_mask;
 
 static void sd_warn(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 
@@ -254,7 +261,7 @@ static bool sd_load_config(struct sd_state *st, struct wsd_config *cfg)
         sd_warn("%s", err);
         return false;
     }
-    if (cfg->count == 0) {
+    if (cfg->count == 0 && cfg->enabled) {
         sd_warn("%s 里没有可用的绑定", path);
     }
     return true;
@@ -312,6 +319,16 @@ static void sd_handle_reload(struct sd_state *st)
     if (wl_display_flush(st->display) < 0 && errno != EAGAIN) {
         sd_warn("flush failed: %s", strerror(errno));
     }
+    /*
+     * 空配置在启动路径上会直接退出（不占独占位置），重载路径上却不退：
+     * 用户很可能正编到一半、只是把一个中间版本存了盘，退掉就再也不会被
+     * 合成器拉起来了（合成器只在启动时拉一次）。留在原地等下一次 HUP。
+     * 代价是这期间占着独占，别的客户端拿不到——所以要说出来。
+     */
+    if (st->config.count == 0) {
+        sd_warn("重载后没有任何绑定：仍然持有全局快捷键管理器，"
+                "要彻底退出请发 SIGTERM");
+    }
     sd_info("重载完成：%u 条绑定", st->registered);
 }
 
@@ -325,27 +342,58 @@ static int sd_display_failed(struct sd_state *st)
                 "treeland_shortcut_manager_v3 可能已经被 dde-daemon 之类持有（occupied）");
         return SD_EXIT_PROTOCOL;
     }
+    /*
+     * 合成器正常退出时 socket 是 EOF，libwayland 把它报成 EPIPE /
+     * ECONNRESET——这不是错误，是"会话结束了"。以前这里统一按 1 返回，
+     * 于是每次正常退出会话，日志里都留一行"连接断开"，任何按退出码判断
+     * 健康状态的东西都会误报。只有真正读写失败才返回 1。
+     */
+    if (err == EPIPE || err == ECONNRESET) {
+        sd_info("合成器已退出（%s），跟着收尾", strerror(err));
+        return SD_EXIT_OK;
+    }
+    if (err == 0) {
+        sd_warn("与合成器的连接不可用，但没有挂起的协议错误");
+        return SD_EXIT_ERROR;
+    }
     sd_warn("与合成器的连接断开：%s", strerror(err));
     return SD_EXIT_ERROR;
 }
 
 /*
- * 事件循环。手写 poll + prepare_read 而不是直接 wl_display_dispatch()：
- * SIGHUP 要能打断阻塞（sa_flags 不设 SA_RESTART，poll 返回 EINTR），而且
- * 只有在确认可读时 read_events，不会出现"用户空间还有事件、socket 却读不到"
- * 的假死。
+ * 事件循环。手写 ppoll + prepare_read 而不是直接 wl_display_dispatch()：
+ * SIGHUP 要能打断阻塞，而且只有在确认可读时 read_events，不会出现
+ * "用户空间还有事件、socket 却读不到"的假死。
+ *
+ * 为什么是 ppoll 而不是 poll：handler 只把信号塞进 pending_signal，主循环
+ * 在两个位置之间有一个窗口——"读完 pending_signal、还没进 poll"。信号正好
+ * 落在这里时，handler 已经把标志置上，poll 等的却是那一次已经被消费掉的
+ * 信号，于是永远等下去。SIGTERM 丢了不是小事：进程会一直占着独占的
+ * shortcut manager，下一个会话再也注册不上快捷键。ppoll 的 sigmask 在
+ * 等待期间原子地换掉掩码（等待之外三个信号保持阻塞），窗口就关掉了。
  */
 static int sd_run(struct sd_state *st)
 {
     int fd = wl_display_get_fd(st->display);
     struct pollfd pfd = {.fd = fd, .events = POLLIN};
+    int result = SD_EXIT_OK;
+
+    sigset_t handled;
+    sigemptyset(&handled);
+    sigaddset(&handled, SIGINT);
+    sigaddset(&handled, SIGTERM);
+    sigaddset(&handled, SIGHUP);
+    /* g_wait_mask 存的是"阻塞之前"的掩码，也就是等待期间要恢复的那个 */
+    sigprocmask(SIG_BLOCK, &handled, &g_wait_mask);
 
     while (st->running) {
         if (wl_display_dispatch_pending(st->display) < 0) {
-            return sd_display_failed(st);
+            result = sd_display_failed(st);
+            break;
         }
         if (wl_display_flush(st->display) < 0 && errno != EAGAIN) {
-            return sd_display_failed(st);
+            result = sd_display_failed(st);
+            break;
         }
 
         sig_atomic_t sig = st->pending_signal;
@@ -365,18 +413,20 @@ static int sd_run(struct sd_state *st)
             continue;
         }
 
-        int rc = poll(&pfd, 1, -1);
+        int rc = ppoll(&pfd, 1, NULL, &g_wait_mask);
         if (rc < 0) {
             wl_display_cancel_read(st->display);
             if (errno == EINTR) {
                 continue; /* 交给循环头的 pending_signal 处理 */
             }
-            sd_warn("poll failed: %s", strerror(errno));
-            return SD_EXIT_ERROR;
+            sd_warn("ppoll failed: %s", strerror(errno));
+            result = SD_EXIT_ERROR;
+            break;
         }
         if (pfd.revents & POLLIN) {
             if (wl_display_read_events(st->display) < 0) {
-                return sd_display_failed(st);
+                result = sd_display_failed(st);
+                break;
             }
             continue;
         }
@@ -384,10 +434,13 @@ static int sd_run(struct sd_state *st)
         wl_display_cancel_read(st->display);
         if (pfd.revents & (POLLHUP | POLLERR | POLLNVAL)) {
             sd_info("合成器断开连接");
-            return SD_EXIT_OK;
+            break;
         }
     }
-    return SD_EXIT_OK;
+
+    /* 离开循环就把掩码恢复原样：后面还要做销毁/断开，不该带着阻塞走 */
+    sigprocmask(SIG_SETMASK, &g_wait_mask, NULL);
+    return result;
 }
 
 /* ==================== 入口 ==================== */
@@ -417,8 +470,17 @@ static void usage(const char *name)
            "  -v, --verbose            打印每条绑定与每次命中\n"
            "  -h, --help               显示本帮助\n"
            "\n"
+           "信号: SIGTERM/SIGINT 退出；SIGHUP 重新读配置文件（先读成功才动绑定）\n"
+           "\n"
+           "退出码: 0 正常 / 1 配置或运行期错误 / 2 用法错误 / 3 连不上 display /\n"
+           "        4 合成器没有 treeland_shortcut_manager_v3 / 5 协议错误（多数是 occupied：\n"
+           "        别的客户端已经持有 manager，在 DDE 会话里那个位置归 dde-daemon）\n"
+           "\n"
            "环境变量:\n"
            "  WOODLAND_SHORTCUTD       合成器据此找本程序；设为 off/0 则合成器不启动它\n"
+           "\n"
+           "同一个 key 只保留第一条：合成器里一条组合只能有一条生效（同 action 会被\n"
+           "upsert 吞掉，不同 action 只有表里靠前的那条会命中），重复的条目会被跳过。\n"
            "\n",
            name);
     print_actions(stdout);
@@ -543,7 +605,6 @@ int main(int argc, char *argv[])
     }
 
     treeland_shortcut_manager_v3_acquire(st.manager);
-    st.acquired = true;
     sd_bind_all(&st);
     /* 第二遍 roundtrip：把 acquire/bind_key 真正发出去，顺便收 bind_failure */
     if (wl_display_roundtrip(st.display) < 0) {
@@ -552,8 +613,9 @@ int main(int argc, char *argv[])
         wsd_config_clear(&st.config);
         return SD_EXIT_PROTOCOL;
     }
-    fprintf(stderr, "woodland-shortcutd: 已注册 %u 条快捷键（%u 条被拒绝）\n", st.registered,
-            st.failures);
+    fprintf(stderr, "woodland-shortcutd: 已发送 %u 条绑定，其中 %u 条被合成器拒绝%s\n",
+            st.registered, st.failures,
+            st.failures ? "（看上面的 bind_failure 日志）" : "");
 
     int rc = sd_run(&st);
 

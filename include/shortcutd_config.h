@@ -88,7 +88,7 @@ enum wsd_action {
 #define WSD_ACTION_MAX WSD_ACTION_SHUTDOWN_MENU
 
 struct wsd_binding {
-    char *name;    /* 注册给合成器的唯一名字，默认取 key 文本（重名时加 #2） */
+    char *name;    /* 注册给合成器的唯一名字，就是 key 文本（配置层保证 key 唯一） */
     char *key;     /* QKeySequence PortableText */
     uint32_t flags;
     uint32_t action;
@@ -127,8 +127,17 @@ enum wsd_load_result wsd_config_load_file(struct wsd_config *cfg, const char *pa
 void wsd_config_load_defaults(struct wsd_config *cfg);
 
 /*
- * 追加一条绑定，name 由 key 派生并保证在本配置内唯一。
- * 参数非法或内存不足返回 false。
+ * 这个 key 是否已经在表里。比较形式忽略大小写与空白：合成器侧的解析是
+ * 大小写不敏感的（`meta+left` 与 `Meta+Left` 是同一个组合），而一条组合在
+ * 合成器里只能有一条生效——同 action 会被 bind_key 的 upsert 吞掉（并且
+ * 保留先注册的 name），不同 action 只有表里靠前的那条会命中。所以重复的
+ * key 必须在配置层就挡掉，否则表现为"第二条静默不生效"。
+ */
+bool wsd_config_has_key(const struct wsd_config *cfg, const char *key);
+
+/*
+ * 追加一条绑定。name 由 key 派生（就是 key 文本，配置层保证 key 唯一）。
+ * 参数非法、key 与已有条目重复、或内存不足返回 false。
  */
 bool wsd_config_add(struct wsd_config *cfg, const char *key, uint32_t action,
                     uint32_t flags, const char *command);

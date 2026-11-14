@@ -86,13 +86,24 @@ static void test_add_and_names(void)
     assert(cfg.enabled);
 
     assert(wsd_config_add(&cfg, "Meta+A", WSD_ACTION_NOTIFY, WSD_FLAG_PRESS, "true"));
-    assert(wsd_config_add(&cfg, "Meta+A", WSD_ACTION_CLOSE_WINDOW, WSD_FLAG_PRESS, NULL));
-    assert(cfg.count == 2);
-    /* 同名 key 两次：名字要自己区分开，否则合成器回 name_conflict */
+    assert(cfg.count == 1);
+    /* 名字就是 key 文本：合成器把 name 当唯一键，配置层保证 key 唯一 */
     assert(strcmp(cfg.bindings[0].name, "Meta+A") == 0);
-    assert(strcmp(cfg.bindings[1].name, "Meta+A#2") == 0);
     assert(cfg.bindings[0].command && strcmp(cfg.bindings[0].command, "true") == 0);
-    assert(cfg.bindings[1].command == NULL);
+
+    /*
+     * 同一个组合只留第一条。合成器侧一条组合只能有一条生效：同 action 会被
+     * bind_key 的 upsert 吞掉（还保留先注册的 name），不同 action 只有表里
+     * 靠前的那条会命中。以前这里给重名加 "#2" 让两条都注册进去，结果是用户
+     * 看到"注册成功"但第二条永远不生效——比直接拒绝更糟。大小写/空白不同
+     * 也要认成同一条：合成器的解析对这两者不敏感。
+     */
+    assert(!wsd_config_add(&cfg, "Meta+A", WSD_ACTION_CLOSE_WINDOW, WSD_FLAG_PRESS, NULL));
+    assert(!wsd_config_add(&cfg, "meta+a", WSD_ACTION_NOTIFY, WSD_FLAG_PRESS, "true"));
+    assert(!wsd_config_add(&cfg, " Meta + A ", WSD_ACTION_NOTIFY, WSD_FLAG_PRESS, "true"));
+    assert(cfg.count == 1);
+    assert(wsd_config_has_key(&cfg, "META+A"));
+    assert(!wsd_config_has_key(&cfg, "Meta+B"));
 
     /* 非法输入一律拒绝，别把半条绑定塞进表里 */
     assert(!wsd_config_add(&cfg, "", WSD_ACTION_NOTIFY, WSD_FLAG_PRESS, "true"));
@@ -102,7 +113,7 @@ static void test_add_and_names(void)
     assert(!wsd_config_add(&cfg, "Meta+B", WSD_ACTION_MAX + 1, WSD_FLAG_PRESS, NULL));
     /* command 只能配 notify：带 command 又给具体动作等于两条语义打架 */
     assert(!wsd_config_add(&cfg, "Meta+B", WSD_ACTION_TILE_LEFT, WSD_FLAG_PRESS, "true"));
-    assert(cfg.count == 2);
+    assert(cfg.count == 1);
 
     wsd_config_clear(&cfg);
     assert(cfg.count == 0 && cfg.bindings == NULL);
@@ -174,7 +185,13 @@ static void test_load_skips_bad_entries(void)
         "\n"
         "[[shortcut]]\n"
         "key = \"Ctrl+Alt+F\"\n"
-        "action = \"close_window\"\n";
+        "action = \"close_window\"\n"
+        "\n"
+        /* 与上一条同一个组合（大小写不同、action 不同）：整条跳过，
+         * 保留先出现的那条的 key 原文与 action */
+        "[[shortcut]]\n"
+        "key = \"ctrl+alt+f\"\n"
+        "action = \"maximize\"\n";
     char *path = write_temp(content);
 
     struct wsd_config cfg;
@@ -183,6 +200,8 @@ static void test_load_skips_bad_entries(void)
     assert(wsd_config_load_file(&cfg, path, err, sizeof(err)) == WSD_LOAD_OK);
     assert(cfg.count == 1);
     assert(strcmp(cfg.bindings[0].key, "Ctrl+Alt+F") == 0);
+    /* 重复的那条被跳过，先出现的那条原样保留 */
+    assert(cfg.bindings[0].action == WSD_ACTION_CLOSE_WINDOW);
 
     wsd_config_clear(&cfg);
     unlink(path);

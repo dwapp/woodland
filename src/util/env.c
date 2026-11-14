@@ -7,6 +7,7 @@
  */
 #include "util/env.h"
 
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 
@@ -46,6 +47,22 @@ bool woodland_desktop_is_dde(const char *current_desktop)
             break;
         }
         p = sep + 1;
+    }
+    return false;
+}
+
+bool woodland_session_is_dde(void)
+{
+    static const char *const vars[] = {
+        "XDG_CURRENT_DESKTOP",
+        "XDG_SESSION_DESKTOP",
+        "DESKTOP_SESSION",
+        NULL,
+    };
+    for (size_t i = 0; vars[i]; i++) {
+        if (woodland_desktop_is_dde(getenv(vars[i]))) {
+            return true;
+        }
     }
     return false;
 }
