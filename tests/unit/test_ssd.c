@@ -25,21 +25,27 @@
  */
 struct glyph_scan {
     struct woodland_view *view;
-    int count;  /* 按钮区里的 buffer 节点数 */
-    int square; /* 其中 dest 宽高相等的 */
-    int spill;  /* 其中"顶端 + 高度"越过内容原点的（即画到了客户端内容上） */
+    int zone_x;  /* 按钮区左边界（绝对坐标），0 表示整条标题栏 */
+    int count;   /* 按钮区里的 buffer 节点数 */
+    int enabled; /* 其中处于可见状态的 */
+    int square;  /* 其中 dest 宽高相等的 */
+    int spill;   /* 其中"顶端 + 高度"越过内容原点的（即画到了客户端内容上） */
 };
 
+/* 注意：wlr_scene_node_for_each_buffer 会整棵跳过 enabled=false 的子树，
+ * 所以这里只能数到"看得见的节点"——想断言某东西被藏起来，只能断言它不在。 */
 static void scan_glyphs(struct wlr_scene_buffer *buffer, int x, int y, void *data)
 {
     struct glyph_scan *scan = data;
-    int ox = scan->view->scene_tree->node.x;
     int oy = scan->view->scene_tree->node.y;
     /* 按钮区 = 内容右端三个按钮宽。标题文字和应用图标都在左侧，不会命中 */
-    if (x < ox + 400 - 3 * WOODLAND_SSD_BUTTON_W || y >= oy) {
+    if (x < scan->zone_x || y >= oy) {
         return;
     }
     scan->count++;
+    if (buffer->node.enabled) {
+        scan->enabled++;
+    }
     if (buffer->dst_width == buffer->dst_height) {
         scan->square++;
     }
@@ -273,15 +279,54 @@ int main(void)
     woodland_ssd_create(&tight);
     assert(tight.ssd != NULL);
 
-    struct glyph_scan scan = {.view = &tight};
+    struct glyph_scan scan = {.view = &tight,
+                              .zone_x = 600 + 400 - 3 * WOODLAND_SSD_BUTTON_W};
     wlr_scene_node_for_each_buffer(&tight.scene_tree->node, scan_glyphs, &scan);
     assert(scan.count == 3);           /* close / max / min 三个符号 */
+    assert(scan.enabled == scan.count); /* 默认宽度下当然要画出来 */
     assert(scan.square == scan.count); /* dest 必须是方形，不能被压扁 */
     assert(scan.spill == 0);           /* 不能越过内容原点画到客户端内容上 */
 
     woodland_ssd_destroy(&tight);
     wlr_scene_node_destroy(&tight.scene_tree->node);
     server.config = NULL;
+
+    /*
+     * 窄窗口：放不下"图标 + 标题 + 三个按钮"时整组按钮收起，右侧那一带仍是
+     * 标题栏（能拖，点不到按钮）。不收的话 32+32+32 三个格子会压到左侧应用
+     * 图标上，两个图形叠在一起谁也点不准。
+     */
+    struct wlr_xdg_surface narrow_base = {0};
+    narrow_base.geometry = (struct wlr_box){.x = 0, .y = 0, .width = 100, .height = 200};
+    struct wlr_xdg_toplevel narrow_toplevel = {.base = &narrow_base};
+
+    struct woodland_view narrow = {0};
+    narrow.server = &server;
+    narrow.xdg_toplevel = &narrow_toplevel;
+    narrow.scene_tree = wlr_scene_tree_create(&server.scene->tree);
+    assert(narrow.scene_tree);
+    wlr_scene_node_set_position(&narrow.scene_tree->node, 900, 100);
+    woodland_ssd_create(&narrow);
+    assert(narrow.ssd != NULL);
+
+    /* 相对 (95, -10) 落在最右那个按钮格子内；按钮收起后必须退回标题栏 */
+    assert(woodland_ssd_at(&narrow, 900 + 95, 100 - 10, &edges) == WOODLAND_SSD_TITLEBAR);
+    assert(woodland_ssd_at(&narrow, 900 + 50, 100 - 10, &edges) == WOODLAND_SSD_TITLEBAR);
+
+    /* 光不响应点击还不够：节点本身也得关掉，否则图标还画在标题栏上。
+     * 这一条是给 ssd_apply_state 的——它跑在 ssd_layout 之后，早先那句
+     * set_enabled(button, titlebar) 会把布局刚收起的按钮重新打开。
+     *
+     * 遍历器会跳过隐藏子树，所以"按钮不在"表现为数不到它们：右侧 96px 那一带
+     * 里只剩应用图标和标题文字（这个 view 两个都可能是空的），三个符号一个都
+     * 不能冒出来。 */
+    struct glyph_scan narrow_scan = {.view = &narrow,
+                                     .zone_x = 900 + 100 - 3 * WOODLAND_SSD_BUTTON_W};
+    wlr_scene_node_for_each_buffer(&narrow.scene_tree->node, scan_glyphs, &narrow_scan);
+    assert(narrow_scan.count <= 2);
+
+    woodland_ssd_destroy(&narrow);
+    wlr_scene_node_destroy(&narrow.scene_tree->node);
 
     /* destroy：view->ssd 置空，scene 树级联释放 */
     woodland_ssd_destroy(&view);

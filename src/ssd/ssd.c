@@ -77,6 +77,7 @@ struct woodland_ssd {
     int height;                          /* 内容高 */
     /* corner_radius 移动至上方的 #if WOODLAND_HAVE_EFFECTS 块内 */
     bool maximized;                      /* 缓存的最大化状态 */
+    bool buttons_hidden;                 /* 窗口太窄，三个按钮整组收起（见 ssd_layout） */
     float scale;                         /* 渲染当前使用的输出缩放 */
 };
 
@@ -499,8 +500,8 @@ static void ssd_update_buttons(struct woodland_ssd *ssd)
 {
     int hovered = button_index(ssd->hover_part);
     int pressed = button_index(ssd->pressed_part);
-    /* 标题栏被隐藏后按钮不存在：残留的 hover 不能让关闭键"亮着" */
-    if (ssd_titlebar_height(ssd->view) <= 0) {
+    /* 标题栏隐藏或按钮因放不下而收起时按钮不存在：残留的 hover 不能让关闭键"亮着" */
+    if (ssd_titlebar_height(ssd->view) <= 0 || ssd->buttons_hidden) {
         hovered = -1;
         pressed = -1;
     }
@@ -586,6 +587,27 @@ static void ssd_layout(struct woodland_ssd *ssd)
     int bwn = ssd_button_width(ssd->view);
     int gap = WOODLAND_SSD_BUTTON_GAP;
     int by = -th + (th - bh) / 2;
+    int icon_size = ssd_icon_size(th);
+    int icon_pad = 8;
+    int right_btns = BUTTON_COUNT * bwn + (BUTTON_COUNT - 1) * gap;
+    int left_bound = ssd->title_icon ? (icon_pad + icon_size + 8) : 8;
+
+    /*
+     * 放不下"图标 + 一点标题 + 三个按钮"时，整组按钮收起。
+     *
+     * 不收的话最左那个按钮会压到应用图标上：两个图形叠在一起谁也点不准，悬停
+     * 底色还会盖住图标。收起后整条标题栏都能拖动，关闭/最大化仍可从右键菜单或
+     * 快捷键走——labwc 对放不下的部件也是"不画"，而不是画到别人身上。
+     *
+     * 收起是整组而不是逐个收：只留一个关闭键看着能用，实际宽度只够画半个，
+     * 比一个都没有更难解释。
+     *
+     * 这里仍然照常摆位，只留下"放不下"这个结论——开/关节点统一由
+     * ssd_apply_state 负责。布局只管几何、状态只管显隐，两处都写会互相覆盖；
+     * 而布局若因为放不下就跳过摆位，节点会停在创建时的 (0,0)，一旦谁把它重新
+     * 打开，图标就画到内容区左上角去了。
+     */
+    ssd->buttons_hidden = w < left_bound + right_btns + 8;
     int x = w - gap - bwn;
     for (int i = 0; i < BUTTON_COUNT; i++) {
         int idx = button_order[i];
@@ -597,8 +619,6 @@ static void ssd_layout(struct woodland_ssd *ssd)
     }
 
     /* 左侧应用图标：垂直居中于标题栏（32px 标题栏配 20px 图标） */
-    int icon_size = ssd_icon_size(th);
-    int icon_pad = 8;
     if (ssd->title_icon) {
         int icon_y = -th + (th - icon_size) / 2;
         wlr_scene_node_set_position(&ssd->title_icon->node, icon_pad, icon_y);
@@ -607,9 +627,9 @@ static void ssd_layout(struct woodland_ssd *ssd)
 
     /* 标题文字：按 GXDE/Deepin 风格全宽居中，左右分别与应用图标及控制按钮保持安全距离 */
     if (ssd->title_text) {
-        int right_btns = BUTTON_COUNT * bwn + (BUTTON_COUNT - 1) * gap;
-        int left_bound = ssd->title_icon ? (icon_pad + icon_size + 8) : 8;
-        int avail_w = (w - right_btns - 8) - left_bound;
+        /* 按钮收起时右侧不再需要让位 */
+        int pad_right = ssd->buttons_hidden ? 0 : right_btns;
+        int avail_w = (w - pad_right - 8) - left_bound;
         if (avail_w < 1) {
             avail_w = 1;
         }
@@ -622,8 +642,8 @@ static void ssd_layout(struct woodland_ssd *ssd)
         if (tx < left_bound) {
             tx = left_bound;
         }
-        if (tx + title_w > w - right_btns - 8) {
-            tx = w - right_btns - 8 - title_w;
+        if (tx + title_w > w - pad_right - 8) {
+            tx = w - pad_right - 8 - title_w;
         }
         if (tx < left_bound) {
             tx = left_bound;
@@ -785,9 +805,12 @@ static void ssd_apply_state(struct woodland_ssd *ssd)
      * 只不是"高度设成 0"，是为了不留下 0 尺寸的节点参与命中与渲染 */
     bool titlebar = ssd_titlebar_height(view) > 0;
     wlr_scene_node_set_enabled(&ssd->titlebar->node, titlebar);
+    /* buttons_hidden 是布局算出来的"放不下"：这个函数在 ssd_layout 之后跑，
+     * 这里的 true 会把布局刚关掉的按钮重新打开，必须一起判断 */
+    bool buttons = titlebar && !ssd->buttons_hidden;
     for (int i = 0; i < BUTTON_COUNT; i++) {
-        wlr_scene_node_set_enabled(&ssd->button[i]->node, titlebar);
-        if (!titlebar) {
+        wlr_scene_node_set_enabled(&ssd->button[i]->node, buttons);
+        if (!buttons) {
             wlr_scene_node_set_enabled(&ssd->button_bg[i]->node, false);
         }
     }
@@ -954,12 +977,12 @@ static enum woodland_ssd_part ssd_hit_relative(struct woodland_ssd *ssd, double 
 
     /* 标题栏（含按钮） */
     if (rx >= 0 && rx < w && ry >= -th && ry < 0) {
-        /* 按钮区（右侧） */
+        /* 按钮区（右侧）。按钮收起时这一带仍是标题栏：能拖，但点不到按钮 */
         int bh = ssd_button_height(th);
         int bwn = ssd_button_width(ssd->view);
         int gap = WOODLAND_SSD_BUTTON_GAP;
         int by = -th + (th - bh) / 2;
-        if (ry >= by && ry < by + bh) {
+        if (!ssd->buttons_hidden && ry >= by && ry < by + bh) {
             int x = w - gap - bwn;
             if (rx >= x && rx < x + bwn) {
                 return WOODLAND_SSD_BUTTON_CLOSE;

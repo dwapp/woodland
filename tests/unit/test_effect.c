@@ -31,7 +31,7 @@ int main(void)
     /* 堆上分配：woodland_config_destroy 连结构本身一起释放，栈上的不行 */
     struct woodland_config *config = woodland_config_create_default();
     assert(config != NULL);
-    config->ssd.titlebar_height = 26;
+    config->ssd.titlebar_height = WOODLAND_SSD_TITLEBAR_H;
     config->ssd.border_width = 1;
     server.config = config;
 
@@ -87,7 +87,7 @@ int main(void)
     clear_corners(&c);
     woodland_effect_corners(&view, &c);
     assert(c.top_left == 10 && c.bottom_right == 10);
-    config->ssd.titlebar_height = 26;
+    config->ssd.titlebar_height = WOODLAND_SSD_TITLEBAR_H;
 
     /* ---- 5) 最大化 / 全屏：一律直角（圆角会在屏幕边缘漏出后面） ---- */
     view.maximized = true;
