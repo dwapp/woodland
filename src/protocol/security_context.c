@@ -364,6 +364,12 @@ woodland_proto_security_context_lookup_client(struct woodland_proto *proto,
  * 的进程连入（权限来自 socket 文件属主与运行时目录，不是合成器逐连接校验），
  * 所以"非沙箱"等价于"本 session 内的可信客户端"。协议族不该再读 SO_PEERCRED
  * 比较 uid——那既冗余又给人"woodland 在做 DDE 特权判定"的错觉。
+ *
+ * 不变式：调用方（各特权协议的 bind 复查）保证本 helper 只在 security_context
+ * 族初始化成功之后才可达。当前启动序列里 security_context_init 失败会让整个
+ * 协议层/合成器启动失败、socket 都不会加，所以此处 fail-open（返回 false =
+ * 放行）只在不可达的启动失败路径上发生。改动 init 顺序或允许降级继续运行时，
+ * 必须先保证这条不变式仍然成立，否则三个特权协议会静默全开。
  */
 bool woodland_proto_security_context_is_sandboxed(struct woodland_proto *proto,
                                                    const struct wl_client *client)

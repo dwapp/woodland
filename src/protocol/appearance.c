@@ -31,7 +31,8 @@
  * 特权判定：协议说"未授权的 bind 可以静默忽略请求甚至断开连接"。woodland
  * 是单用户 session 合成器，用户 socket 只能被同 uid 连接，别的用户连不上；
  * 特权边界统一交给 wp_security_context_manager_v1（沙箱连接的 global 过滤
- * 已藏起本协议）。woodland 不做 DDE 的 privileged 服务、也不逐连接比 uid，
+ * 已藏起 manager 端；观测端 treeland_appearance_v1 在白名单里、沙箱可见）。
+ * woodland 不做 DDE 的 privileged 服务、也不逐连接比 uid，
  * 与 compositor_action.c / shortcut.c / xwindow_control.c 的取舍一致。
  */
 #include <stdlib.h>
