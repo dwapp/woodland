@@ -40,17 +40,17 @@
  *     都不广播：DDE Dock 用 isActive() 判通道可用性，广播一个永远失败的
  *     global 会让它一直发请求、不再回退到 X11 原生 reparent。
  *
- * 权限：协议要求"应当拒绝非特权客户端的 bind"。woodland 没有 DDE 的
- * privilege 服务，只做两层力所能及的校验——对端 uid 与合成器相同、且该连接
- * 没有 security context（沙箱客户端的 global 过滤在 sec_ctx_global_filter
- * 里已经挡了一道，这里是纵深防御）。这不是 DDE 的按 app_id 授权，也不等价
- * 于上游要求 target 与 anchor 同 session 的隔离：任何同 uid 的非沙箱进程
+ * 权限：协议要求"应当拒绝非特权客户端的 bind"。woodland 是单用户 session
+ * 合成器（用户 socket 只能被同 uid 连接），特权边界统一交给
+ * wp_security_context_manager_v1：带 security context 的沙箱连接的 global
+ * 过滤在 sec_ctx_global_filter 里已经挡了一道，这里的 bind 再判一次
+ * "无 security context"只是纵深防御。woodland 不做 DDE 的按 app_id 授权，
+ * 也不等价于上游要求 target 与 anchor 同 session 的隔离：任何非沙箱进程
  * 都能按 X11 window id 挪动别人的窗口。
  */
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
 
 #include <wayland-server-core.h>
 #include <wayland-server-protocol.h> /* wl_callback_interface / wl_callback_send_done */
@@ -296,26 +296,14 @@ static bool anchor_position(struct woodland_server *server, struct wl_client *cl
 
 /* ==================== bind / 请求 ==================== */
 
-static bool client_allowed(struct woodland_server *server, struct wl_client *client,
-                           uid_t *out_uid)
+static bool client_allowed(struct woodland_server *server, struct wl_client *client)
 {
-    pid_t pid = 0;
-    uid_t uid = (uid_t)-1;
-    gid_t gid = 0;
-    wl_client_get_credentials(client, &pid, &uid, &gid);
-    (void)pid;
-    (void)gid;
-    if (out_uid) {
-        *out_uid = uid;
-    }
-    if (uid != (uid_t)-1 && uid != getuid()) {
-        return false;
-    }
     /*
      * 沙箱连接的 global 过滤器已经把这个特权协议藏起来了；再判一次是防止
-     * 客户端在 commit 之前就 bind（或绕过过滤器的路径）拿到对象。
+     * 客户端在 commit 之前就 bind（或绕过过滤器的路径）拿到对象。用户 socket
+     * 本身只接受同 uid 连接，不需要再逐连接比对 uid。
      */
-    return woodland_protocol_client_security_context(server, client) == NULL;
+    return !woodland_proto_security_context_is_sandboxed(server->proto, client);
 }
 
 static void binding_resource_destroy(struct wl_resource *resource)
@@ -457,12 +445,8 @@ static const struct treeland_xwindow_control_v1_interface xwindow_impl = {
 static void xwindow_bind(struct wl_client *client, void *data, uint32_t version, uint32_t id)
 {
     struct woodland_proto_xwindow_control *family = data;
-    uid_t uid = (uid_t)-1;
-    if (!client_allowed(family->server, client, &uid)) {
-        wlr_log(WLR_ERROR,
-                "xwindow-control: denied bind from uid %u (compositor uid %u), sandboxed=%d",
-                (unsigned)uid, (unsigned)getuid(),
-                woodland_protocol_client_security_context(family->server, client) != NULL);
+    if (!client_allowed(family->server, client)) {
+        wlr_log(WLR_ERROR, "xwindow-control: denied bind from sandboxed client");
         /*
          * 协议没有自己的 error enum：用 implementation 错误明确拒绝 bind。
          * 注意这会断掉整条连接（不只是这次 bind），误 bind 的普通应用会直接
@@ -470,7 +454,7 @@ static void xwindow_bind(struct wl_client *client, void *data, uint32_t version,
          * 很小；要更温和可以改成建完 resource 立刻销毁，但那样诊断更弱。
          */
         wl_client_post_implementation_error(client,
-            "treeland_xwindow_control_v1: bind rejected (different user or sandboxed)");
+            "treeland_xwindow_control_v1: bind rejected for a sandboxed client");
         return;
     }
 

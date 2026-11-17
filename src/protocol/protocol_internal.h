@@ -171,6 +171,8 @@ void woodland_proto_security_context_finish(struct woodland_proto *proto);
 const struct wlr_security_context_v1_state *
 woodland_proto_security_context_lookup_client(struct woodland_proto *proto,
                                               const struct wl_client *client);
+bool woodland_proto_security_context_is_sandboxed(struct woodland_proto *proto,
+                                                   const struct wl_client *client);
 
 /* X11 摆位族（xwindow_control.c）：treeland-xwindow-control-v1。
  * 谁都不依赖它，也不被别人依赖；排在 security_context 之后是为了让

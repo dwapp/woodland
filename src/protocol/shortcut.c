@@ -31,8 +31,10 @@
  *                 状态机，不改状态、不发事件，但记 trace / 日志 / wctl。
  *
  * 部分实现（明确写出来，别当成安全边界）：
- *   - 协议要求 privileged client。woodland 没有 DDE privilege 服务，与
- *     compositor_action.c 一样只校验对端 uid 与合成器相同，挡住跨用户连接。
+ *   - 协议要求 privileged client。woodland 是单用户 session 合成器（用户
+ *     socket 只能被同 uid 连接），特权边界统一交给 wp_security_context_manager_v1：
+ *     带 security context 的沙箱连接由全局过滤器藏起本协议，这里不再逐连接
+ *     比 uid（那既冗余又给人"在做 DDE 特权判定"的错觉）。
  *   - 「用户 session 切换时延迟 bind/unbind」没有实现：woodland 是单用户
  *     session 合成器，绑定一律立即生效。
  *   - 裸 Meta（Super 单独按下）只能被 capture 捕获，不能 bind_key：协议
@@ -54,7 +56,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 #include <wayland-server-core.h>
 #include <wlr/types/wlr_compositor.h>
@@ -763,20 +764,14 @@ static enum shortcut_outcome shortcut_run_action(struct woodland_proto_shortcut 
 
 /* ==================== bind / manager 请求 ==================== */
 
-static bool client_allowed(struct wl_client *client)
+/*
+ * 最小权限校验：非沙箱即可信。单用户合成器的用户 socket 本身只接受同 uid
+ * 连接，唯一要挡的是带 security context 的沙箱连接（global 过滤已藏起本
+ * 协议，这里是纵深防御）。
+ */
+static bool client_allowed(struct woodland_server *server, struct wl_client *client)
 {
-    pid_t pid = 0;
-    uid_t uid = (uid_t)-1;
-    gid_t gid = 0;
-    wl_client_get_credentials(client, &pid, &uid, &gid);
-    (void)pid;
-    (void)gid;
-    if (uid == (uid_t)-1) {
-        /* 部分 fd 取不到 SO_PEERCRED：in-process 客户端也走这条，放行 */
-        wlr_log(WLR_INFO, "shortcut-manager: no peer credentials, allowing bind");
-        return true;
-    }
-    return uid == getuid();
+    return !woodland_proto_security_context_is_sandboxed(server->proto, client);
 }
 
 static void manager_resource_destroy(struct wl_resource *resource)
@@ -1165,9 +1160,10 @@ static const struct treeland_shortcut_manager_v3_interface manager_impl = {
 static void shortcut_bind(struct wl_client *client, void *data, uint32_t version, uint32_t id)
 {
     struct woodland_proto_shortcut *sc = data;
-    if (!client_allowed(client)) {
+    if (!client_allowed(sc->server, client)) {
+        wlr_log(WLR_ERROR, "shortcut-manager: denied bind from sandboxed client");
         wl_client_post_implementation_error(client,
-            "treeland_shortcut_manager_v3: bind rejected for a different user");
+            "treeland_shortcut_manager_v3: bind rejected for a sandboxed client");
         return;
     }
     if (version > SC_VERSION) {

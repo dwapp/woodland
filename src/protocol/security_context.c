@@ -355,6 +355,22 @@ woodland_proto_security_context_lookup_client(struct woodland_proto *proto,
                                                          (struct wl_client *)client);
 }
 
+/*
+ * 判定"该连接是否带安全上下文"：任何有 security context 的连接（沙箱引擎经
+ * create_listener + commit 建立的私有 socket，以及绑定到沙箱连接的客户端）都
+ * 受统一全局过滤器约束，其中特权协议已经被藏起来了。
+ *
+ * 这是单用户合成器的唯一身份边界：woodland 的用户 socket 本身就只能被同 uid
+ * 的进程连入（权限来自 socket 文件属主与运行时目录，不是合成器逐连接校验），
+ * 所以"非沙箱"等价于"本 session 内的可信客户端"。协议族不该再读 SO_PEERCRED
+ * 比较 uid——那既冗余又给人"woodland 在做 DDE 特权判定"的错觉。
+ */
+bool woodland_proto_security_context_is_sandboxed(struct woodland_proto *proto,
+                                                   const struct wl_client *client)
+{
+    return woodland_proto_security_context_lookup_client(proto, client) != NULL;
+}
+
 const struct wlr_security_context_v1_state *
 woodland_protocol_client_security_context(struct woodland_server *server,
                                           const struct wl_client *client)

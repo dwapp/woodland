@@ -235,9 +235,10 @@ X11 窗口的缩放滤波（按所在输出的 scale 选 nearest/bilinear）全�
   `woodland_workspace_switch()`；15..30 号 shell 动作（show-desktop、多任务、
   缩放、FPS、锁屏、关机菜单、用户切换）暂置空——不改状态、不发事件，只记
   `action` 轨迹、`wctl get_tree` 的 `compositor_action` 和合成器日志，别把
-  "ignore" 当成"已生效"。bind 的特权校验只做到同 uid：woodland 没有 DDE 的
-  privilege 服务，这不是权限边界。协议 XML 是 `protocols/treeland/` 下的只读
-  副本（MIT，上游 `dde/`）；档位详见 `include/protocol.h` 头部注释。
+  "ignore" 当成"已生效"。bind 的特权校验只挡沙箱连接（用户 socket 本身限同
+  uid，别的用户连不上），特权边界统一交给 wp_security_context_manager_v1，
+  woodland 没有 DDE 的 privilege 服务，这不是权限边界。协议 XML 是 `protocols/treeland/`
+  下的只读副本（MIT，上游 `dde/`）；档位详见 `include/protocol.h` 头部注释。
 - **treeland-shortcut-manager-unstable-v3 已接线**（`feature/shortcut-manager-v3`）：
   `acquire` 独占、bind/unbind 的四种 `bind_failure`、`capture_next_shortcut` 的
   busy / not_active / aborted / interrupted 与 `activated` 事件都实现；动作里
@@ -360,9 +361,9 @@ X11 窗口的缩放滤波（按所在输出的 scale 选 nearest/bilinear）全�
     `xwayland_lib`（只链 protocol_lib 的单测会缺符号），钩子为 NULL 就是本构建
     没 Xwayland，如实回 `callback.done(1)` 并记 `no_xwayland`，别假装生效。
   ④ 每条请求建一个 `wl_callback`、发一次 `done(0/1)` 后立刻销毁；连 callback
-    都分配不出来只能 `post_no_memory`。bind 限同 uid 且非沙箱（**不是** DDE 的
-    privilege 服务，也不等价于上游要求 target/anchor 同 session 的隔离：同 uid
-    的非沙箱进程能按 wid 挪任意 X11 窗口），新 global 已登记进
+    都分配不出来只能 `post_no_memory`。bind 限非沙箱（**不是** DDE 的
+    privilege 服务，也不等价于上游要求 target/anchor 同 session 的隔离：任何
+    非沙箱进程都能按 wid 挪任意 X11 窗口），新 global 已登记进
     `security_context.c` 的 `privileged_protocols`，加了暴露给客户端的 global
     都要同步那张表。拒绝 bind 用 implementation error，会断掉整条连接。
   ⑤ **X11 configure 收 int16_t x/y**，而 `wl_fixed_t` 能给出几万像素的合法

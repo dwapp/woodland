@@ -55,7 +55,7 @@ struct wlr_output;
  *             X11/Xwayland 应用与沙盒内直连主 WAYLAND_DISPLAY 的进程不受限；
  *             新增任何暴露给客户端的 global 时必须同步更新 security_context.c 的
  *             allowed_protocols / privileged_protocols 分类）、
- *             treeland-xwindow-control-v1（bind 限同 uid 且非沙箱；按 wid 找到
+ *             treeland-xwindow-control-v1（bind 限非沙箱；按 wid 找到
  *             已映射的 XWayland 窗口——受管理视图与 override-redirect 都算——
  *             摆到 anchor surface 左上角 + (dx,dy)，并同步 X11 侧 configure；
  *             目标超出 X11 int16 坐标范围时回 done(1) 且不动窗口；每条请求
@@ -70,8 +70,10 @@ struct wlr_output;
  *             —— 真接 woodland_workspace_switch()；其余 15..30 号动作
  *             （show-desktop、多任务、缩放、FPS、锁屏、关机菜单、用户切换）
  *             置空但可观测（trace / wctl / 日志），不假装生效。bind 的
- *             "非特权客户端"判定只做到同 uid，woodland 没有 DDE 的
- *             privileged 服务，取舍写在 compositor_action.c 文件头。
+ *             "非特权客户端"判定只挡沙箱连接：用户 socket 本身限同 uid，
+ *             特权边界统一交给 wp_security_context_manager_v1，woodland 不
+ *             做 DDE 的按 app_id / 签名授权，取舍写在 compositor_action.c
+ *             文件头。
  *   部分实现：treeland-foreign-toplevel-manager-v3 的 dock preview context——
  *             对象与请求照协议校验（invalid_surface / context_already_exists），
  *             但缩略图/tooltip popover 是 treeland 的 QML 特效，woodland 不实现，
@@ -84,7 +86,8 @@ struct wlr_output;
  *             窗口/工作区/贴边逻辑，21 与 24..31、40..45 置空但可观测。
  *             swipe/hold 绑定能注册、查重、unbind，但 woodland 没有触摸
  *             手势识别状态机，只登记不触发（trace 明写 gesture_unwired）。
- *             多用户 session 的延迟 bind 与真正的特权判定同样未做，
+ *             多用户 session 的延迟 bind 与真正的特权判定同样未做（bind 只
+ *             挡沙箱连接，特权边界交给 wp_security_context_manager_v1），
  *             取舍写在 shortcut.c 文件头。
  *   仅记录：  xdg-toplevel-tag（存下来、经 wctl 可见，但暂不参与窗口规则）；
  *             treeland-decoration 的阴影（要一层模糊 buffer，还没做）；
@@ -411,11 +414,11 @@ enum woodland_xwindow_outcome {
 };
 
 /*
- * 权限边界（P2-4）：woodland 没有 DDE 的 app_id / 签名授权服务，"同 uid 且非
- * 沙箱"只保证调用方是本机同一个用户，不等价于上游要求 target 与 anchor 同
- * session 的隔离。也就是说任何同 uid 的非沙箱进程都能按 X11 window id 挪动
- * 别人的窗口。这是当前权限模型的真实边界，别把 bind 校验误读成已等价实现
- * DDE 特权授权。
+ * 权限边界（P2-4）：woodland 没有 DDE 的 app_id / 签名授权服务。用户 socket
+ * 本身只接受同 uid 连接，所以唯一要挡的是带 security context 的沙箱连接；
+ * "非沙箱"不等于上游要求的 target 与 anchor 同 session 的隔离——任何本 session
+ * 的非沙箱进程都能按 X11 window id 挪动别人的窗口。这是当前权限模型的真实
+ * 边界，别把 bind 校验误读成已等价实现 DDE 特权授权。
  */
 
 /** 稳定字符串（unknown 值返回 "unknown"）。 */
