@@ -416,6 +416,7 @@ static const struct wsd_default wsd_defaults[] = {
     {"Meta+Down", WSD_FLAG_PRESS, WSD_ACTION_CANCEL_MAXIMIZE, NULL},
     {"Meta+Left", WSD_FLAG_PRESS, WSD_ACTION_TILE_LEFT, NULL},
     {"Meta+Right", WSD_FLAG_PRESS, WSD_ACTION_TILE_RIGHT, NULL},
+    {"Meta+S", WSD_FLAG_PRESS, WSD_ACTION_TOGGLE_MULTITASK_VIEW, NULL},
     /* 启动器：非 DDE 环境的基本可用性就靠这两条 */
     {"Meta+Return", WSD_FLAG_PRESS, WSD_ACTION_NOTIFY, default_terminal_cmds},
     {"Meta+E", WSD_FLAG_PRESS, WSD_ACTION_NOTIFY, default_filemanager_cmds},

@@ -165,7 +165,8 @@ enum woodland_protocol_action_class {
     WOODLAND_PROTO_ACTION_WORKSPACE,    /* workspace_1..12 */
     WOODLAND_PROTO_ACTION_WORKSPACE_PREV,
     WOODLAND_PROTO_ACTION_WORKSPACE_NEXT,
-    WOODLAND_PROTO_ACTION_UNSUPPORTED,  /* 15..30：woodland 暂无对应状态机 */
+    WOODLAND_PROTO_ACTION_MULTITASK,    /* open/close/toggle_multitask_view (16..18) */
+    WOODLAND_PROTO_ACTION_UNSUPPORTED,  /* 15, 19..30：woodland 暂无对应状态机 */
 };
 
 enum woodland_protocol_action_class
@@ -246,6 +247,7 @@ enum woodland_shortcut_action_class {
     WOODLAND_SC_ACTION_WORKSPACE_NEXT,
     WOODLAND_SC_ACTION_VIEW,          /* 最大化/最小化/关闭/移动/缩放 */
     WOODLAND_SC_ACTION_MOVE_WORKSPACE,
+    WOODLAND_SC_ACTION_MULTITASK,     /* open/close/toggle_multitask_view (25..27) */
     WOODLAND_SC_ACTION_TILE,
     WOODLAND_SC_ACTION_UNSUPPORTED,    /* woodland 暂无对应 shell 状态机 */
 };

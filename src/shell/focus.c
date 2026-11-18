@@ -157,7 +157,8 @@ static void view_set_focused_look(struct woodland_view *view, bool focused)
 
 static bool view_is_modal(const struct woodland_view *view)
 {
-    if (view->type == WOODLAND_VIEW_XDG && view->xdg_toplevel) {
+    if (view->type == WOODLAND_VIEW_XDG && view->xdg_toplevel &&
+        view->xdg_toplevel->base && view->xdg_toplevel->base->surface) {
         /* xdg-dialog-v1：GTK4/Qt 的模态对话框走这个扩展 */
         struct wlr_xdg_dialog_v1 *dialog =
             wlr_xdg_dialog_v1_try_from_wlr_xdg_toplevel(view->xdg_toplevel);

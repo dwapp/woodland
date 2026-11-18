@@ -40,6 +40,7 @@ struct woodland_session_lock;
 struct wlr_pointer_constraints_v1;
 struct wlr_pointer_constraint_v1;
 struct woodland_window_menu;
+struct woodland_multitask_view;
 /* 贴边铺满预览（拖动窗口靠近屏幕边缘时显示的半透明目标区域预览） */
 struct woodland_snap_preview {
     struct woodland_server *server;
@@ -176,6 +177,7 @@ struct woodland_server {
     struct wlr_box interactive_initial_geo;
     struct woodland_snap_preview snap_preview;
     struct woodland_window_menu *window_menu;
+    struct woodland_multitask_view *multitask_view;
     /* 前置抓取上下文（按下时记录，避免客户端 request_move 的 RPC 往返丢失初速度） */
     struct {
         struct woodland_view *view;

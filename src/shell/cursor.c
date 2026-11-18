@@ -26,6 +26,7 @@
 #include "shell_internal.h"
 #include "ssd.h"
 #include "view.h"
+#include "multitask_view.h"
 #include "window_menu.h"
 #include "woodland.h"
 
@@ -104,6 +105,7 @@ void woodland_cursor_process_motion(struct woodland_server *server, uint32_t tim
 {
     if (woodland_session_lock_is_locked(server)) {
         woodland_window_menu_hide(server);
+        woodland_multitask_view_close(server, false);
         if (server->cursor_mode != WOODLAND_CURSOR_PASSTHROUGH) {
             woodland_cursor_reset_mode(server);
         }
@@ -118,6 +120,12 @@ void woodland_cursor_process_motion(struct woodland_server *server, uint32_t tim
             wlr_seat_pointer_clear_focus(server->seat);
             woodland_cursor_set(server, "default");
         }
+        return;
+    }
+    if (woodland_multitask_view_is_active(server)) {
+        woodland_multitask_view_handle_motion(server, server->cursor->x, server->cursor->y);
+        woodland_cursor_set(server, "default");
+        wlr_seat_pointer_notify_clear_focus(server->seat);
         return;
     }
     if (woodland_window_menu_is_active(server)) {
@@ -282,6 +290,7 @@ static void server_cursor_button(struct wl_listener *listener, void *data)
     }
     if (woodland_session_lock_is_locked(server)) {
         woodland_window_menu_hide(server);
+        woodland_multitask_view_close(server, false);
         double sx = 0, sy = 0;
         struct wlr_surface *surface = NULL;
         woodland_session_lock_surface_at(server, server->cursor->x, server->cursor->y, &surface,
@@ -294,6 +303,12 @@ static void server_cursor_button(struct wl_listener *listener, void *data)
             wlr_seat_pointer_clear_focus(server->seat);
         }
         return;
+    }
+    if (woodland_multitask_view_is_active(server)) {
+        if (woodland_multitask_view_handle_button(server, event->button, event->state,
+                                                  server->cursor->x, server->cursor->y)) {
+            return;
+        }
     }
     /* 窗口菜单处于激活态时，指针事件优先交由窗口菜单处理 */
     if (woodland_window_menu_is_active(server)) {

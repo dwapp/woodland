@@ -94,13 +94,31 @@ trigger 11;  expect_state 1  11 no_workspace 6
 trigger 10;  expect_state 10 10 switched 7
 trigger 14;  expect_state 10 14 no_workspace 8
 
+# 多任务视图动作：open(16) / close(17) / toggle(18) 真生效
+trigger 16;  expect_state 10 16 multitask 9
+_tree="$(wctl_cmd get_tree)" || smoke_fail "get_tree after open_multitask_view failed"
+printf '%s' "$_tree" | jq -e '.multitask_view.active == true and .multitask_view.workspace == "10"' >/dev/null \
+    || smoke_fail "multitask_view did not open: $_tree"
+trigger 17;  expect_state 10 17 multitask 10
+_tree="$(wctl_cmd get_tree)" || smoke_fail "get_tree after close_multitask_view failed"
+printf '%s' "$_tree" | jq -e '.multitask_view.active == false' >/dev/null \
+    || smoke_fail "multitask_view did not close: $_tree"
+trigger 18;  expect_state 10 18 multitask 11
+_tree="$(wctl_cmd get_tree)" || smoke_fail "get_tree after toggle_multitask_view(open) failed"
+printf '%s' "$_tree" | jq -e '.multitask_view.active == true' >/dev/null \
+    || smoke_fail "multitask_view did not toggle open: $_tree"
+trigger 18;  expect_state 10 18 multitask 12
+_tree="$(wctl_cmd get_tree)" || smoke_fail "get_tree after toggle_multitask_view(close) failed"
+printf '%s' "$_tree" | jq -e '.multitask_view.active == false' >/dev/null \
+    || smoke_fail "multitask_view did not toggle close: $_tree"
+
 # 置空的部分：不改状态、不发事件，但 wctl / 日志 / trace 要说明忽略了哪一个
-trigger 23;  expect_state 10 23 unsupported 9   # lockscreen
-trigger 30;  expect_state 10 30 unsupported 10  # shutdown_menu_log_out
+trigger 23;  expect_state 10 23 unsupported 13  # lockscreen
+trigger 30;  expect_state 10 30 unsupported 14  # shutdown_menu_log_out
 
 # 枚举外的值：静默忽略（协议没有错误枚举，连协议错误都不该有）
-trigger 999; expect_state 10 999 invalid 11
-trigger 0;   expect_state 10 0   invalid 12
+trigger 999; expect_state 10 999 invalid 15
+trigger 0;   expect_state 10 0   invalid 16
 
 # destroy 请求不改变任何合成器状态，且连接仍然健康
 set +e
@@ -108,14 +126,17 @@ set +e
 _rc=$?
 set -e
 [ "$_rc" -eq 0 ] || smoke_fail "probe --destroy exited with $_rc"
-expect_state 10 0 invalid 12
+expect_state 10 0 invalid 16
 
-# 决策轨迹：12 条 action（每条 trigger 一条），5 次真正的 workspace 切换
+# 决策轨迹：16 条 action（每条 trigger 一条），5 次真正的 workspace 切换
 # （1→2→1→2→1→10），并且把"未实现"写成决策依据而不是含糊的 ignore
 _trace="$(wctl_cmd get_trace)" || smoke_fail "get_trace failed"
 printf '%s' "$_trace" | jq -e \
-    '[.entries[] | select(.what == "action")] | length == 12' >/dev/null \
-    || smoke_fail "expected 12 action trace entries: $_trace"
+    '[.entries[] | select(.what == "action")] | length == 16' >/dev/null \
+    || smoke_fail "expected 16 action trace entries: $_trace"
+printf '%s' "$_trace" | jq -e \
+    '[.entries[] | select(.what == "multitask")] | length == 4' >/dev/null \
+    || smoke_fail "expected 4 multitask trace entries: $_trace"
 printf '%s' "$_trace" | jq -e \
     '[.entries[] | select(.what == "workspace")] | length == 5' >/dev/null \
     || smoke_fail "expected 5 workspace switches in trace: $_trace"

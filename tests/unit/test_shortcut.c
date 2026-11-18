@@ -183,7 +183,13 @@ static void test_classify(void)
            WOODLAND_SC_ACTION_MOVE_WORKSPACE);
     assert(woodland_shortcut_action_classify(23) ==
            WOODLAND_SC_ACTION_MOVE_WORKSPACE);
-    for (uint32_t value = 24; value <= 31; value++) {
+    assert(woodland_shortcut_action_classify(24) ==
+           WOODLAND_SC_ACTION_UNSUPPORTED);
+    for (uint32_t value = 25; value <= 27; value++) {
+        assert(woodland_shortcut_action_classify(value) ==
+               WOODLAND_SC_ACTION_MULTITASK);
+    }
+    for (uint32_t value = 28; value <= 31; value++) {
         assert(woodland_shortcut_action_classify(value) ==
                WOODLAND_SC_ACTION_UNSUPPORTED);
     }

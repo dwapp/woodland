@@ -66,6 +66,7 @@
 #include <xkbcommon/xkbcommon.h>
 
 #include "focus.h"
+#include "multitask_view.h"
 #include "placement.h"
 #include "protocol.h"
 #include "protocol_internal.h"
@@ -103,7 +104,7 @@ static const char *const outcome_names[] = {
     "none", "bound", "upsert", "unbound", "name_conflict", "duplicate_binding",
     "invalid_argument", "internal_error", "activated", "no_owner", "switched",
     "no_workspace", "no_view", "view_action", "tiled", "moved_workspace",
-    "unsupported", "invalid", "gesture_unwired", "captured", "busy",
+    "multitask", "unsupported", "invalid", "gesture_unwired", "captured", "busy",
     "not_active", "aborted", "interrupted", "not_acquired", "occupied",
 };
 
@@ -124,6 +125,7 @@ enum shortcut_outcome {
     OUTCOME_VIEW_ACTION,
     OUTCOME_TILED,
     OUTCOME_MOVED_WORKSPACE,
+    OUTCOME_MULTITASK,
     OUTCOME_UNSUPPORTED,
     OUTCOME_INVALID,
     OUTCOME_GESTURE_UNWIRED,
@@ -446,6 +448,10 @@ woodland_shortcut_action_classify(uint32_t action)
         action == TREELAND_SHORTCUT_MANAGER_V3_ACTION_MOVE_WINDOW_TO_NEXT_WORKSPACE) {
         return WOODLAND_SC_ACTION_MOVE_WORKSPACE;
     }
+    if (action >= TREELAND_SHORTCUT_MANAGER_V3_ACTION_OPEN_MULTITASK_VIEW &&
+        action <= TREELAND_SHORTCUT_MANAGER_V3_ACTION_TOGGLE_MULTITASK_VIEW) {
+        return WOODLAND_SC_ACTION_MULTITASK;
+    }
     if (action >= TREELAND_SHORTCUT_MANAGER_V3_ACTION_TILE_LEFT &&
         action <= TREELAND_SHORTCUT_MANAGER_V3_ACTION_TILE_BOTTOM_RIGHT) {
         return WOODLAND_SC_ACTION_TILE;
@@ -733,6 +739,17 @@ static enum shortcut_outcome shortcut_run_action(struct woodland_proto_shortcut 
             shortcut_move_view_to_workspace(server, view, target);
             outcome = OUTCOME_MOVED_WORKSPACE;
         }
+        break;
+    }
+    case WOODLAND_SC_ACTION_MULTITASK: {
+        if (action == TREELAND_SHORTCUT_MANAGER_V3_ACTION_OPEN_MULTITASK_VIEW) {
+            woodland_multitask_view_open(server);
+        } else if (action == TREELAND_SHORTCUT_MANAGER_V3_ACTION_CLOSE_MULTITASK_VIEW) {
+            woodland_multitask_view_close(server, false);
+        } else {
+            woodland_multitask_view_toggle(server);
+        }
+        outcome = OUTCOME_MULTITASK;
         break;
     }
     case WOODLAND_SC_ACTION_TILE: {

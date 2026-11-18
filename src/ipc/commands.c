@@ -37,6 +37,7 @@
 #include "view.h"
 #include "woodland.h"
 #include "woodland_config.h"
+#include "multitask_view.h"
 #include "window_menu.h"
 #include "workspace.h"
 
@@ -85,7 +86,7 @@ static const struct ipc_field_doc get_tree_fields[] = {
     {"compositor_action", "obj",
      "treeland-compositor-action: available (bool), trigger_count (int), "
      "last_action (int, 0 before any trigger), "
-     "last_outcome (str|null: none|switched|no_workspace|unsupported|invalid)"},
+     "last_outcome (str|null: none|switched|no_workspace|multitask|unsupported|invalid)"},
     {"shortcut_manager", "obj",
      "treeland-shortcut-manager-v3: available (bool), acquired (bool), "
      "manager_count (int), binding_count (int), capture_count (int), "
@@ -133,6 +134,9 @@ static const struct ipc_field_doc get_tree_fields[] = {
      "namespace — the surface under the cursor)"},
     {"window_menu", "obj",
      "window menu: active (bool), view (int), x, y"},
+    {"multitask_view", "obj",
+     "multitask overview: active (bool), workspace (str|null), "
+     "card_count (int), selected_index (int), selected_view (int|null)"},
     {"views", "obj[]",
      "per view: id, kind, z, title, app_id, tag, workspace, "
      "output, mapped, placed, minimized, maximized, "
@@ -691,6 +695,8 @@ static void ipc_get_tree(struct woodland_server *server, struct woodland_json *o
     append_dnd(server, out);
     woodland_json_obj_key(&obj, "window_menu");
     woodland_window_menu_status(server, out);
+    woodland_json_obj_key(&obj, "multitask_view");
+    woodland_multitask_view_status(server, out);
 
 
     woodland_json_obj_key(&obj, "views");

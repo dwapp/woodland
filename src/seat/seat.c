@@ -22,6 +22,7 @@
 #include "view.h"
 #include "woodland.h"
 #include "woodland_config.h"
+#include "multitask_view.h"
 #include "window_menu.h"
 #include "workspace.h"
 
@@ -62,6 +63,10 @@ static bool handle_keybinding(struct woodland_server *server, xkb_keysym_t sym, 
     case XKB_KEY_F1:
         /* 老键位保留：等价于下一个窗口 */
         woodland_focus_cycle(server, true);
+        break;
+    case XKB_KEY_s:
+    case XKB_KEY_S:
+        woodland_multitask_view_toggle(server);
         break;
     case XKB_KEY_1:
     case XKB_KEY_2:
@@ -184,6 +189,22 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data)
         } else {
             return;
         }
+    }
+
+    /* 多任务视图处于激活态时，键盘事件优先由多任务视图消费，不透传给底层窗口 */
+    if (woodland_multitask_view_is_active(server)) {
+        if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+            uint32_t modifiers = wlr_keyboard_get_modifiers(keyboard->wlr_keyboard);
+            for (int i = 0; i < nsyms; i++) {
+                if (woodland_multitask_view_handle_key(server, syms[i], modifiers)) {
+                    return;
+                }
+            }
+        }
+        if (!woodland_protocol_shortcuts_inhibited(server)) {
+            woodland_protocol_shortcuts_key(server, keyboard->wlr_keyboard, event);
+        }
+        return;
     }
 
     /* 处于交互式移动或缩放状态时（由菜单或键盘发起） */
