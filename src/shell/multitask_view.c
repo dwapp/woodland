@@ -37,6 +37,7 @@
 #include "util/json.h"
 #include "view.h"
 #include "window_menu.h"
+#include "window_switcher.h"
 #include "woodland.h"
 #include "woodland_config.h"
 #include "workspace.h"
@@ -1188,8 +1189,9 @@ void woodland_multitask_view_open(struct woodland_server *server)
     }
     struct woodland_multitask_view *mv = server->multitask_view;
 
-    /* 打开多任务视图前收起窗口菜单、结束移动/缩放交互 */
+    /* 打开多任务视图前收起窗口菜单与 Alt+Tab 切换器、结束移动/缩放交互 */
     woodland_window_menu_hide(server);
+    woodland_window_switcher_cancel(server);
     if (server->cursor_mode != WOODLAND_CURSOR_PASSTHROUGH) {
         woodland_cursor_reset_mode(server);
     }

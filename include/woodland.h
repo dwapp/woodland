@@ -41,6 +41,7 @@ struct wlr_pointer_constraints_v1;
 struct wlr_pointer_constraint_v1;
 struct woodland_window_menu;
 struct woodland_multitask_view;
+struct woodland_window_switcher;
 /* 贴边铺满预览（拖动窗口靠近屏幕边缘时显示的半透明目标区域预览） */
 struct woodland_snap_preview {
     struct woodland_server *server;
@@ -147,11 +148,13 @@ struct woodland_server {
     struct wl_listener pointer_focus_change;    // seat->pointer_state.events.focus_change
     struct wl_listener keyboard_focus_change;  // seat->keyboard_state.events.focus_change
     /*
-     * VT 切换键的吞键表：evdev keycode 位图（32 字节 = 256 个键位，超过
-     * 256 的 keycode 一律不记——F1..F12 远在界内）。VT 切换吃掉一个 press
-     * 后，对应的 release 要么在切回本 VT 后才到、要么根本不来；晚到的
-     * 孤儿 release 不能转发给客户端——没有 press 配对的 release 会让客户端
-     * 的按键状态错乱（labwc key-state 的同一套语义）。
+     * 合成器吞键表：evdev keycode 位图（32 字节 = 256 个键位，超过
+     * 256 的 keycode 一律不记——F1..F12、Tab、方向键、修饰键均远在界内）。
+     * 当一颗键的 press 被合成器吃掉（VT 切换、Alt+Tab 切换器、内置键位）而未
+     * 下发给客户端时，对应的 release（含切回本 VT 或面板收起后才到的晚到
+     * release）必须一并丢弃——没有 press 配对的孤儿 release 会让客户端按键状态
+     * 错乱；反之，面板打开前已下发给客户端的 press（如先按住的 Shift 或 Alt），
+     * 其 release 不在此表中，必须放行配对（labwc key-state 的同一套语义）。
      */
     uint8_t vt_swallowed_keys[32];
     struct woodland_ime_relay *ime;             // 输入法中继器与协议管理
@@ -178,6 +181,14 @@ struct woodland_server {
     struct woodland_snap_preview snap_preview;
     struct woodland_window_menu *window_menu;
     struct woodland_multitask_view *multitask_view;
+    /*
+     * Alt+Tab 切换器（按住 Alt 期间的面板）。
+     *
+     * 和 window_menu 同一个位置、同一个理由：它是"指针/键盘此刻在干什么"
+     * 之外的一层覆盖 UI，生命周期跟 server 一致，挂在 server 上比藏进
+     * shell 私有状态更好查（wctl get_tree 直接读，不用树外挂账）。
+     */
+    struct woodland_window_switcher *window_switcher;
     /* 前置抓取上下文（按下时记录，避免客户端 request_move 的 RPC 往返丢失初速度） */
     struct {
         struct woodland_view *view;

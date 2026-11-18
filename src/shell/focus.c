@@ -11,6 +11,7 @@
  */
 #include "config.h"
 
+#include <wlr/types/wlr_keyboard.h>
 #include <wlr/types/wlr_layer_shell_v1.h>
 #include "scene.h"
 #include <wlr/types/wlr_seat.h>
@@ -68,18 +69,32 @@ enum woodland_view_wants_focus woodland_view_wants_focus(const struct woodland_v
     return WOODLAND_VIEW_WANTS_FOCUS_ALWAYS;
 }
 
-bool woodland_view_focusable(const struct woodland_view *view)
+/*
+ * 可聚焦判定的唯一实现。ignore_minimized=true 时只放宽最小化这一条，
+ * 给 woodland_view_restorable() 用（"恢复之后能不能聚焦"）。
+ */
+static bool view_focusable_ex(const struct woodland_view *view, bool ignore_minimized)
 {
     if (!view || !view->server) {
         return false;
     }
-    if (!view->mapped || view->minimized || view->override_redirect ||
+    if (!view->mapped || (!ignore_minimized && view->minimized) || view->override_redirect ||
         view->workspace != view->server->active_workspace) {
         return false;
     }
     enum woodland_view_wants_focus wants = woodland_view_wants_focus(view);
     return wants == WOODLAND_VIEW_WANTS_FOCUS_ALWAYS ||
            wants == WOODLAND_VIEW_WANTS_FOCUS_LIKELY;
+}
+
+bool woodland_view_focusable(const struct woodland_view *view)
+{
+    return view_focusable_ex(view, false);
+}
+
+bool woodland_view_restorable(const struct woodland_view *view)
+{
+    return view_focusable_ex(view, true);
 }
 
 void woodland_seat_focus_surface(struct woodland_server *server, struct wlr_surface *surface)
@@ -93,8 +108,24 @@ void woodland_seat_focus_surface(struct woodland_server *server, struct wlr_surf
     }
     struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(server->seat);
     if (keyboard != NULL) {
-        wlr_seat_keyboard_notify_enter(server->seat, surface, keyboard->keycodes,
-                                       keyboard->num_keycodes, &keyboard->modifiers);
+        /*
+         * 过滤掉 press 已被合成器吞掉、但物理上仍按着的键（如按住 Tab 期间松开
+         * Alt 或按 Enter 触发切换焦点）：新焦点窗口没收过它们的 press，稍后它们
+         * 的 release 也会被 seat 层按 vt_swallowed_keys 吞掉，不能写进 enter 的
+         * 已按下键数组里，否则新窗口会以为那颗键一直按着。
+         */
+        uint32_t filtered[WLR_KEYBOARD_KEYS_CAP];
+        size_t nfiltered = 0;
+        for (size_t i = 0; i < keyboard->num_keycodes && nfiltered < WLR_KEYBOARD_KEYS_CAP; i++) {
+            uint32_t kc = keyboard->keycodes[i];
+            if (kc < sizeof(server->vt_swallowed_keys) * 8 &&
+                (server->vt_swallowed_keys[kc / 8] & (uint8_t)(1u << (kc % 8))) != 0) {
+                continue;
+            }
+            filtered[nfiltered++] = kc;
+        }
+        wlr_seat_keyboard_notify_enter(server->seat, surface, filtered,
+                                       nfiltered, &keyboard->modifiers);
     }
 }
 
@@ -305,10 +336,17 @@ void woodland_focus_view(struct woodland_view *view, bool raise)
         return;
     }
 
+    /*
+     * 最小化就先恢复，然后**继续往下走**照常聚焦。
+     *
+     * 这里曾经是"恢复完就 return"，理由是"恢复会重新 map，map 路径会再调
+     * 一次本函数"。xdg 视图不是这样：woodland_view_set_minimized() 只关掉
+     * scene 节点，surface 一直是 mapped 的，不存在第二次 map——那一下于是
+     * 变成"窗口恢复了、但没拿到焦点"（xdg-activation 点通知栏、Alt+Tab 选中
+     * 一个最小化的窗口，踩的都是这条）。恢复之后继续走，才和"激活"同义。
+     */
     if (view->minimized) {
-        /* 恢复会重新 map，map 路径会再次调用本函数（届时已可聚焦） */
         woodland_view_set_minimized(view, false);
-        return;
     }
 
     /* 不在当前工作区：先切过去（清焦点，稍后由本次聚焦覆盖） */

@@ -5,6 +5,7 @@
 #include "util/json.h"
 #include "view.h"
 #include "window_menu.h"
+#include "window_switcher.h"
 #include "woodland.h"
 #include "woodland_config.h"
 #include "workspace.h"
@@ -292,6 +293,32 @@ int main(void)
     woodland_window_menu_hide(&server);
 
     server.config = NULL;
+
+    /*
+     * Alt+Tab 与右键菜单的交叉：切换器打开时必须先把菜单收掉。
+     *
+     * 两块面板并存时面板盖住菜单，提交后焦点换了、菜单还挂在原来那个窗口
+     * 上——接下来一个 Enter 就作用到旧窗口（"切换完莫名其妙关掉一个窗口"）。
+     */
+    view.mapped = true;
+    server.focused_view = &view;
+    wl_list_insert(&server.views, &view.link); /* 切换器的候选集来自这条链表 */
+    wl_signal_init(&server.view_unmapped);
+    wl_signal_init(&server.view_changed);
+    assert(woodland_window_switcher_init(&server));
+
+    woodland_window_menu_show(&view, 200, 100);
+    assert(woodland_window_menu_is_active(&server));
+    assert(woodland_window_switcher_begin(&server, true));
+    assert(!woodland_window_menu_is_active(&server));
+
+    /* 菜单没开的时候再按 Alt+Tab 也不该出岔子（hide 对未激活是空操作） */
+    assert(woodland_window_switcher_begin(&server, true));
+    assert(!woodland_window_menu_is_active(&server));
+
+    woodland_window_switcher_finish(&server);
+    assert(server.window_switcher == NULL);
+    wl_list_remove(&view.link);
 
     woodland_window_menu_finish(&server);
     assert(server.window_menu == NULL);

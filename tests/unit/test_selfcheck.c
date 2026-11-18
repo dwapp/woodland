@@ -23,6 +23,7 @@
 #include "ssd.h"
 #include "util/json.h"
 #include "view.h"
+#include "window_switcher.h"
 #include "woodland.h"
 #include "workspace.h"
 
@@ -86,6 +87,10 @@ int main(void) {
     struct woodland_server server = {0};
     wl_list_init(&server.views);
     wl_list_init(&server.workspaces);
+    wl_list_init(&server.outputs);
+    /* 切换器 init 会订阅这三个信号（零初始化的 wl_signal 不能插链） */
+    wl_signal_init(&server.view_unmapped);
+    wl_signal_init(&server.view_changed);
     server.scene = wlr_scene_create();
     assert(server.scene);
 
@@ -99,7 +104,7 @@ int main(void) {
     /* ---------- 空状态：全部通过 ---------- */
     struct woodland_check out[WOODLAND_SELFCHECK_MAX];
     int n = run(&server, out);
-    assert(n == 10);
+    assert(n == 11);
     assert_all_ok(&server, "empty");
 
     /* ---------- 壁纸树必须在 scene 最底层 ---------- */
@@ -210,6 +215,49 @@ int main(void) {
     assert(find(out, n, "mapped_in_workspace")->ok);
     b.view.mapped = true;
     assert_all_ok(&server, "remapped");
+
+    /* ---------- 切换器快照：面板开着时每一项都还得是活的、还是合法目标 ---------- */
+    /*
+     * 这条抓的是 view_unmapped 监听的漏挂/漏摘。下面故意只改 mapped、不发
+     * 信号，模拟"监听没挂上"的形状——面板外观上看不出来（最多少一行），
+     * 但快照里那一项已经不该在候选里了。
+     */
+    assert(woodland_window_switcher_init(&server));
+    assert(woodland_window_switcher_begin(&server, true));
+    assert(woodland_window_switcher_is_active(&server));
+    assert_all_ok(&server, "switcher open");
+
+    /*
+     * 最小化的候选是**合法**的（面板上那行标"已最小化"，提交时恢复）：
+     * 自检在这一格必须保持绿，否则"最小化窗口进列表"这条功能一上线就被
+     * 自己的不变量判红。
+     */
+    b.view.minimized = true;
+    assert_all_ok(&server, "a minimized candidate is still valid");
+    b.view.minimized = false;
+
+    b.view.mapped = false;
+    n = run(&server, out);
+    const struct woodland_check *sw = find(out, n, "switcher_snapshot");
+    assert(!sw->ok);
+    assert(strstr(sw->actual, "no longer a valid target"));
+    b.view.mapped = true;
+    assert_all_ok(&server, "switcher healthy again");
+
+    /* 模拟候选已从 server->views 摘除但未通知切换器：必须走 !view_in_list 且不解引用 */
+    wl_list_remove(&b.view.link);
+    n = run(&server, out);
+    sw = find(out, n, "switcher_snapshot");
+    assert(!sw->ok);
+    assert(strstr(sw->actual, "is not in server->views"));
+    wl_list_insert(&server.views, &b.view.link);
+    assert_all_ok(&server, "switcher list restored");
+
+    /* 收起后面板不再持有候选；自检也该回到绿 */
+    woodland_window_switcher_cancel(&server);
+    assert_all_ok(&server, "switcher cancelled");
+    woodland_window_switcher_finish(&server);
+    assert(server.window_switcher == NULL);
 
     /* ---------- xdg configure 的 activated 与状态不符 ---------- */
     fake_set_activated(&b, false);

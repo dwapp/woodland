@@ -310,6 +310,14 @@ test_multitask_view = executable('test_multitask_view', 'test_multitask_view.c',
   link_with: [shell_lib, output_lib, cursor_lib, workspace_lib, ssd_lib, effect_lib, layer_lib, session_lock_lib, capture_lib, util_lib, trace_lib, dnd_lib] + xwayland_libs)
 test('multitask_view', test_multitask_view)
 
+# Alt+Tab 切换器：下标轮转、候选快照、中途掉窗口。要真 scene（面板是 cairo
+# 画的 buffer），所以依赖列表跟 test_window_menu 一样。
+test_window_switcher = executable('test_window_switcher', 'test_window_switcher.c',
+  dependencies: [scene_deps, wayland_server, pangocairo, cairo, xkbcommon],
+  include_directories: woodland_inc,
+  link_with: [shell_lib, output_lib, cursor_lib, workspace_lib, ssd_lib, effect_lib, layer_lib, session_lock_lib, capture_lib, util_lib, trace_lib, dnd_lib] + xwayland_libs)
+test('window_switcher', test_window_switcher)
+
 # 环境探测：只是字符串判断，但 woodland_desktop_is_dde() 决定合成器要不要
 # 在会话里拉 woodland-shortcutd（判错会抢走 DDE 的全局快捷键）。
 test_env = executable('test_env', 'test_env.c',

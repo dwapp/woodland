@@ -16,6 +16,18 @@ struct wlr_surface;
  * （之前 layer.c 和 shell.c 各写了一份几乎一样的过滤）。
  */
 bool woodland_view_focusable(const struct woodland_view *view);
+
+/**
+ * 视图"恢复之后能不能聚焦"——即 `woodland_view_focusable()` 忽略最小化那一条。
+ *
+ * 给"最小化窗口也要出现在列表里"的场景用（Alt+Tab 切换器）：最小化的窗口
+ * 现在拿不到焦点，但它仍然是个合法的切换目标，提交时先恢复再聚焦。其余
+ * 条件（已映射 / 非 override-redirect / 当前工作区 / X11 焦点模型）与
+ * `woodland_view_focusable()` 完全一致——判定只写在这里一份，不要在调用方
+ * 复述，否则两边条件迟早漂移。
+ */
+bool woodland_view_restorable(const struct woodland_view *view);
+
 enum woodland_view_wants_focus {
     WOODLAND_VIEW_WANTS_FOCUS_ALWAYS,
     WOODLAND_VIEW_WANTS_FOCUS_LIKELY,
@@ -36,9 +48,10 @@ struct woodland_view *woodland_focus_current(struct woodland_server *server);
 /**
  * 聚焦视图（统一入口，替代旧的 woodland_view_focus）。
  *
- * 依次处理：最小化则先恢复（重 map 会再次进来）、不在当前工作区则切过去、
+ * 依次处理：最小化则先恢复、不在当前工作区则切过去、
  * 有模态子对话框则改为聚焦对话框、必要时置顶（z 序 + views 链表头）、
  * 同步 activated / SSD 激活色 / foreign-toplevel 状态、下发键盘 enter。
+ * 所以对最小化的窗口调本函数 = "恢复 + 聚焦"，一步到位。
  *
  * raise=false 用于"只给焦点不改层叠"（如从 layer 退回、焦点回退）。
  */

@@ -51,6 +51,19 @@ int main(void) {
     assert(woodland_view_focusable(&d));
     server.active_workspace = &ws1;
 
+    /*
+     * 可恢复判定：就是上面那份判定放过"最小化"一条，其余条件一模一样。
+     * 两者只在 c（最小化）上有分歧——这条分歧是 Alt+Tab 候选集的全部依据，
+     * 写成两个独立实现的话迟早会漂，所以钉在这里。
+     */
+    assert(woodland_view_restorable(&a));
+    assert(woodland_view_restorable(&c)); /* 拿不到焦点，但恢复之后可以 */
+    assert(!woodland_view_restorable(&d));
+    assert(!woodland_view_restorable(&e));
+    assert(!woodland_view_restorable(NULL));
+    struct woodland_view unmapped = { .server = &server, .mapped = false, .workspace = &ws1 };
+    assert(!woodland_view_restorable(&unmapped));
+
     /* ---------- 回退目标 = z 序最上 ---------- */
     assert(woodland_focus_topmost(&server) == &a);
 

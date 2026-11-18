@@ -35,8 +35,10 @@ static void handle_ext_workspace_commit(struct wl_listener *listener, void *data
 
 bool woodland_workspace_init(struct woodland_server *server) {
     wl_list_init(&server->workspaces);
-    /* 信号在 workspace 这一层建：切换是它的事，订阅方（壁纸族）后到 */
-    wl_signal_init(&server->workspace_changed);
+    /* 信号在 workspace 这一层建；若 shell 层（如 window_switcher）已先初始化并挂了监听，保留链表 */
+    if (!server->workspace_changed.listener_list.next) {
+        wl_signal_init(&server->workspace_changed);
+    }
 
     server->ext_workspace_manager =
         wlr_ext_workspace_manager_v1_create(server->display, EXT_WORKSPACE_VERSION);
