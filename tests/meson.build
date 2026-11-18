@@ -445,6 +445,18 @@ if get_option('test').enabled()
            is_parallel: false,
            timeout: 60)
 
+      if fs.exists(action_xml)
+        test('smoke-multitask',
+             find_program('sh'),
+             args: [meson.current_source_dir() / 'smoke' / 'run_multitask_smoke.sh',
+                    woodland_bin.full_path(),
+                    simple_ssd_bin.full_path(),
+                    action_probe.full_path(),
+                    wctl_bin.full_path()],
+             is_parallel: false,
+             timeout: 60)
+      endif
+
       # 多走一遍 blur 参数；脚本按 [effects] 配置跑"开"和"关"两遍。
       test('smoke-bg-effect',
            find_program('sh'),

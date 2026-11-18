@@ -42,6 +42,7 @@
 #include "trace.h"
 #include "view.h"
 #include "woodland.h"
+#include "multitask_view.h"
 #include "window_menu.h"
 #include "workspace.h"
 
@@ -299,6 +300,7 @@ void woodland_view_unmap(struct woodland_view *view)
         woodland_view_update_outputs(view);
         woodland_layer_update_top_layer_visibility(view->server);
     }
+    woodland_multitask_view_handle_view_unmap(view);
     /* Xwayland 视图在 unmap 时销毁任务栏句柄，避免未映射时残留 */
     if (view->type == WOODLAND_VIEW_XWAYLAND) {
         woodland_view_finish_handles(view);
@@ -347,6 +349,7 @@ void woodland_view_destroy(struct woodland_view *view)
         view->mapped = false;
         woodland_layer_update_top_layer_visibility(view->server);
     }
+    woodland_multitask_view_handle_view_unmap(view);
     /* foreign-toplevel 与 ext-foreign-toplevel-list 句柄 */
     woodland_view_finish_handles(view);
     /* 按窗口捕获源：源随 scene 节点释放，这里只摘监听 */
@@ -718,6 +721,7 @@ bool woodland_shell_init(struct woodland_server *server)
     }
     woodland_snap_preview_init(server);
     woodland_window_menu_init(server);
+    woodland_multitask_view_init(server);
     server->pointer_constraint_is_focused_hook = shell_pointer_constraint_is_focused;
     /* dnd 是 shell 的下游，不能反过来调 selfcheck（会成环），走钩子 */
     server->selfcheck_schedule_hook = woodland_selfcheck_schedule;
@@ -735,6 +739,7 @@ void woodland_shell_finish(struct woodland_server *server)
         wl_list_remove(&server->new_toplevel_decoration.link);
     }
     woodland_snap_preview_finish(server);
+    woodland_multitask_view_finish(server);
     woodland_window_menu_finish(server);
     server->pointer_constraint_is_focused_hook = NULL;
     server->selfcheck_schedule_hook = NULL;

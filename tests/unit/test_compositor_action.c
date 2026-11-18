@@ -33,6 +33,8 @@ static void test_classify(void)
             expected = WOODLAND_PROTO_ACTION_WORKSPACE_PREV;
         } else if (value == 14) {
             expected = WOODLAND_PROTO_ACTION_WORKSPACE_NEXT;
+        } else if (value >= 16 && value <= 18) {
+            expected = WOODLAND_PROTO_ACTION_MULTITASK;
         } else {
             expected = WOODLAND_PROTO_ACTION_UNSUPPORTED;
         }

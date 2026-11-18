@@ -34,6 +34,7 @@
 #include <wayland-server-core.h>
 #include <wlr/util/log.h>
 
+#include "multitask_view.h"
 #include "protocol.h"
 #include "protocol_internal.h"
 #include "trace.h"
@@ -55,6 +56,7 @@ enum action_outcome {
     OUTCOME_NONE = 0,
     OUTCOME_SWITCHED,
     OUTCOME_NO_WORKSPACE,
+    OUTCOME_MULTITASK,
     OUTCOME_UNSUPPORTED,
     OUTCOME_INVALID,
 };
@@ -64,6 +66,7 @@ static const char *const outcome_names[] = {
     [OUTCOME_NONE] = "none",
     [OUTCOME_SWITCHED] = "switched",
     [OUTCOME_NO_WORKSPACE] = "no_workspace",
+    [OUTCOME_MULTITASK] = "multitask",
     [OUTCOME_UNSUPPORTED] = "unsupported",
     [OUTCOME_INVALID] = "invalid",
 };
@@ -119,6 +122,10 @@ woodland_protocol_action_classify(uint32_t action)
     }
     if (action == TREELAND_COMPOSITOR_ACTION_V1_ACTION_NEXT_WORKSPACE) {
         return WOODLAND_PROTO_ACTION_WORKSPACE_NEXT;
+    }
+    if (action >= TREELAND_COMPOSITOR_ACTION_V1_ACTION_OPEN_MULTITASK_VIEW &&
+        action <= TREELAND_COMPOSITOR_ACTION_V1_ACTION_TOGGLE_MULTITASK_VIEW) {
+        return WOODLAND_PROTO_ACTION_MULTITASK;
     }
     if (action >= ACTION_UNSUPPORTED_MIN && action <= ACTION_MAX) {
         return WOODLAND_PROTO_ACTION_UNSUPPORTED;
@@ -258,6 +265,20 @@ static void action_handle_trigger(struct wl_client *client, struct wl_resource *
         outcome = OUTCOME_SWITCHED;
         snprintf(detail, sizeof(detail), "%s workspace %s", next ? "next" : "previous",
                  target->name);
+        break;
+    }
+    case WOODLAND_PROTO_ACTION_MULTITASK: {
+        if (action == TREELAND_COMPOSITOR_ACTION_V1_ACTION_OPEN_MULTITASK_VIEW) {
+            woodland_multitask_view_open(server);
+            snprintf(detail, sizeof(detail), "open_multitask_view");
+        } else if (action == TREELAND_COMPOSITOR_ACTION_V1_ACTION_CLOSE_MULTITASK_VIEW) {
+            woodland_multitask_view_close(server, false);
+            snprintf(detail, sizeof(detail), "close_multitask_view");
+        } else {
+            woodland_multitask_view_toggle(server);
+            snprintf(detail, sizeof(detail), "toggle_multitask_view");
+        }
+        outcome = OUTCOME_MULTITASK;
         break;
     }
     case WOODLAND_PROTO_ACTION_UNSUPPORTED: {
