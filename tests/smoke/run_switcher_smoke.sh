@@ -102,18 +102,18 @@ expect_trace "commit" 4
 # 两次提交的目标都是最小化窗口：一次是面板开着时被最小化，一次是开面板前就最小化
 expect_trace "restore" 2
 # 第三轮在面板开着时把高亮项最小化：标记翻转一次，那一行必须留下。
-# （"客户端自己取消最小化"验不了：仓库的 xdg-shell XML 是 unstable v6，
-#  没有 unset_minimized，那条分支只有单测覆盖。）
+# （"客户端自己取消最小化"验不了：Wayland stable xdg-shell 有意只提供
+#  set_minimized、不提供 unset_minimized，那条分支由单测覆盖。）
 expect_trace "min n=3" 1
 # 一个都不该摘：最小化的候选要留在列表里（Alt+Tab 是它们唯一的回程票）
 [ "$(trace_count "drop")" -eq 0 ] || smoke_fail "minimizing must not drop the row from the snapshot"
 
 echo "== 监听器接线 =="
-# 三个信号缺一个都会让某条生命周期路径失效（unmap / 最小化 / 锁屏），
+# 四个信号缺一个都会让某条生命周期路径失效（unmap / 最小化 / 锁屏 / 切工作区），
 # 而面板外观上完全看不出来，所以在这里点名核对一次。
 "$WCTL" -s "$SOCK" get_listeners | jq -e '
     [.listeners[] | select(.name | startswith("switcher.")) | .name] | sort
-    == ["switcher.changed", "switcher.lock", "switcher.unmapped"]
+    == ["switcher.changed", "switcher.lock", "switcher.unmapped", "switcher.workspace"]
 ' >/dev/null || smoke_fail "switcher listeners are not all wired"
 
 echo "== 不变量自检 =="

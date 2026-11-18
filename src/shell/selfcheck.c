@@ -594,8 +594,8 @@ static void check_switcher(struct woodland_server *server,
         if (!view_in_list(server, views[i])) {
             check->ok = false;
             set_text(check->actual, sizeof(check->actual),
-                     "candidate %d (view#%u) is not in server->views", i,
-                     (unsigned)views[i]->id);
+                     "candidate %d (%p) is not in server->views", i,
+                     (const void *)views[i]);
             return;
         }
         if (!woodland_view_restorable(views[i])) {

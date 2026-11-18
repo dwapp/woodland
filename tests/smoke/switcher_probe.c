@@ -642,9 +642,9 @@ int main(int argc, char **argv)
     }
 
     /*
-     * 这里不验"客户端自己取消最小化"：仓库生成的 xdg-shell 是 **unstable v6**，
-     * 那个版本只有 `set_minimized`，没有 `unset_minimized`（stable 1.0 才加）。
-     * 所以 `unmin` 分支只有单测覆盖（直接改字段再补发 view_changed），
+     * 这里不验"客户端自己取消最小化"：Wayland stable xdg-shell 有意只提供
+     * `set_minimized`、不提供 `unset_minimized`（恢复由合成器或任务栏触发）。
+     * 所以 `unmin` 分支由单测覆盖（直接改字段再补发 view_changed），
      * 端到端只钉"提交时由合成器恢复"这一条。
      */
     send_key(KEY_LEFTALT, false);

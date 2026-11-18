@@ -41,6 +41,7 @@
 #include <wlr/util/log.h>
 
 #include "focus.h"
+#include "multitask_view.h"
 #include "output.h"
 #include "placement.h"
 #include "scene.h"
@@ -176,6 +177,7 @@ struct woodland_window_switcher {
     struct wl_listener view_unmapped;
     struct wl_listener view_changed;
     struct wl_listener lock_changed;
+    struct wl_listener workspace_changed;
 };
 
 /* ==================== 候选与下标（纯逻辑） ==================== */
@@ -285,6 +287,9 @@ static const char *switcher_label(const struct woodland_view *view)
 static void switcher_row_text(const struct woodland_view *view, bool minimized,
                               char *buf, size_t size)
 {
+    if (!buf || size == 0) {
+        return;
+    }
     const char *label = switcher_label(view);
     const char *suffix = "";
     if (minimized) {
@@ -296,8 +301,19 @@ static void switcher_row_text(const struct woodland_view *view, bool minimized,
         suffix_len = 0;
     }
     size_t title_max = size - 1 - suffix_len;
-    snprintf(buf, title_max + 1, "%s", label);
-    memcpy(buf + strlen(buf), suffix, suffix_len + 1);
+    size_t label_len = strlen(label);
+    size_t copy_len = label_len < title_max ? label_len : title_max;
+    if (copy_len < label_len) {
+        /* 回退到完整的 UTF-8 字符边界，避免把半个多字节字符交给 Pango */
+        while (copy_len > 0 && ((unsigned char)label[copy_len] & 0xC0) == 0x80) {
+            copy_len--;
+        }
+    }
+    if (copy_len > 0) {
+        memcpy(buf, label, copy_len);
+    }
+    memcpy(buf + copy_len, suffix, suffix_len);
+    buf[copy_len + suffix_len] = '\0';
 }
 
 static void switcher_cairo_rounded_rect(cairo_t *cr, double x, double y, double w, double h,
@@ -701,6 +717,22 @@ static void handle_lock_changed(struct wl_listener *listener, void *data)
 }
 
 /*
+ * 切换工作区时面板必须立刻收起。
+ *
+ * 快照记录的是打开那一刻所在工作区的候选；若面板开着时外部经
+ * ext-workspace / treeland-compositor-action 切走了工作区，
+ * workspace_switch 不会逐个发 view_changed，快照里就全成了旧工作区的窗口。
+ */
+static void handle_workspace_changed(struct wl_listener *listener, void *data)
+{
+    struct woodland_window_switcher *sw = wl_container_of(listener, sw, workspace_changed);
+    (void)data;
+    if (sw->active) {
+        switcher_finish(sw->server, false);
+    }
+}
+
+/*
  * 把第 idx 项从快照里摘掉：剩下的是指针数组，memmove 让顺序保持 z 序。
  * 先摘再从剩余项里挑高亮——被摘的那一项本身就可能是当前高亮。
  * 摘空了就顺手收面板（没有候选的 Alt+Tab 面板没有意义）。
@@ -823,6 +855,15 @@ bool woodland_window_switcher_init(struct woodland_server *server)
         woodland_listener_connect(&sw->lock_changed, &server->session_lock->lock_changed,
                                   handle_lock_changed, "switcher.lock");
     }
+    /*
+     * workspace_init 排在 shell_init 之后，这里若尚未初始化则先建信号，
+     * workspace_init 会保留这条监听链表（见 workspace.c）。
+     */
+    if (!server->workspace_changed.listener_list.next) {
+        wl_signal_init(&server->workspace_changed);
+    }
+    woodland_listener_connect(&sw->workspace_changed, &server->workspace_changed,
+                              handle_workspace_changed, "switcher.workspace");
     server->window_switcher = sw;
     return true;
 }
@@ -838,6 +879,9 @@ void woodland_window_switcher_finish(struct woodland_server *server)
     wl_list_remove(&sw->view_changed.link);
     if (sw->lock_changed.link.prev) {
         wl_list_remove(&sw->lock_changed.link);
+    }
+    if (sw->workspace_changed.link.prev) {
+        wl_list_remove(&sw->workspace_changed.link);
     }
     if (sw->tree) {
         wlr_scene_node_destroy(&sw->tree->node);
@@ -868,6 +912,7 @@ bool woodland_window_switcher_begin(struct woodland_server *server, bool forward
      * 手势语义上也不对：Alt+Tab 是"选窗口"，不是"边拖边选"。
      */
     if (!server || !server->window_switcher || woodland_session_lock_is_locked(server) ||
+        woodland_multitask_view_is_active(server) ||
         server->cursor_mode == WOODLAND_CURSOR_MOVE ||
         server->cursor_mode == WOODLAND_CURSOR_RESIZE) {
         return false;
@@ -909,6 +954,10 @@ bool woodland_window_switcher_begin(struct woodland_server *server, bool forward
 
     wlr_scene_node_set_enabled(&sw->tree->node, true);
     wlr_scene_node_raise_to_top(&sw->tree->node);
+    /* 拖拽图标树必须始终在最顶层（满足 selfcheck 的 dnd_icon 不变量） */
+    if (server->dnd.drag && server->dnd.icons) {
+        wlr_scene_node_raise_to_top(&server->dnd.icons->node);
+    }
 
     woodland_trace_add("switcher", origin ? origin->id : 0, "begin n=%d dir=%s sel=%d", sw->count,
                        forward ? "fwd" : "back", sw->selected);

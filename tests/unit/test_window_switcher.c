@@ -18,11 +18,13 @@
 #include <wlr/render/allocator.h>
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/types/wlr_cursor.h>
+#include <wlr/types/wlr_data_device.h>
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_output_layout.h>
 #include <xkbcommon/xkbcommon.h>
 
 #include "focus.h"
+#include "multitask_view.h"
 #include "output.h"
 #include "scene.h"
 #include "session_lock.h"
@@ -317,6 +319,73 @@ int main(void)
     woodland_window_switcher_cancel(&server);
     assert(!woodland_window_switcher_is_active(&server));
 
+    /* ---------- 7g. 切工作区：面板立刻收起，不留旧工作区快照 ---------- */
+    server.focused_view = &va;
+    assert(woodland_window_switcher_begin(&server, true));
+    assert(woodland_window_switcher_is_active(&server));
+    server.active_workspace = &ws2;
+    wl_signal_emit_mutable(&server.workspace_changed, &ws2);
+    assert(!woodland_window_switcher_is_active(&server));
+    server.active_workspace = &ws1;
+
+    /* ---------- 7h. 与多任务视图互斥 ---------- */
+    assert(woodland_multitask_view_init(&server));
+    woodland_multitask_view_open(&server);
+    assert(woodland_multitask_view_is_active(&server));
+    assert(!woodland_window_switcher_begin(&server, true));
+    assert(!woodland_window_switcher_is_active(&server));
+    woodland_multitask_view_close(&server, false);
+    assert(!woodland_multitask_view_is_active(&server));
+
+    /* 反过来：切换器开着时打开多任务视图，先收起切换器 */
+    server.focused_view = &va;
+    assert(woodland_window_switcher_begin(&server, true));
+    assert(woodland_window_switcher_is_active(&server));
+    woodland_multitask_view_open(&server);
+    assert(!woodland_window_switcher_is_active(&server));
+    assert(woodland_multitask_view_is_active(&server));
+    woodland_multitask_view_close(&server, false);
+    woodland_multitask_view_finish(&server);
+
+    /* ---------- 7i. 拖拽中打开切换器：拖拽图标树仍保持最顶层 ---------- */
+    struct wlr_drag fake_drag = {0};
+    server.dnd.drag = &fake_drag;
+    server.dnd.icons = wlr_scene_tree_create(&server.scene->tree);
+    assert(server.dnd.icons != NULL);
+    server.focused_view = &va;
+    assert(woodland_window_switcher_begin(&server, true));
+    assert(woodland_window_switcher_is_active(&server));
+    {
+        struct wl_list *last = server.scene->tree.children.prev;
+        struct wlr_scene_node *top = wl_container_of(last, top, link);
+        assert(top == &server.dnd.icons->node);
+    }
+    woodland_window_switcher_cancel(&server);
+    server.dnd.drag = NULL;
+    wlr_scene_node_destroy(&server.dnd.icons->node);
+    server.dnd.icons = NULL;
+
+    /* ---------- 7j. 超长中文 UTF-8 标题 + 最小化后缀：按字符边界截断不崩溃 ---------- */
+    {
+        char long_zh[320];
+        size_t pos = 0;
+        const char *unit = "中文测试";
+        size_t ulen = strlen(unit);
+        while (pos + ulen < sizeof(long_zh) - 1) {
+            memcpy(long_zh + pos, unit, ulen);
+            pos += ulen;
+        }
+        long_zh[pos] = '\0';
+        va.title = long_zh;
+        va.minimized = true;
+        server.focused_view = &vb;
+        assert(woodland_window_switcher_begin(&server, true));
+        assert(woodland_window_switcher_is_active(&server));
+        woodland_window_switcher_cancel(&server);
+        va.title = NULL;
+        va.minimized = false;
+    }
+
     /* ---------- 8. 切换中候选被卸载：从快照里摘掉，不悬空 ---------- */
     server.focused_view = &va;
     assert(woodland_window_switcher_begin(&server, true));
@@ -355,9 +424,12 @@ int main(void)
     assert(server.window_switcher == NULL);
     server.session_lock = NULL;
 
-    wlr_scene_node_destroy(&server.scene->tree.node);
     wlr_cursor_destroy(server.cursor);
     woodland_output_finish(&server);
+    wlr_scene_node_destroy(&server.scene->tree.node);
+    wlr_allocator_destroy(server.allocator);
+    wlr_renderer_destroy(server.renderer);
+    wlr_backend_destroy(server.backend);
     wl_display_destroy(server.display);
     return 0;
 }

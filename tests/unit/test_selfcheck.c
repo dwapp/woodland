@@ -244,6 +244,15 @@ int main(void) {
     b.view.mapped = true;
     assert_all_ok(&server, "switcher healthy again");
 
+    /* 模拟候选已从 server->views 摘除但未通知切换器：必须走 !view_in_list 且不解引用 */
+    wl_list_remove(&b.view.link);
+    n = run(&server, out);
+    sw = find(out, n, "switcher_snapshot");
+    assert(!sw->ok);
+    assert(strstr(sw->actual, "is not in server->views"));
+    wl_list_insert(&server.views, &b.view.link);
+    assert_all_ok(&server, "switcher list restored");
+
     /* 收起后面板不再持有候选；自检也该回到绿 */
     woodland_window_switcher_cancel(&server);
     assert_all_ok(&server, "switcher cancelled");

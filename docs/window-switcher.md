@@ -111,9 +111,11 @@ if (woodland_window_switcher_is_active(server)) {
 - **右键菜单开着时按 Alt+Tab**：`begin` 第一件事就是 `woodland_window_menu_hide()`。不收的话两块面板并存，
   面板盖住菜单，提交后焦点换了、菜单还挂在**原来那个窗口**上——接下来一个 Enter 就作用到旧窗口
   （典型的"切换完莫名其妙关掉一个窗口"）。Alt+Tab 是"选窗口"的模态手势，右键菜单在这个上下文里没有意义。
-- **拖动 / 缩放进行中**：`begin` 直接拒绝。那两个状态里指针是主控、键盘归 `interactive` 那一层
-  （方向键微调、Escape 取消，见 `seat.c` 的 `cursor_mode` 分支）；开面板会把键盘整块抢走
-  （Escape 变成"取消切换"而不是"取消拖动"），提交时还会在拖动途中改焦点。
+- **拖动 / 缩放或多任务视图进行中**：`begin` 直接拒绝。拖动/缩放时键盘归 `interactive` 那一层
+  （方向键微调、Escape 取消，见 `seat.c` 的 `cursor_mode` 分支），多任务视图激活时键盘归总览界面（含 `Tab` 切卡）；
+  反过来，切换器开着时经协议触发 `woodland_multitask_view_open()` 会先调用 `woodland_window_switcher_cancel()` 收起面板，避免两层模态叠放。
+- **拖拽图标层序**：面板打开时 `raise_to_top`，若当前正在拖拽（`server->dnd.drag && server->dnd.icons`），随即把 `dnd->icons` 重新置顶，保持 `self_check` 的 `dnd_icon` 不变量。
+- **切换工作区**：面板开着时若外部经 `ext-workspace` / `treeland-compositor-action` 切走工作区，`workspace_changed`（`switcher.workspace` 监听器）一到即 `finish(false)` 收起，避免快照残留旧工作区窗口。
 - **锁屏**：两头都堵。`begin` 直接拒绝；面板开着时锁屏，`lock_changed` 一到就 `finish(false)` 收起
   （`switcher.lock` 监听器）。只靠锁屏树 `raise_to_top` 盖住面板不够——状态留着的话，解锁后第一次
   `Tab` 会落进一个陈旧的高亮项，松手就换焦点，用户看到的是"解锁后窗口突然跳了一下"。
@@ -187,10 +189,10 @@ WAYLAND_DISPLAY=wayland-0 grim /tmp/switcher.png
 > `update_state` 置成 `false`，xkb 状态只由 `modifiers` 请求驱动。少发这一条，合成器那边
 > 修饰位恒为 0，`Alt+Tab` 根本进不到键位表（探针第一版就卡在这里）。
 >
-> **`unmin` 这条分支没有端到端覆盖**：仓库生成的 xdg-shell 是 unstable v6，那个版本只有
-> `set_minimized`、没有 `unset_minimized`（stable 1.0 才加），客户端没法自己撤销最小化。
+> **`unmin` 这条分支没有端到端覆盖**：Wayland stable `xdg-shell` 有意只提供
+> `set_minimized`、不提供 `unset_minimized`（恢复最小化由合成器或任务栏经 `foreign-toplevel` /
+> `xdg-activation` 触发），客户端没法通过 `xdg-shell` 自己撤销最小化。
 > 所以 `unmin` 靠单测（直接改字段 + 补发 `view_changed`）；端到端只钉"提交时由合成器恢复"。
-> 真要用协议验，得先把测试用的 XML 换成 stable 版本——那会牵动所有探针的生成头，不值当。
 
 ## 8. 已知取舍
 
