@@ -69,7 +69,7 @@ meson test -C build --print-errorlogs  # 跑全部测试
 
 ## 调试接口（wctl）
 
-合成器在 `$XDG_RUNTIME_DIR/woodland-<wayland socket>.sock` 上开一个**只读**调试 socket，路径同时导出到 `WOODLAND_IPC`。协议是「一行一条命令、一行一条 JSON 回应」，所以 `wctl` 和 `nc -U` 都能用：
+合成器在 `$XDG_RUNTIME_DIR/woodland-<wayland socket>.sock` 上开一个调试 socket（**默认只读**，写命令见下面的 `--debug-ctl` 小节），路径同时导出到 `WOODLAND_IPC`。协议是「一行一条命令、一行一条 JSON 回应」，所以 `wctl` 和 `nc -U` 都能用：
 
 ```bash
 wctl get_tree   | jq '.views[] | {id,title,focused,activated,outer,snapped}'

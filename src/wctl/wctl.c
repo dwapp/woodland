@@ -223,10 +223,10 @@ int main(int argc, char *argv[]) {
      * 容量按"够用且有上限"定：超出就拒发，不发被截断的半条命令 */
     char request[256];
     int request_len = snprintf(request, sizeof(request), "%s", cmd);
-    for (int i = optind + 1; request_len >= 0 && i < argc; i++) {
-        int more = snprintf(request + request_len,
-                            (size_t)request_len < sizeof(request) ? sizeof(request) - (size_t)request_len : 0,
-                            " %s", argv[i]);
+    for (int i = optind + 1; request_len >= 0 && (size_t)request_len < sizeof(request) && i < argc;
+         i++) {
+        int more = snprintf(request + request_len, sizeof(request) - (size_t)request_len, " %s",
+                            argv[i]);
         request_len = more < 0 ? more : request_len + more;
     }
     if (request_len >= 0 && (size_t)request_len + 2 <= sizeof(request)) {

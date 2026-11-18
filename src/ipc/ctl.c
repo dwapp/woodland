@@ -194,21 +194,30 @@ static bool ctl_view_cmd(struct woodland_server *server, const char *cmd, const 
         woodland_focus_view(view, true);
     } else if (strcmp(cmd, "close") == 0) {
         woodland_view_close(view);
-    } else if (strcmp(cmd, "move") == 0) {
+    } else if (strcmp(cmd, "move") == 0 || strcmp(cmd, "resize") == 0) {
         if (!view->mapped || !view->scene_tree) {
             respond(out, cmd, false, "view is not mapped");
             return false;
         }
-        struct woodland_ssd_margins m = {0};
-        woodland_ssd_get_margins(view, &m);
-        wlr_scene_node_set_position(&view->scene_tree->node, (int)v[1] + m.left, (int)v[2] + m.top);
-        woodland_view_update_outputs(view);
-    } else if (strcmp(cmd, "resize") == 0) {
-        if (v[1] <= 0 || v[2] <= 0 || v[1] > 16384 || v[2] > 16384) {
-            respond(out, cmd, false, "size out of range (1..16384)");
+        /* max/fullscreen/snap 下直接改几何会让几何和状态标志对不上，
+         * 先 maximize/fullscreen 0 再动 */
+        if (view->maximized || view->fullscreen || view->snapped_edges) {
+            respond(out, cmd, false, "view is maximized/fullscreen/snapped: restore it first");
             return false;
         }
-        woodland_view_request_size(view, (int)v[1], (int)v[2]);
+        if (strcmp(cmd, "move") == 0) {
+            struct woodland_ssd_margins m = {0};
+            woodland_ssd_get_margins(view, &m);
+            wlr_scene_node_set_position(&view->scene_tree->node, (int)v[1] + m.left,
+                                        (int)v[2] + m.top);
+            woodland_view_update_outputs(view);
+        } else {
+            if (v[1] <= 0 || v[2] <= 0 || v[1] > 16384 || v[2] > 16384) {
+                respond(out, cmd, false, "size out of range (1..16384)");
+                return false;
+            }
+            woodland_view_request_size(view, (int)v[1], (int)v[2]);
+        }
     } else if (strcmp(cmd, "maximize") == 0) {
         woodland_view_set_maximized(view, v[1] == 1);
     } else if (strcmp(cmd, "fullscreen") == 0) {
@@ -318,7 +327,7 @@ static bool ctl_inject_key(struct woodland_server *server, const char *args,
         return false;
     }
     if (!server->seat || !server->seat->keyboard_state.focused_surface) {
-        respond(out, "inject_key", false, "no keyboard focus");
+        respond(out, "inject_key", false, "no keyboard focus (headless seats have no keyboard)");
         return false;
     }
     bool press = strcmp(action, "press") == 0 || strcmp(action, "tap") == 0;

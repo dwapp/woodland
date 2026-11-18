@@ -112,6 +112,21 @@ w get_tree | jq -e '.workspace.current == "2"' >/dev/null || smoke_fail "workspa
 w workspace 1 | jq -e '.ok == true' >/dev/null || smoke_fail "workspace 1 failed"
 
 w pointer_move 640 360 | jq -e '.ok == true' >/dev/null || smoke_fail "pointer_move failed"
+
+# fullscreen / resize / inject_key
+w fullscreen "$ID" 1 | jq -e '.ok == true' >/dev/null || smoke_fail "fullscreen failed"
+w get_tree | jq -e '.views[0].fullscreen == true' >/dev/null || smoke_fail "view should be fullscreen"
+w move "$ID" 5 5 | jq -e '.ok == false' >/dev/null || smoke_fail "move must be refused while fullscreen"
+w resize "$ID" 400 300 | jq -e '.ok == false' >/dev/null || smoke_fail "resize must be refused while fullscreen"
+w fullscreen "$ID" 0 | jq -e '.ok == true' >/dev/null || smoke_fail "leave fullscreen failed"
+w resize "$ID" 400 300 | jq -e '.ok == true' >/dev/null || smoke_fail "resize failed"
+w resize "$ID" 0 300 | jq -e '.ok == false' >/dev/null || smoke_fail "zero-size resize should fail"
+w focus_view "$ID" | jq -e ".ok == true" >/dev/null || smoke_fail "refocus failed"
+# headless 没有键盘设备：只能断言"没有键盘焦点"这条明确的错误；
+# 真正送键的路径要在有 seat keyboard 的会话里验证
+w inject_key 30 tap | jq -e '.ok == false and (.error | startswith("no keyboard focus"))' >/dev/null \
+    || smoke_fail "inject_key should report missing keyboard focus on a headless seat"
+w inject_key 30 smash | jq -e '.ok == false' >/dev/null || smoke_fail "bad key action should fail"
 w pointer_button left click | jq -e '.ok == true' >/dev/null || smoke_fail "pointer_button failed"
 
 # 坏参数：明确报错、不改状态、合成器不崩
