@@ -357,6 +357,11 @@ struct woodland_server {
      * "用户自己接管全局快捷键"留的出口。
      */
     bool no_shortcut_client;
+    /*
+     * --debug-ctl：打开 wctl 的写命令（focus/move/inject_key 等，见
+     * src/ipc/ctl.c）。默认关闭——调试 socket 默认保持只读。
+     */
+    bool debug_ctl;
 };
 
 /**

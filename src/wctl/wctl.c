@@ -42,6 +42,12 @@ static void usage(const char *name) {
            "  get_config  active runtime configuration\n"
            "  reload_config reload configuration from file\n"
            "\n"
+           "write commands (only when woodland runs with --debug-ctl; see `help`):\n"
+           "  focus_view <id> | close <id> | move <id> <x> <y> | resize <id> <w> <h>\n"
+           "  maximize|fullscreen|minimize <id> <0|1> | workspace <name>\n"
+           "  pointer_move <x> <y> | pointer_button <left|right|middle> <press|release|click>\n"
+           "  inject_key <linux_keycode> <press|release|tap>\n"
+           "\n"
            "aliases: tree, focus, check, scene, config, reload\n"
            "\n"
            "options:\n"
@@ -213,8 +219,21 @@ int main(int argc, char *argv[]) {
     }
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
-    char request[64];
-    int request_len = snprintf(request, sizeof(request), "%s\n", cmd);
+    /* 命令名后面的参数原样拼进同一行（写命令：move 3 100 200）。
+     * 容量按"够用且有上限"定：超出就拒发，不发被截断的半条命令 */
+    char request[256];
+    int request_len = snprintf(request, sizeof(request), "%s", cmd);
+    for (int i = optind + 1; request_len >= 0 && (size_t)request_len < sizeof(request) && i < argc;
+         i++) {
+        int more = snprintf(request + request_len, sizeof(request) - (size_t)request_len, " %s",
+                            argv[i]);
+        request_len = more < 0 ? more : request_len + more;
+    }
+    if (request_len >= 0 && (size_t)request_len + 2 <= sizeof(request)) {
+        request[request_len++] = '\n';
+    } else {
+        request_len = (int)sizeof(request);   /* 触发下面的"过长"分支 */
+    }
     /* snprintf 返回"本来要写多少"，截断时它会大于缓冲：直接拿去 write
      * 会从栈上读出去，把后面的内存发给对端 */
     if (request_len < 0 || (size_t)request_len >= sizeof(request)) {

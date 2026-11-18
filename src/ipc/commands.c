@@ -6,8 +6,8 @@
  * woodland_json 缓冲。好处是它可以在单元测试里直接调，不用起监听、
  * 不用连客户端；换传输方式（比如以后加个 fifo）也不用改这里。
  *
- * 全部命令只读。给"设置几何""注入按键"这类写命令开的口子，需要和正常
- * 输入路径抢状态，一个 bug 就变成"合成器被调试工具搞坏了"，收益不值。
+ * 这里的命令全部只读。写命令（移动/聚焦/注入输入）在 ctl.c，且只有
+ * --debug-ctl 打开时才生效：默认调试 socket 仍然是只读的。
  */
 #include <stdint.h>
 #include <string.h>
@@ -962,7 +962,7 @@ static bool ipc_reload_config(struct woodland_server *server, struct woodland_js
 /* ==================== 分发 ==================== */
 
 /* help 的输出从 ipc_cmd_docs 生成：表是唯一事实源，不会和实现漂移 */
-static void ipc_help(struct woodland_json *out)
+static void ipc_help(const struct woodland_server *server, struct woodland_json *out)
 {
     struct woodland_json_obj obj;
     woodland_json_obj_open(&obj, out);
@@ -996,6 +996,7 @@ static void ipc_help(struct woodland_json *out)
         woodland_json_arr_close(&fields);
         woodland_json_obj_close(&cmd_obj);
     }
+    woodland_ipc_ctl_help(server, out, &cmds);
     woodland_json_arr_close(&cmds);
     woodland_json_obj_close(&obj);
 }
@@ -1029,8 +1030,14 @@ static bool dispatch(struct woodland_server *server, const char *line, struct wo
         respond_error(out, "", "empty command");
         return false;
     }
+    {
+        bool ctl_ok = false;
+        if (woodland_ipc_ctl_dispatch(server, cmd, p + n, out, &ctl_ok)) {
+            return ctl_ok;
+        }
+    }
     if (strcmp(cmd, "help") == 0) {
-        ipc_help(out);
+        ipc_help(server, out);
         return true;
     }
     if (strcmp(cmd, "ping") == 0) {

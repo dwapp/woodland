@@ -86,7 +86,7 @@ meson test -C build --print-errorlogs  # 跑全部测试
 
 ## 调试接口（wctl）
 
-合成器在 `$XDG_RUNTIME_DIR/woodland-<wayland socket>.sock` 上开一个**只读**调试 socket，路径同时导出到 `WOODLAND_IPC`。协议是「一行一条命令、一行一条 JSON 回应」，所以 `wctl` 和 `nc -U` 都能用：
+合成器在 `$XDG_RUNTIME_DIR/woodland-<wayland socket>.sock` 上开一个调试 socket（**默认只读**，写命令见下面的 `--debug-ctl` 小节），路径同时导出到 `WOODLAND_IPC`。协议是「一行一条命令、一行一条 JSON 回应」，所以 `wctl` 和 `nc -U` 都能用：
 
 ```bash
 wctl get_tree   | jq '.views[] | {id,title,focused,activated,outer,snapped}'
@@ -100,6 +100,22 @@ wctl self_check | jq .        # 不变量断言；失败项带 expected / actual
 wctl dump_scene | jq '.nodes' # wlr_scene 树，排查「画了但看不见」
 wctl --help
 ```
+
+### 写命令：`--debug-ctl`
+
+调试 socket **默认只读**。合成器加 `--debug-ctl` 启动后才开放写命令（`src/ipc/ctl.c`，`wctl help` 里会多出带 `usage` 的条目；没开时调用它们回 `ok=false` 且不改任何状态）：
+
+```bash
+woodland --debug-ctl --self-check --trace
+wctl focus_view 3        # 注意：不是 `wctl focus`（那是 get_focus 的别名）
+wctl move 3 300 200      # 外框左上角，布局坐标，不吸附不夹取
+wctl resize 3 800 600 | maximize 3 1 | fullscreen 3 1 | minimize 3 0 | close 3
+wctl workspace 2
+wctl pointer_move 640 360; wctl pointer_button left click   # 走真实的 cursor button 信号
+wctl inject_key 30 tap   # 只送给键盘焦点的客户端，不经过合成器快捷键表
+```
+
+写命令一律走合成器自己的入口（`woodland_focus_view` / `woodland_view_set_*` 等），并在 `--trace` 里留一条 `action` 轨迹（detail 以 `debug-ctl` 开头）。回归：`meson test -C build smoke-debug-ctl`。wctl 会把命令名后的参数原样拼进同一行（上限 255 字节）。
 
 **每个命令的完整字段清单（名字+类型+说明）在 `wctl help` 的响应里**，加新命令时同步更新 `src/ipc/commands.c` 顶部的 `ipc_cmd_docs` 表——它是唯一事实源，help 输出由它生成。
 
