@@ -68,18 +68,32 @@ enum woodland_view_wants_focus woodland_view_wants_focus(const struct woodland_v
     return WOODLAND_VIEW_WANTS_FOCUS_ALWAYS;
 }
 
-bool woodland_view_focusable(const struct woodland_view *view)
+/*
+ * 可聚焦判定的唯一实现。ignore_minimized=true 时只放宽最小化这一条，
+ * 给 woodland_view_restorable() 用（"恢复之后能不能聚焦"）。
+ */
+static bool view_focusable_ex(const struct woodland_view *view, bool ignore_minimized)
 {
     if (!view || !view->server) {
         return false;
     }
-    if (!view->mapped || view->minimized || view->override_redirect ||
+    if (!view->mapped || (!ignore_minimized && view->minimized) || view->override_redirect ||
         view->workspace != view->server->active_workspace) {
         return false;
     }
     enum woodland_view_wants_focus wants = woodland_view_wants_focus(view);
     return wants == WOODLAND_VIEW_WANTS_FOCUS_ALWAYS ||
            wants == WOODLAND_VIEW_WANTS_FOCUS_LIKELY;
+}
+
+bool woodland_view_focusable(const struct woodland_view *view)
+{
+    return view_focusable_ex(view, false);
+}
+
+bool woodland_view_restorable(const struct woodland_view *view)
+{
+    return view_focusable_ex(view, true);
 }
 
 void woodland_seat_focus_surface(struct woodland_server *server, struct wlr_surface *surface)
@@ -305,10 +319,17 @@ void woodland_focus_view(struct woodland_view *view, bool raise)
         return;
     }
 
+    /*
+     * 最小化就先恢复，然后**继续往下走**照常聚焦。
+     *
+     * 这里曾经是"恢复完就 return"，理由是"恢复会重新 map，map 路径会再调
+     * 一次本函数"。xdg 视图不是这样：woodland_view_set_minimized() 只关掉
+     * scene 节点，surface 一直是 mapped 的，不存在第二次 map——那一下于是
+     * 变成"窗口恢复了、但没拿到焦点"（xdg-activation 点通知栏、Alt+Tab 选中
+     * 一个最小化的窗口，踩的都是这条）。恢复之后继续走，才和"激活"同义。
+     */
     if (view->minimized) {
-        /* 恢复会重新 map，map 路径会再次调用本函数（届时已可聚焦） */
         woodland_view_set_minimized(view, false);
-        return;
     }
 
     /* 不在当前工作区：先切过去（清焦点，稍后由本次聚焦覆盖） */

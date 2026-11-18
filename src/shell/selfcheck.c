@@ -26,6 +26,7 @@
 #include "util/json.h"
 #include "ssd.h"
 #include "view.h"
+#include "window_switcher.h"
 #include "woodland.h"
 #include "workspace.h"
 
@@ -537,6 +538,81 @@ static void check_dnd_icon(struct woodland_server *server,
              dnd->drag->icon ? "present" : "absent");
 }
 
+/*
+ * 切换器快照一致性。
+ *
+ * 面板开着时快照是"按下 Alt 那一刻的 z 序"，里面每一项都必须还在
+ * server->views 里、且仍然满足 woodland_view_restorable()（= focusable
+ * 放过"最小化"那一条；最小化的候选是合法的，提交时会被恢复）。
+ * 这条专抓 view_unmapped 监听的漏挂/漏摘：快照里留着已卸载的窗口，面板画的
+ * 是陈旧行；留着已 free 的窗口，渲染时读 view->title 就是 UAF——两者从面板
+ * 外观上都看不出来（最多是"少一行/多一行"），只有拿链表对照才说得清。
+ *
+ * 先查链表成员（纯指针比较，不解引用），再查 restorable（会读 workspace 等
+ * 字段）——顺序反过来，如果那个 view 已经 free 了就是先崩在解引用上。
+ */
+static void check_switcher(struct woodland_server *server,
+                           struct woodland_check *check) {
+    check->ok = true;
+    set_text(check->expected, sizeof(check->expected),
+             "inactive => empty snapshot; active => every candidate still in views "
+             "and still restorable (focusable, or minimized but restorable)");
+
+    if (!server->window_switcher) {
+        /* 没 init 切换器（伪造 server 的单测）不算失败 */
+        set_text(check->actual, sizeof(check->actual), "no switcher");
+        return;
+    }
+
+    struct woodland_view *views[WOODLAND_SWITCHER_MAX_ITEMS];
+    int selected = -1;
+    int n = woodland_window_switcher_snapshot(server, views,
+                                              WOODLAND_SWITCHER_MAX_ITEMS, &selected);
+    if (!woodland_window_switcher_is_active(server)) {
+        if (n != 0 || selected != -1) {
+            check->ok = false;
+            set_text(check->actual, sizeof(check->actual),
+                     "inactive but snapshot still holds %d candidate(s)", n);
+        } else {
+            set_text(check->actual, sizeof(check->actual), "inactive, snapshot empty");
+        }
+        return;
+    }
+
+    if (n <= 0) {
+        check->ok = false;
+        set_text(check->actual, sizeof(check->actual), "active with an empty snapshot");
+        return;
+    }
+    if (selected < 0 || selected >= n) {
+        check->ok = false;
+        set_text(check->actual, sizeof(check->actual),
+                 "highlight out of range (index=%d, count=%d)", selected, n);
+        return;
+    }
+    for (int i = 0; i < n; i++) {
+        if (!view_in_list(server, views[i])) {
+            check->ok = false;
+            set_text(check->actual, sizeof(check->actual),
+                     "candidate %d (view#%u) is not in server->views", i,
+                     (unsigned)views[i]->id);
+            return;
+        }
+        if (!woodland_view_restorable(views[i])) {
+            check->ok = false;
+            set_text(check->actual, sizeof(check->actual),
+                     "candidate %d (view#%u) is no longer a valid target "
+                     "(mapped=%d minimized=%d orid=%d same_ws=%d)",
+                     i, (unsigned)views[i]->id, views[i]->mapped, views[i]->minimized,
+                     views[i]->override_redirect,
+                     views[i]->workspace == server->active_workspace);
+            return;
+        }
+    }
+    set_text(check->actual, sizeof(check->actual),
+             "active, %d candidate(s), index %d, all in views and restorable", n, selected);
+}
+
 /* ==================== 汇总 ==================== */
 
 int woodland_selfcheck_collect(struct woodland_server *server,
@@ -561,6 +637,7 @@ int woodland_selfcheck_collect(struct woodland_server *server,
         {"ssd_geometry_matches", check_ssd_geometry},
         {"wallpaper_below_layers", check_wallpaper_z_order},
         {"dnd_icon", check_dnd_icon},
+        {"switcher_snapshot", check_switcher},
     };
 
     int count = 0;

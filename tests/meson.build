@@ -457,6 +457,45 @@ if get_option('test').enabled()
              timeout: 60)
       endif
 
+      # Alt+Tab 切换器：探针开两个窗口 + 一块虚拟键盘，发 Alt↓ Tab↓ Tab↑ Alt↑，
+      # 用 get_focus / get_tree 断言"面板开了、高亮谁、松手后焦点落到谁"。
+      # 这是唯一能验证"按键真的走到切换器"的用例——单测只覆盖选择逻辑。
+      switcher_probe_srcs = [
+        'smoke/switcher_probe.c',
+        custom_target('switcher-xdg-shell-header',
+          input: wp_datadir / 'stable' / 'xdg-shell' / 'xdg-shell.xml',
+          output: 'switcher-xdg-shell-client-protocol.h',
+          command: [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@']),
+        custom_target('switcher-xdg-shell-code',
+          input: wp_datadir / 'stable' / 'xdg-shell' / 'xdg-shell.xml',
+          output: 'switcher-xdg-shell-protocol.c',
+          command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@']),
+        # 虚拟键盘的 XML 在 wlroots 子项目里。**只能当命令行参数传**：写成
+        # input: 会被 meson 的沙箱拦下（"Tried to grab file ... from a nested
+        # subproject"，tests/ 不许引用子项目里的文件）。tests/unit 里的
+        # test_ime 也是这么绕的。
+        custom_target('switcher-vk-header',
+          output: 'switcher-virtual-keyboard-unstable-v1-client-protocol.h',
+          command: [wayland_scanner, 'client-header',
+                    meson.project_source_root() / 'subprojects' / 'wlroots' / 'protocol' /
+                    'virtual-keyboard-unstable-v1.xml', '@OUTPUT@']),
+        custom_target('switcher-vk-code',
+          output: 'switcher-virtual-keyboard-unstable-v1-protocol.c',
+          command: [wayland_scanner, 'private-code',
+                    meson.project_source_root() / 'subprojects' / 'wlroots' / 'protocol' /
+                    'virtual-keyboard-unstable-v1.xml', '@OUTPUT@']),
+      ]
+      switcher_probe = executable('switcher_probe', switcher_probe_srcs,
+                                  dependencies: [wayland_client_dep, xkbcommon])
+      test('smoke-switcher',
+           find_program('sh'),
+           args: [meson.current_source_dir() / 'smoke' / 'run_switcher_smoke.sh',
+                  woodland_bin.full_path(),
+                  switcher_probe.full_path(),
+                  wctl_bin.full_path()],
+           is_parallel: false,
+           timeout: 60)
+
       # 多走一遍 blur 参数；脚本按 [effects] 配置跑"开"和"关"两遍。
       test('smoke-bg-effect',
            find_program('sh'),

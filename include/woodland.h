@@ -41,6 +41,7 @@ struct wlr_pointer_constraints_v1;
 struct wlr_pointer_constraint_v1;
 struct woodland_window_menu;
 struct woodland_multitask_view;
+struct woodland_window_switcher;
 /* 贴边铺满预览（拖动窗口靠近屏幕边缘时显示的半透明目标区域预览） */
 struct woodland_snap_preview {
     struct woodland_server *server;
@@ -178,6 +179,14 @@ struct woodland_server {
     struct woodland_snap_preview snap_preview;
     struct woodland_window_menu *window_menu;
     struct woodland_multitask_view *multitask_view;
+    /*
+     * Alt+Tab 切换器（按住 Alt 期间的面板）。
+     *
+     * 和 window_menu 同一个位置、同一个理由：它是"指针/键盘此刻在干什么"
+     * 之外的一层覆盖 UI，生命周期跟 server 一致，挂在 server 上比藏进
+     * shell 私有状态更好查（wctl get_tree 直接读，不用树外挂账）。
+     */
+    struct woodland_window_switcher *window_switcher;
     /* 前置抓取上下文（按下时记录，避免客户端 request_move 的 RPC 往返丢失初速度） */
     struct {
         struct woodland_view *view;

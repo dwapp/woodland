@@ -48,7 +48,24 @@ meson test -C build --print-errorlogs  # 跑全部测试
   `wctl get_trace` 里 `spawn` 标签的 detail 断言"起了 / 为什么没起"。
 - **冒烟脚本一律先 `. tests/smoke/lib.sh` 再 `smoke_init <名字>`。** 失败时它把现场落到 `build/meson-logs/smoke/<名字>/`：`compositor.log`、`meta.txt`（参数 / socket / 退出码），有 `WCTL` 和 `SOCK` 时还会抓 `get_tree` / `get_focus` / `self_check` / `get_trace` / `dump_scene` 的 JSON 和一张 `screenshot.png`。脚本自己的收尾写成 `smoke_cleanup()`（dump 之后才调用），断言失败用 `smoke_fail "..."`。**不要再用 `cat 日志; exit 1`**——那正是"只有一行结论、没有现场"的老写法。
 - **`smoke-xwayland` 是全仓库唯一做像素颜色断言的用例，而且依赖不齐时会直接 SKIP。** 它要 `Xwayland` + `grim` + `lswt` + `convert` + `jq` + `xterm` 或 `xlogo`；没装 xterm/xlogo 的机器上整条 exit 77，标题栏底色那两个断言一次都不跑。后果很隐蔽：`OK` 和 `SKIP` 在"没红"这件事上一样，看着全绿、push 上去才红。跑完 `meson test` 请**看 SKIP 名单**而不是只看成功数。
+- **在有宿主 X 会话的桌面上跑 `smoke-xwindow-control` 会红，别当成回归。** 宿主占着
+  `:0`（/tmp/.X11-unix/X0），测试里的 Xwayland 只能落到 `:2`；而 wlroots 0.20 启动
+  Xwayland **不再传 `-auth`**（`subprojects/wlroots/xwayland/server.c` 里没有 auth 逻辑），
+  授权走环境里那份 `/run/linglong/Xauthority`，里面只有 `:0` 的 cookie，于是探针连 `:2`
+  拿到 `Authorization required, but no authorization protocol specified`。CI 没有宿主 X、
+  Xwayland 直接拿 `:0`，所以那边是绿的。判据：失败信息里出现 `Authorization required`
+  \+ 合成器日志里 `Failed to bind socket ... X0: Address already in use`，就是这条。
 - **像素断言的期望色从 `wctl get_tree` 的 `ssd.palette` 取，不要在脚本里抄十六进制。** `ssd.palette` 报的是该窗口**最终生效**的标题栏/边框颜色（`titlebar_active` / `titlebar_inactive` / `border_active` / `border_inactive` + `dark`），由 `woodland_ssd_get_palette()` 统一算出——调色板有三层来源（客户端覆盖 / 配色方案 / 配置文件 / 内置默认），只有 `ssd.c` 说得准。抄一份常量就得人肉同步，改色板会导致 CI 红在 `no SSD titlebar pixels` 上（看着像 SSD 没画，其实只是换了色，2026-11 踩过）。内置默认值本身由 `tests/unit/test_ssd.c` 钉住——色板是有意的设计决定，改它要连单测一起改。
+- **`smoke-switcher` 是唯一驱动真按键的用例，三个坑都在探针里。** 它起三个真 xdg_toplevel，
+  用 `zwp_virtual_keyboard_v1` 发 `Alt↓ Tab↓ Tab↑ Alt↑`：① **modifiers 必须自己发**
+  （`zwp_virtual_keyboard_v1_modifiers`），wlr 的 virtual-keyboard 后端把 key 事件的
+  `update_state` 置成 `false`，xkb 状态只由 modifiers 请求驱动——少这一条，合成器那边修饰位恒为 0，
+  `Alt+Tab` 根本进不到键位表；② **探针要把自己 bind/create 的 proxy 全部 destroy**，
+  `wl_display_disconnect()` 不回收它们，ASan 构建里 LeakSanitizer 会稳定漏 9 个然后把整条用例判
+  FAIL（断言其实全过，看着像功能坏了）。③ **最小化不等于"候选作废"**：最小化的窗口留在列表里
+  （标 `(已最小化)`、提交时恢复），所以断言方向是"计数不变 + `get_tree` 的 `minimized` 翻转"，
+  轨迹里看 `min n=` / `restore`，**不要**指望 `drop`。探针带 `--hold-ms N` 可以把面板停住截图
+  （第一轮刚打开、第三轮最小化之后两个停点）。
 - **自写的 Wayland 探针要 roundtrip 两次，收事件要走 prepare_read。** 第一次 roundtrip 只拿到 global 列表：registry 回调里发的 `bind` 被排进出站缓冲，但同一批事件里那个 sync 回调已经把 roundtrip 的 `done` 置上了，dispatch 循环立刻退出，缓冲里剩下的 `bind` 没人 flush——合成器根本没看见 bind，也就一条事件都不会推。第二次 roundtrip 开头那次 flush 才把 bind 发出去。同理，收广播不能只调 `wl_display_dispatch_pending()`（它只分发已进内存队列的事件，socket 不读）：要 `wl_display_prepare_read()` → `poll()` → `wl_display_read_events()` → `wl_display_dispatch_pending()` 这套。`tests/smoke/appearance_probe.c` 是现成样例。
 - **CI 跑在 `archlinux:base-devel`，不要换回 `debian:stable`。** wlroots 0.20 要 wayland >= 1.24、libdrm >= 2.4.129、xkbcommon >= 1.8、pixman >= 0.43，bookworm 一个都不满足，meson 会退到 wrap 里逐个编 fallback，链条断在第一个 wayland 子项目（`Dependency "expat" not found`）。缺 expat 只是表象，补它只会把失败推到下一个依赖。
 - **顶层 `meson.build` 里给 `wlroots` 包的那层 `declare_dependency` 别删。** wlroots 作为子项目构建时，`wayland-scanner` 生成的协议头落在 `build/subprojects/wlroots/protocol/`，而它自己只导出 `include/`，于是 `wlr/types/wlr_layer_shell_v1.h` 里 `#include "wlr-layer-shell-unstable-v1-protocol.h"` 直接编译失败。系统装过 wlroots 的机器上 `/usr/include` 有这个头，问题会被掩盖——**本地能编不代表能编**。
@@ -98,7 +115,7 @@ wctl --help
             {"seq":3,"ms":31,"obj":1,"what":"focus","detail":"prev=0 raise=1"}]}
 ```
 
-- `what` 是**稳定标签**（脚本会 grep），权威清单在 `include/trace.h`：`map` / `unmap` / `destroy` / `focus` / `focus_none` / `layer_focus` / `place` / `workspace` / `output_add` / `output_remove` / `cfg_apply` / `deco` / `bg_effect` / `action` / `shortcut` / `appearance` / `ftl` / `tearing` / `vt` / `snap` / `dnd` / `sec_ctx` / `xwindow` / `menu` / `spawn`。加新标签先改 trace.h 的清单，再发第一条轨迹。
+- `what` 是**稳定标签**（脚本会 grep），权威清单在 `include/trace.h`：`map` / `unmap` / `destroy` / `focus` / `focus_none` / `layer_focus` / `place` / `workspace` / `output_add` / `output_remove` / `cfg_apply` / `deco` / `bg_effect` / `action` / `shortcut` / `appearance` / `ftl` / `tearing` / `vt` / `snap` / `dnd` / `sec_ctx` / `xwindow` / `menu` / `multitask` / `switcher` / `spawn`。加新标签先改 trace.h 的清单，再发第一条轨迹。
 - `detail` 只写**决策依据**（走了哪个分支、策略名、抑制窗口），不要抄 `get_tree` 已有的数值。
 - 关闭时零分配零格式化；打开后也不分配（一次 calloc）。**它只依赖 `util/json`，不许反向依赖任何业务模块**——否则会成为依赖环的入口。
 - 环的语义：`seq` 全局单调，`total` 是累计条数，`dropped = total - count` 就是被覆盖掉的条数。第一个 entry 的 `seq` 一定等于 `dropped`。

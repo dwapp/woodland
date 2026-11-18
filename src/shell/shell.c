@@ -44,6 +44,7 @@
 #include "woodland.h"
 #include "multitask_view.h"
 #include "window_menu.h"
+#include "window_switcher.h"
 #include "workspace.h"
 
 /* ==================== 双后端访问器 ==================== */
@@ -722,6 +723,8 @@ bool woodland_shell_init(struct woodland_server *server)
     woodland_snap_preview_init(server);
     woodland_window_menu_init(server);
     woodland_multitask_view_init(server);
+    /* 失败不致命：切换器全空指针时 Alt+Tab 只是什么都不发生 */
+    woodland_window_switcher_init(server);
     server->pointer_constraint_is_focused_hook = shell_pointer_constraint_is_focused;
     /* dnd 是 shell 的下游，不能反过来调 selfcheck（会成环），走钩子 */
     server->selfcheck_schedule_hook = woodland_selfcheck_schedule;
@@ -741,6 +744,7 @@ void woodland_shell_finish(struct woodland_server *server)
     woodland_snap_preview_finish(server);
     woodland_multitask_view_finish(server);
     woodland_window_menu_finish(server);
+    woodland_window_switcher_finish(server);
     server->pointer_constraint_is_focused_hook = NULL;
     server->selfcheck_schedule_hook = NULL;
 }

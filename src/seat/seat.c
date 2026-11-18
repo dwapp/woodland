@@ -24,6 +24,7 @@
 #include "woodland_config.h"
 #include "multitask_view.h"
 #include "window_menu.h"
+#include "window_switcher.h"
 #include "workspace.h"
 
 /* ==================== 键盘 ==================== */
@@ -57,8 +58,11 @@ static bool handle_keybinding(struct woodland_server *server, xkb_keysym_t sym, 
         wl_display_terminate(server->display);
         break;
     case XKB_KEY_Tab:
-        /* Alt+Tab 沿 z 序往前，Alt+Shift+Tab 往回（labwc NextWindow 语义） */
-        woodland_focus_cycle(server, (modifiers & WLR_MODIFIER_SHIFT) == 0);
+    case XKB_KEY_ISO_Left_Tab:
+        /* Alt+Tab 打开窗口切换器并预选下一个窗口；按住 Alt 连按 Tab 由
+         * 切换器自己接管（见下面的键盘钩子），走不到这里。
+         * Alt+Shift+Tab（keysym 是 ISO_Left_Tab）从 z 序尾部往前选。 */
+        woodland_window_switcher_begin(server, (modifiers & WLR_MODIFIER_SHIFT) == 0);
         break;
     case XKB_KEY_F1:
         /* 老键位保留：等价于下一个窗口 */
@@ -178,6 +182,25 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data)
         return;
     }
 
+    uint32_t modifiers = wlr_keyboard_get_modifiers(keyboard->wlr_keyboard);
+
+    /*
+     * Alt+Tab 切换器处于激活态（Alt 还按着）：键盘整个归它。
+     *
+     * 排在全局快捷键与内置键位之前：切换期间 Tab 不该再被解释成"再切一个"，
+     * 更不该漏进焦点窗口（否则在编辑器里按 Tab 会插制表符）。release 也一并
+     * 吞——press 已经被我们吃了，孤立的 release 会让客户端按键状态错乱。
+     * 收尾（松开 Alt / Enter / Escape）由切换器自己处理。
+     */
+    if (woodland_window_switcher_is_active(server)) {
+        for (int i = 0; i < nsyms; i++) {
+            if (woodland_window_switcher_handle_key(server, syms[i], event->state, modifiers)) {
+                return;
+            }
+        }
+        return;
+    }
+
     /* 窗口菜单处于激活态时，键盘事件优先由窗口菜单消费 */
     if (woodland_window_menu_is_active(server)) {
         if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
@@ -194,7 +217,6 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data)
     /* 多任务视图处于激活态时，键盘事件优先由多任务视图消费，不透传给底层窗口 */
     if (woodland_multitask_view_is_active(server)) {
         if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
-            uint32_t modifiers = wlr_keyboard_get_modifiers(keyboard->wlr_keyboard);
             for (int i = 0; i < nsyms; i++) {
                 if (woodland_multitask_view_handle_key(server, syms[i], modifiers)) {
                     return;
@@ -211,7 +233,6 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data)
     if (server->cursor_mode == WOODLAND_CURSOR_MOVE ||
         server->cursor_mode == WOODLAND_CURSOR_RESIZE) {
         if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
-            uint32_t modifiers = wlr_keyboard_get_modifiers(keyboard->wlr_keyboard);
             for (int i = 0; i < nsyms; i++) {
                 if (woodland_interactive_handle_key(server, syms[i], modifiers)) {
                     return;
@@ -238,7 +259,6 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data)
     }
 
     bool handled = false;
-    uint32_t modifiers = wlr_keyboard_get_modifiers(keyboard->wlr_keyboard);
     if (!inhibited && (modifiers & WLR_MODIFIER_ALT) &&
         event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
         for (int i = 0; i < nsyms; i++) {

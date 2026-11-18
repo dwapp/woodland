@@ -28,6 +28,7 @@
 #include "view.h"
 #include "multitask_view.h"
 #include "window_menu.h"
+#include "window_switcher.h"
 #include "woodland.h"
 
 /* ==================== SSD 按钮 hover / pressed ==================== */
@@ -304,6 +305,18 @@ static void server_cursor_button(struct wl_listener *listener, void *data)
         }
         return;
     }
+    /*
+     * Alt+Tab 面板开着时按鼠标键：收起面板，但这一下**照常下发**。
+     *
+     * 不发的话会漏掉一个配对：press 被吞、release 落在面板已经收起的时刻
+     * 就会直接发给客户端，客户端的按键状态从此错一位。让点击照常生效也符合
+     * 直觉——"按住 Alt 东张西望，然后直接点一下目标窗口"。
+     */
+    if (event->state == WL_POINTER_BUTTON_STATE_PRESSED &&
+        woodland_window_switcher_is_active(server)) {
+        woodland_window_switcher_cancel(server);
+    }
+
     if (woodland_multitask_view_is_active(server)) {
         if (woodland_multitask_view_handle_button(server, event->button, event->state,
                                                   server->cursor->x, server->cursor->y)) {

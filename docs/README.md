@@ -13,3 +13,4 @@
 | [wallpaper-protocols.md](wallpaper-protocols.md) | 壁纸协议族：treeland-wallpaper-manager 与 wallpaper-shell、配置持久化（wallpaper.json）、多源可见性裁决 |
 | [drm-lease.md](drm-lease.md) | DRM 租借协议（wp_drm_lease_device_v1）：VR/XR 头显独占访问、non-desktop 设备识别与隔离策略 |
 | [shortcut-client.md](shortcut-client.md) | 全局快捷键客户端（woodland-shortcutd）：非 DDE 会话的自动启动判定、TOML 配置、内置默认键位、命令启动与生命周期 |
+| [window-switcher.md](window-switcher.md) | Alt+Tab 窗口切换器：候选快照与 z 序、begin/step/finish 状态机、切换期间的键盘归属、Cairo 面板渲染与验证方式 |

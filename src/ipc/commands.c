@@ -39,6 +39,7 @@
 #include "woodland_config.h"
 #include "multitask_view.h"
 #include "window_menu.h"
+#include "window_switcher.h"
 #include "workspace.h"
 
 /* 场景树转储的递归深度与节点上限：防止一次 dump 输出几百 KB */
@@ -138,11 +139,15 @@ static const struct ipc_field_doc get_tree_fields[] = {
      "multitask overview: active (bool), workspace (str|null), "
      "card_count (int), thumb_count (int), dropped_cards (int), "
      "dropped_workspaces (int), selected_index (int), selected_view (int|null)"},
+    {"window_switcher", "obj",
+     "Alt+Tab switcher: active (bool), count (int: candidates in the "
+     "snapshot), index (int: highlighted position, -1 = none), "
+     "selected (int: view id under the highlight, 0 = none)"},
     {"views", "obj[]",
      "per view: id, kind, z, title, app_id, tag, workspace, "
      "output, mapped, placed, minimized, maximized, "
      "fullscreen, override_redirect, csd, focused, "
-     "activated, focusable, scene_visible, tearing, parent, "
+     "activated, focusable, restorable, scene_visible, tearing, parent, "
      "foreign_toplevel{tracked,identifier,handles,icon_geometry}, "
      "outer[x,y,w,h], content[x,y,w,h], "
      "ssd{present,active,margins,"
@@ -417,6 +422,12 @@ static void append_view_details(struct woodland_server *server, struct woodland_
     woodland_json_obj_bool(&obj, "focused", server->focused_view == view);
     woodland_json_obj_bool(&obj, "activated", view->activated);
     woodland_json_obj_bool(&obj, "focusable", woodland_view_focusable(view));
+    /*
+     * "恢复之后能不能聚焦"：最小化的窗口 focusable=false 但 restorable=true。
+     * 这条是 Alt+Tab 候选集与 self_check 的判据，单独导出来，省得排查
+     * "为什么面板里有这一行 / 为什么自检红了"时还要人肉推条件。
+     */
+    woodland_json_obj_bool(&obj, "restorable", woodland_view_restorable(view));
     woodland_json_obj_bool(&obj, "scene_visible",
                            view->scene_tree && view->scene_tree->node.enabled);
     woodland_json_obj_bool(&obj, "tearing", view->tearing_hint == WOODLAND_TEARING_ASYNC);
@@ -698,6 +709,8 @@ static void ipc_get_tree(struct woodland_server *server, struct woodland_json *o
     woodland_window_menu_status(server, out);
     woodland_json_obj_key(&obj, "multitask_view");
     woodland_multitask_view_status(server, out);
+    woodland_json_obj_key(&obj, "window_switcher");
+    woodland_window_switcher_status(server, out);
 
 
     woodland_json_obj_key(&obj, "views");
