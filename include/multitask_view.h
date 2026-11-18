@@ -61,10 +61,13 @@ struct woodland_multitask_view {
     struct woodland_workspace *selected_workspace;
     struct multitask_workspace_item workspaces[WOODLAND_MULTITASK_MAX_WORKSPACES];
     int workspace_count;
-    int hovered_workspace; /* -1 表示无 */
+    int dropped_workspaces; /* 超过上限未展示的工作区数量 */
+    int hovered_workspace;  /* -1 表示无 */
 
     struct multitask_card_item cards[WOODLAND_MULTITASK_MAX_CARDS];
     int card_count;
+    int thumb_count;   /* 成功生成离屏实时缩略图的卡片数 */
+    int dropped_cards; /* 超过上限未展示的窗口卡片数量 */
     int grid_cols;
     int grid_rows;
     int selected_index; /* 当前选中的卡片索引，无卡片时为 -1 */

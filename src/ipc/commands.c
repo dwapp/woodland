@@ -136,7 +136,8 @@ static const struct ipc_field_doc get_tree_fields[] = {
      "window menu: active (bool), view (int), x, y"},
     {"multitask_view", "obj",
      "multitask overview: active (bool), workspace (str|null), "
-     "card_count (int), selected_index (int), selected_view (int|null)"},
+     "card_count (int), thumb_count (int), dropped_cards (int), "
+     "dropped_workspaces (int), selected_index (int), selected_view (int|null)"},
     {"views", "obj[]",
      "per view: id, kind, z, title, app_id, tag, workspace, "
      "output, mapped, placed, minimized, maximized, "

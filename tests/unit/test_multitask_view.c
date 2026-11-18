@@ -18,6 +18,7 @@
 #include <wlr/backend/headless.h>
 #include <wlr/render/allocator.h>
 #include <wlr/render/wlr_renderer.h>
+#include <wlr/types/wlr_keyboard.h>
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_xdg_shell.h>
@@ -158,7 +159,20 @@ int main(void)
     assert(!v2.minimized);
     assert(server.focused_view == &v2);
 
-    /* 3. Toggle 打开 + Escape 取消关闭 */
+    /* 3. Toggle 打开 + 裸 s 不关闭 + Alt+S 关闭（修复内置 Alt+S toggle 语义） */
+    woodland_multitask_view_toggle(&server);
+    assert(woodland_multitask_view_is_active(&server));
+    assert(!woodland_multitask_view_handle_key(&server, XKB_KEY_s, 0));
+    assert(woodland_multitask_view_is_active(&server));
+    assert(woodland_multitask_view_handle_key(&server, XKB_KEY_s, WLR_MODIFIER_ALT));
+    assert(!woodland_multitask_view_is_active(&server));
+
+    woodland_multitask_view_toggle(&server);
+    assert(woodland_multitask_view_is_active(&server));
+    assert(woodland_multitask_view_handle_key(&server, XKB_KEY_S, WLR_MODIFIER_ALT));
+    assert(!woodland_multitask_view_is_active(&server));
+
+    /* Toggle 打开 + Escape 取消关闭 */
     woodland_multitask_view_toggle(&server);
     assert(woodland_multitask_view_is_active(&server));
     assert(woodland_multitask_view_handle_key(&server, XKB_KEY_Escape, 0));
@@ -193,6 +207,52 @@ int main(void)
     assert(woodland_multitask_view_handle_button(
         &server, BTN_LEFT, WL_POINTER_BUTTON_STATE_PRESSED, 2, 2));
     assert(!woodland_multitask_view_is_active(&server));
+
+    /* 5. 超出上限截断计数：65 张卡片与 14 个工作区应上报 dropped_cards / dropped_workspaces */
+    struct woodland_workspace extra_ws[WOODLAND_MULTITASK_MAX_WORKSPACES];
+    for (int i = 0; i < WOODLAND_MULTITASK_MAX_WORKSPACES; i++) {
+        memset(&extra_ws[i], 0, sizeof(extra_ws[i]));
+        char nm[8];
+        snprintf(nm, sizeof(nm), "%d", i + 3);
+        extra_ws[i].name = strdup(nm);
+        extra_ws[i].server = &server;
+        extra_ws[i].tree = wlr_scene_tree_create(&server.scene->tree);
+        wlr_scene_node_set_enabled(&extra_ws[i].tree->node, false);
+        wl_list_insert(server.workspaces.prev, &extra_ws[i].link);
+    }
+    struct woodland_view extra_views[WOODLAND_MULTITASK_MAX_CARDS + 1];
+    for (int i = 0; i < WOODLAND_MULTITASK_MAX_CARDS + 1; i++) {
+        memset(&extra_views[i], 0, sizeof(extra_views[i]));
+        extra_views[i].id = (uint32_t)(100 + i);
+        extra_views[i].server = &server;
+        extra_views[i].workspace = &ws1;
+        extra_views[i].mapped = true;
+        extra_views[i].type = WOODLAND_VIEW_XDG;
+        extra_views[i].xdg_toplevel = &fake_tl1;
+        extra_views[i].scene_tree = wlr_scene_tree_create(ws1.tree);
+        wl_list_insert(server.views.prev, &extra_views[i].link);
+    }
+    woodland_multitask_view_open(&server);
+    assert(server.multitask_view->workspace_count == WOODLAND_MULTITASK_MAX_WORKSPACES);
+    assert(server.multitask_view->dropped_workspaces == 2);
+    assert(server.multitask_view->card_count == WOODLAND_MULTITASK_MAX_CARDS);
+    /* ws1 原有 v1 (1) + 65 个 extra_views = 66，超出上限 64 共截断 2 张 */
+    assert(server.multitask_view->dropped_cards == 2);
+    woodland_json_init(&json);
+    woodland_multitask_view_status(&server, &json);
+    assert(strstr(woodland_json_data(&json), "\"dropped_cards\":2") != NULL);
+    assert(strstr(woodland_json_data(&json), "\"dropped_workspaces\":2") != NULL);
+    assert(strstr(woodland_json_data(&json), "\"thumb_count\":0") != NULL);
+    woodland_json_finish(&json);
+    woodland_multitask_view_close(&server, false);
+
+    for (int i = 0; i < WOODLAND_MULTITASK_MAX_CARDS + 1; i++) {
+        wl_list_remove(&extra_views[i].link);
+    }
+    for (int i = 0; i < WOODLAND_MULTITASK_MAX_WORKSPACES; i++) {
+        wl_list_remove(&extra_ws[i].link);
+        free(extra_ws[i].name);
+    }
 
     woodland_multitask_view_finish(&server);
     assert(server.multitask_view == NULL);

@@ -346,7 +346,8 @@ static void mv_render_scene_node(struct wlr_renderer *renderer, struct wlr_rende
         struct wlr_client_buffer *client_buffer = wlr_client_buffer_get(scene_buffer->buffer);
         if (client_buffer) {
             texture = client_buffer->texture;
-        } else if (renderer && temps && temps->count < 32) {
+        }
+        if (!texture && renderer && temps && temps->count < 32) {
             texture = wlr_texture_from_buffer(renderer, scene_buffer->buffer);
             if (texture) {
                 temps->textures[temps->count++] = texture;
@@ -822,6 +823,8 @@ static void mv_clear_cards(struct woodland_multitask_view *mv)
     }
     memset(mv->cards, 0, sizeof(mv->cards));
     mv->card_count = 0;
+    mv->thumb_count = 0;
+    mv->dropped_cards = 0;
     mv->grid_cols = 0;
     mv->grid_rows = 0;
     mv->selected_index = -1;
@@ -841,6 +844,7 @@ static void mv_clear_workspaces(struct woodland_multitask_view *mv)
     }
     memset(mv->workspaces, 0, sizeof(mv->workspaces));
     mv->workspace_count = 0;
+    mv->dropped_workspaces = 0;
     mv->hovered_workspace = -1;
 }
 
@@ -854,11 +858,16 @@ static void mv_build_workspaces(struct woodland_multitask_view *mv)
     struct woodland_workspace *ws;
     wl_list_for_each(ws, &mv->server->workspaces, link) {
         if (mv->workspace_count >= WOODLAND_MULTITASK_MAX_WORKSPACES) {
-            break;
+            mv->dropped_workspaces++;
+            continue;
         }
         struct multitask_workspace_item *it = &mv->workspaces[mv->workspace_count++];
         it->workspace = ws;
         it->window_count = mv_count_workspace_views(mv->server, ws);
+    }
+    if (mv->dropped_workspaces > 0) {
+        wlr_log(WLR_INFO, "multitask_view: truncated %d workspaces beyond limit %d",
+                mv->dropped_workspaces, WOODLAND_MULTITASK_MAX_WORKSPACES);
     }
     if (mv->workspace_count == 0) {
         return;
@@ -909,9 +918,14 @@ static void mv_build_cards(struct woodland_multitask_view *mv, struct woodland_v
             continue;
         }
         if (mv->card_count >= WOODLAND_MULTITASK_MAX_CARDS) {
-            break;
+            mv->dropped_cards++;
+            continue;
         }
         mv->cards[mv->card_count++].view = v;
+    }
+    if (mv->dropped_cards > 0) {
+        wlr_log(WLR_INFO, "multitask_view: truncated %d cards beyond limit %d",
+                mv->dropped_cards, WOODLAND_MULTITASK_MAX_CARDS);
     }
 
     if (mv->card_count == 0) {
@@ -1001,6 +1015,7 @@ static void mv_build_cards(struct woodland_multitask_view *mv, struct woodland_v
                 mv_fit_box_within(thumb_buf->width, thumb_buf->height, &card->thumb_box, &fitted);
                 wlr_scene_buffer_set_dest_size(card->thumb_buffer, fitted.width, fitted.height);
                 wlr_scene_node_set_position(&card->thumb_buffer->node, fitted.x, fitted.y);
+                mv->thumb_count++;
             }
             wlr_buffer_drop(thumb_buf);
         }
@@ -1493,6 +1508,14 @@ bool woodland_multitask_view_handle_key(struct woodland_server *server, xkb_keys
     case XKB_KEY_Escape:
         woodland_multitask_view_close(server, false);
         return true;
+    case XKB_KEY_s:
+    case XKB_KEY_S:
+        /* 与内置 Alt+S toggle 对齐：打开后再按 Alt+S 关闭 */
+        if (modifiers & WLR_MODIFIER_ALT) {
+            woodland_multitask_view_close(server, false);
+            return true;
+        }
+        return false;
     case XKB_KEY_Return:
     case XKB_KEY_KP_Enter:
     case XKB_KEY_space:
@@ -1607,6 +1630,9 @@ void woodland_multitask_view_status(struct woodland_server *server, struct woodl
         woodland_json_obj_str(&obj, "workspace",
                               mv->selected_workspace ? mv->selected_workspace->name : NULL);
         woodland_json_obj_int(&obj, "card_count", mv->card_count);
+        woodland_json_obj_int(&obj, "thumb_count", mv->thumb_count);
+        woodland_json_obj_int(&obj, "dropped_cards", mv->dropped_cards);
+        woodland_json_obj_int(&obj, "dropped_workspaces", mv->dropped_workspaces);
         woodland_json_obj_int(&obj, "selected_index", mv->selected_index);
         if (mv->selected_index >= 0 && mv->selected_index < mv->card_count &&
             mv->cards[mv->selected_index].view) {
