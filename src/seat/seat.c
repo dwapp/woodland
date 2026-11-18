@@ -61,9 +61,9 @@ static bool handle_keybinding(struct woodland_server *server, xkb_keysym_t sym, 
     case XKB_KEY_ISO_Left_Tab:
         /* Alt+Tab 打开窗口切换器并预选下一个窗口；按住 Alt 连按 Tab 由
          * 切换器自己接管（见下面的键盘钩子），走不到这里。
-         * Alt+Shift+Tab（keysym 是 ISO_Left_Tab）从 z 序尾部往前选。 */
-        woodland_window_switcher_begin(server, (modifiers & WLR_MODIFIER_SHIFT) == 0);
-        break;
+         * Alt+Shift+Tab（keysym 是 ISO_Left_Tab）从 z 序尾部往前选。
+         * 没有候选时返回 false，不吞掉这一下。 */
+        return woodland_window_switcher_begin(server, (modifiers & WLR_MODIFIER_SHIFT) == 0);
     case XKB_KEY_F1:
         /* 老键位保留：等价于下一个窗口 */
         woodland_focus_cycle(server, true);
@@ -131,6 +131,43 @@ static void change_vt(struct woodland_server *server, unsigned vt)
     wlr_session_change_vt(server->session, vt);
 }
 
+/*
+ * 按 evdev keycode 记账"哪几个 press 被合成器内部消费了"。
+ *
+ * 只吞那些 press 确实被合成器吃掉的键的 release：
+ *   - 面板打开前已下发给客户端的键（如先按住的 Shift 或 Alt），位图里为 0，
+ *     release 必须放行给原表面配对，否则客户端 xkb 里修饰键会卡住；
+ *   - 面板打开时或激活期间被合成器吃掉的键（如 Tab / Escape / Return），
+ *     位图里为 1，即使面板先因 Escape / Alt 松开而关闭，随后的晚到 release
+ *     也在此拦截，不会漏成孤儿 release。
+ */
+static void seat_swallow_key_press(struct woodland_server *server, uint32_t keycode)
+{
+    if (keycode < sizeof(server->vt_swallowed_keys) * 8) {
+        server->vt_swallowed_keys[keycode / 8] |= (uint8_t)(1u << (keycode % 8));
+    }
+}
+
+static bool seat_consume_swallowed_release(struct woodland_server *server, uint32_t keycode)
+{
+    if (keycode < sizeof(server->vt_swallowed_keys) * 8 &&
+        (server->vt_swallowed_keys[keycode / 8] & (uint8_t)(1u << (keycode % 8))) != 0) {
+        server->vt_swallowed_keys[keycode / 8] &= (uint8_t)~(1u << (keycode % 8));
+        return true;
+    }
+    return false;
+}
+
+static void seat_forward_key(struct woodland_server *server,
+                             struct wlr_keyboard *wlr_keyboard,
+                             struct wlr_keyboard_key_event *event)
+{
+    if (!woodland_ime_keyboard_grab_key(server, wlr_keyboard, event)) {
+        wlr_seat_set_keyboard(server->seat, wlr_keyboard);
+        wlr_seat_keyboard_notify_key(server->seat, event->time_msec, event->keycode, event->state);
+    }
+}
+
 static void keyboard_handle_key(struct wl_listener *listener, void *data)
 {
     struct woodland_keyboard *keyboard = wl_container_of(listener, keyboard, key);
@@ -154,20 +191,14 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data)
         for (int i = 0; i < nsyms; i++) {
             unsigned vt = woodland_seat_vt_from_keysym(syms[i]);
             if (vt) {
-                if (event->keycode < sizeof(server->vt_swallowed_keys) * 8) {
-                    server->vt_swallowed_keys[event->keycode / 8] |=
-                        (uint8_t)(1u << (event->keycode % 8));
-                }
+                seat_swallow_key_press(server, event->keycode);
                 change_vt(server, vt);
                 return;
             }
         }
-    } else if (event->keycode < sizeof(server->vt_swallowed_keys) * 8 &&
-               (server->vt_swallowed_keys[event->keycode / 8] &
-                (uint8_t)(1u << (event->keycode % 8))) != 0) {
-        /* 孤儿 release：press 被 VT 切换吃掉的那颗键，release 不下传 */
-        server->vt_swallowed_keys[event->keycode / 8] &=
-            (uint8_t)~(1u << (event->keycode % 8));
+    } else if (!woodland_window_switcher_is_active(server) &&
+               seat_consume_swallowed_release(server, event->keycode)) {
+        /* 孤儿 release：press 被 VT 切换、切换器或内置键位吃掉的那颗键，release 不下传 */
         return;
     }
 
@@ -185,18 +216,32 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data)
     uint32_t modifiers = wlr_keyboard_get_modifiers(keyboard->wlr_keyboard);
 
     /*
-     * Alt+Tab 切换器处于激活态（Alt 还按着）：键盘整个归它。
+     * Alt+Tab 切换器处于激活态（Alt 还按着）：键盘归它。
      *
-     * 排在全局快捷键与内置键位之前：切换期间 Tab 不该再被解释成"再切一个"，
-     * 更不该漏进焦点窗口（否则在编辑器里按 Tab 会插制表符）。release 也一并
-     * 吞——press 已经被我们吃了，孤立的 release 会让客户端按键状态错乱。
-     * 收尾（松开 Alt / Enter / Escape）由切换器自己处理。
+     * 排在 keyboard-shortcuts-inhibit、全局快捷键与内置键位之前是有意的：
+     *   - 抑制器只拦"启动新快捷键"（下面的 handle_keybinding）；一旦面板已经
+     *     打开，即使焦点客户端中途异步挂上抑制器，面板也必须能收到 Alt↑ / Escape
+     *     完成收尾，否则面板会永久卡在屏幕上；
+     *   - 激活期间的所有 press 一律记入吞键位图并由切换器消费；
+     *   - release 先交切换器判是否松开 Alt 提交，再按位图决定去留：press 被
+     *     我们吞过的键（如 Tab）丢弃其 release，而面板打开前已发给客户端的键
+     *     （如先按住的 Shift 或未切走焦点时的 Alt）放行给原焦点表面配对。
      */
     if (woodland_window_switcher_is_active(server)) {
+        struct wlr_surface *prev_focus =
+            seat ? seat->keyboard_state.focused_surface : NULL;
+        if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+            seat_swallow_key_press(server, event->keycode);
+        }
         for (int i = 0; i < nsyms; i++) {
             if (woodland_window_switcher_handle_key(server, syms[i], event->state, modifiers)) {
-                return;
+                break;
             }
+        }
+        if (event->state != WL_KEYBOARD_KEY_STATE_PRESSED &&
+            !seat_consume_swallowed_release(server, event->keycode) &&
+            seat && seat->keyboard_state.focused_surface == prev_focus) {
+            seat_forward_key(server, keyboard->wlr_keyboard, event);
         }
         return;
     }
@@ -262,15 +307,18 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data)
     if (!inhibited && (modifiers & WLR_MODIFIER_ALT) &&
         event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
         for (int i = 0; i < nsyms; i++) {
-            handled = handle_keybinding(server, syms[i], modifiers);
+            if (handle_keybinding(server, syms[i], modifiers)) {
+                handled = true;
+                break;
+            }
+        }
+        if (handled) {
+            seat_swallow_key_press(server, event->keycode);
         }
     }
 
     if (!handled) {
-        if (!woodland_ime_keyboard_grab_key(server, keyboard->wlr_keyboard, event)) {
-            wlr_seat_set_keyboard(seat, keyboard->wlr_keyboard);
-            wlr_seat_keyboard_notify_key(seat, event->time_msec, event->keycode, event->state);
-        }
+        seat_forward_key(server, keyboard->wlr_keyboard, event);
     }
 }
 

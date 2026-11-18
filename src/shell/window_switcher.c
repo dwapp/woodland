@@ -1000,14 +1000,14 @@ bool woodland_window_switcher_handle_key(struct woodland_server *server, xkb_key
         /*
          * 松开 Alt = 提交。这里只看 keysym 不看 modifiers：wlr_keyboard 是否
          * 已经把这一下写进 xkb 状态是内部行为，靠它判断"Alt 还在不在"
-         * 属于依赖实现细节。其余按键的 release 一律吞掉——press 已经被
-         * 切换器吃掉，孤立的 release 下发给客户端会让它的按键状态错乱
-         * （和 seat.c 里 VT 键的孤儿 release 同一套理由）。
+         * 属于依赖实现细节。至于该 release 事件本身要不要下发给客户端，由
+         * seat 层按"对应的 press 是否被合成器吞过"（keycode 位图）配对决定。
          */
         if (sym == XKB_KEY_Alt_L || sym == XKB_KEY_Alt_R) {
             switcher_finish(server, true);
+            return true;
         }
-        return true;
+        return false;
     }
 
     switch (sym) {

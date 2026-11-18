@@ -148,11 +148,13 @@ struct woodland_server {
     struct wl_listener pointer_focus_change;    // seat->pointer_state.events.focus_change
     struct wl_listener keyboard_focus_change;  // seat->keyboard_state.events.focus_change
     /*
-     * VT 切换键的吞键表：evdev keycode 位图（32 字节 = 256 个键位，超过
-     * 256 的 keycode 一律不记——F1..F12 远在界内）。VT 切换吃掉一个 press
-     * 后，对应的 release 要么在切回本 VT 后才到、要么根本不来；晚到的
-     * 孤儿 release 不能转发给客户端——没有 press 配对的 release 会让客户端
-     * 的按键状态错乱（labwc key-state 的同一套语义）。
+     * 合成器吞键表：evdev keycode 位图（32 字节 = 256 个键位，超过
+     * 256 的 keycode 一律不记——F1..F12、Tab、方向键、修饰键均远在界内）。
+     * 当一颗键的 press 被合成器吃掉（VT 切换、Alt+Tab 切换器、内置键位）而未
+     * 下发给客户端时，对应的 release（含切回本 VT 或面板收起后才到的晚到
+     * release）必须一并丢弃——没有 press 配对的孤儿 release 会让客户端按键状态
+     * 错乱；反之，面板打开前已下发给客户端的 press（如先按住的 Shift 或 Alt），
+     * 其 release 不在此表中，必须放行配对（labwc key-state 的同一套语义）。
      */
     uint8_t vt_swallowed_keys[32];
     struct woodland_ime_relay *ime;             // 输入法中继器与协议管理

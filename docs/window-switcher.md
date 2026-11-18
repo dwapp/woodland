@@ -55,20 +55,28 @@ Esc   ───────────▶ 面板消失，焦点不动
 插入点在 `seat.c:keyboard_handle_key`，位置很关键——排在**锁屏之后、窗口菜单 / 交互式移动 / 全局快捷键 / 内置键位之前**：
 
 ```c
-uint32_t modifiers = wlr_keyboard_get_modifiers(keyboard->wlr_keyboard);
 if (woodland_window_switcher_is_active(server)) {
+    struct wlr_surface *prev_focus = seat ? seat->keyboard_state.focused_surface : NULL;
+    if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED)
+        seat_swallow_key_press(server, event->keycode);
     for (int i = 0; i < nsyms; i++)
         if (woodland_window_switcher_handle_key(server, syms[i], event->state, modifiers))
-            return;
-    return;   /* 没识别的键也吞掉 */
+            break;
+    if (event->state != WL_KEYBOARD_KEY_STATE_PRESSED &&
+        !seat_consume_swallowed_release(server, event->keycode) &&
+        seat && seat->keyboard_state.focused_surface == prev_focus)
+        seat_forward_key(server, keyboard->wlr_keyboard, event);
+    return;
 }
 ```
 
 三条理由：
 
 1. **`Tab` 不能漏给客户端**：漏了就是往编辑器里插一个制表符；
-2. **`release` 也要吞**：press 已经被合成器吃掉，孤立的 release 会让客户端的按键状态错位（和 `seat.c` 里 VT 切换键的"孤儿 release"同一套理由）；
-3. **排在全局快捷键之前**：`treeland-shortcut-manager-v3` 的绑定和内置键位在选窗口期间都不该生效。
+2. **按 keycode 位图严格配对 press 与 release**（复用 `server->vt_swallowed_keys` 模式）：
+   - 凡是 press 被切换器或内置键位吃掉的键（触发打开面板的 `Tab`、激活期间按下的 `Tab` / `Escape` / `Return` 等），其 keycode 记入位图；对应的 release 无论在面板开着时到达、还是面板已因 `Escape` / 松开 `Alt` 关闭后才晚到，都会按位图吞掉，且焦点切换时的 `wl_keyboard.enter` 也会过滤掉它们，不会产生孤儿 release；
+   - 反之，面板打开前 press 已下发给客户端的键（如先按住的 `Shift` 或 `Alt` 本身），位图里为 0，在原焦点表面未切走时其 release 正常放行配对，避免客户端 `xkb` 里修饰键卡死；
+3. **排在 `keyboard-shortcuts-inhibit` 与全局快捷键之前**：抑制器只拦"启动新快捷键"（`begin` 入口）；一旦面板已经打开，即使焦点客户端中途异步挂上抑制器，面板也必须能收到 `Alt↑` / `Escape` 收尾，否则面板会永久卡在屏幕上。
 
 **松开 Alt 的判据是 keysym（`Alt_L` / `Alt_R` 的 release），不是 modifiers。** `wlr_keyboard_notify_key` 是先发 `events.key`、再 `xkb_state_update_key`（`wlr_keyboard.c:110`），所以按键回调里看到的 modifiers 是**这一下之前的**状态——指望它判断"Alt 松了没有"等于依赖实现顺序。keysym 就是这一下按的是什么，不会骗人。
 
@@ -128,7 +136,7 @@ if (woodland_window_switcher_is_active(server)) {
   单测那种没有 session_lock 的裸 server 也不会踩空。
 - **面板 buffer 在 finish 时放掉**：`wlr_scene_buffer_set_buffer(panel, NULL)`。一个 560×300 的
   ARGB 面 600KB 出头，面板关着不会被渲染，攥着只是白占。
-- 没有候选（一个可聚焦窗口都没有）时不弹空面板，也不吞 `Alt+Tab`。
+- 没有候选（一个可恢复/可聚焦窗口都没有）时不弹空面板，也不吞 `Alt+Tab`。
 
 ## 7. 调试与验证
 

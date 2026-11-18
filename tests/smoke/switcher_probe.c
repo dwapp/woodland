@@ -50,8 +50,19 @@ static struct wl_compositor *compositor;
 static struct wl_shm *shm;
 static struct xdg_wm_base *wm_base;
 static struct wl_seat *seat;
+static struct wl_keyboard *wl_kb;
 static struct zwp_virtual_keyboard_manager_v1 *vk_mgr;
 static struct zwp_virtual_keyboard_v1 *vk;
+
+/*
+ * 客户端视角下的按键配对账本（盯 seat 层的吞键位图）：
+ *   - client_held[kc]：当前焦点表面按 enter / leave / key 维护的"按下未松开"位图；
+ *   - orphan_releases：收到 release 时 client_held[kc] 为 false 的次数（孤儿 release）；
+ *   - swallowed_leaks：Tab / Escape 这两颗被切换器消费的键漏进客户端的次数。
+ */
+static bool client_held[256];
+static int orphan_releases;
+static int swallowed_leaks;
 
 static int failures;
 /* --hold-ms N：面板打开后多停 N 毫秒再松 Alt（截图/人工观察用，默认 0）。
@@ -122,11 +133,118 @@ static const struct xdg_toplevel_listener toplevel_listener = {
     .close = toplevel_close,
 };
 
+static void kb_keymap(void *data, struct wl_keyboard *kb, uint32_t format, int32_t fd,
+                      uint32_t size)
+{
+    (void)data;
+    (void)kb;
+    (void)format;
+    (void)size;
+    if (fd >= 0) {
+        close(fd);
+    }
+}
+
+static void kb_enter(void *data, struct wl_keyboard *kb, uint32_t serial,
+                     struct wl_surface *surface, struct wl_array *keys)
+{
+    (void)data;
+    (void)kb;
+    (void)serial;
+    (void)surface;
+    memset(client_held, 0, sizeof(client_held));
+    uint32_t *k;
+    wl_array_for_each(k, keys) {
+        if (*k < 256) {
+            client_held[*k] = true;
+        }
+        if (*k == KEY_TAB || *k == KEY_ESC) {
+            swallowed_leaks++;
+        }
+    }
+}
+
+static void kb_leave(void *data, struct wl_keyboard *kb, uint32_t serial,
+                     struct wl_surface *surface)
+{
+    (void)data;
+    (void)kb;
+    (void)serial;
+    (void)surface;
+    memset(client_held, 0, sizeof(client_held));
+}
+
+static void kb_key(void *data, struct wl_keyboard *kb, uint32_t serial, uint32_t time,
+                   uint32_t key, uint32_t state)
+{
+    (void)data;
+    (void)kb;
+    (void)serial;
+    (void)time;
+    if (key == KEY_TAB || key == KEY_ESC) {
+        swallowed_leaks++;
+    }
+    if (key >= 256) {
+        return;
+    }
+    if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+        client_held[key] = true;
+    } else if (state == WL_KEYBOARD_KEY_STATE_RELEASED) {
+        if (!client_held[key]) {
+            orphan_releases++;
+        }
+        client_held[key] = false;
+    }
+}
+
+static void kb_modifiers(void *data, struct wl_keyboard *kb, uint32_t serial,
+                         uint32_t mods_depressed, uint32_t mods_latched, uint32_t mods_locked,
+                         uint32_t group)
+{
+    (void)data;
+    (void)kb;
+    (void)serial;
+    (void)mods_depressed;
+    (void)mods_latched;
+    (void)mods_locked;
+    (void)group;
+}
+
+static void kb_repeat_info(void *data, struct wl_keyboard *kb, int32_t rate, int32_t delay)
+{
+    (void)data;
+    (void)kb;
+    (void)rate;
+    (void)delay;
+}
+
+static const struct wl_keyboard_listener kb_listener = {
+    .keymap = kb_keymap,
+    .enter = kb_enter,
+    .leave = kb_leave,
+    .key = kb_key,
+    .modifiers = kb_modifiers,
+    .repeat_info = kb_repeat_info,
+};
+
+static int client_held_count(void)
+{
+    int n = 0;
+    for (size_t i = 0; i < sizeof(client_held) / sizeof(client_held[0]); i++) {
+        if (client_held[i]) {
+            n++;
+        }
+    }
+    return n;
+}
+
 static void seat_capabilities(void *data, struct wl_seat *s, uint32_t caps)
 {
     (void)data;
-    (void)s;
-    (void)caps;
+    if ((caps & WL_SEAT_CAPABILITY_KEYBOARD) && !wl_kb) {
+        wl_kb = wl_seat_get_keyboard(s);
+        wl_keyboard_add_listener(wl_kb, &kb_listener, NULL);
+    }
 }
 
 static void seat_name(void *data, struct wl_seat *s, const char *name)
@@ -393,41 +511,112 @@ static int focused_view(void)
 }
 
 /*
- * 读某个视图的布尔字段（这里只用于 minimized）。
+ * 在 [start, end) 这段对象 JSON 里找顶层键 `"key":` 的值起点。
  *
- * get_tree 里每个视图对象都以 `"id":N` 开头，minimized 排在几个基础布尔里
- * （commands.c:obj_view_status），排在 parent / foreign_toplevel 那些嵌套对象
- * 之前——所以"从 `"id":N` 往后找第一个 `"minimized":`"是安全的，只要半路没
- * 撞上下一个视图的 `"id"`。先在 `"views":[` 之后找，免得匹配到别处的 id。
+ * 只在深度 == 1（该对象自身的顶层字段）时匹配，跳过所有嵌套的 `{...}` /
+ * `[...]`（如 ssd、deco、foreign_toplevel、outer）及字符串字面量，不依赖
+ * append_view_details() 的字段输出顺序。
+ */
+static const char *json_top_field(const char *start, const char *end, const char *key)
+{
+    char pat[64];
+    int pat_len = snprintf(pat, sizeof(pat), "\"%s\":", key);
+    if (pat_len <= 0 || (size_t)pat_len >= sizeof(pat)) {
+        return NULL;
+    }
+    int depth = 0;
+    bool in_str = false;
+    for (const char *p = start; p < end; p++) {
+        char c = *p;
+        if (in_str) {
+            if (c == '\\' && p + 1 < end) {
+                p++;
+            } else if (c == '"') {
+                in_str = false;
+            }
+            continue;
+        }
+        if (c == '"') {
+            if (depth == 1 && (size_t)(end - p) >= (size_t)pat_len &&
+                memcmp(p, pat, (size_t)pat_len) == 0) {
+                return p + pat_len;
+            }
+            in_str = true;
+        } else if (c == '{' || c == '[') {
+            depth++;
+        } else if (c == '}' || c == ']') {
+            depth--;
+        }
+    }
+    return NULL;
+}
+
+/*
+ * 读某个视图的顶层布尔字段（这里只用于 minimized）。
  *
- * 不用 jq：探针是 C 进程，断言写在这里才叫端到端（shell 那层只判退出码）。
+ * 按括号深度逐个切出 `"views":[...]` 里的视图对象，在对象自身的顶层字段里
+ * 查 `"id"` 与目标 key，不依赖字段先后顺序，也不会误匹配嵌套对象里的同名键。
  */
 static int view_bool_field(int id, const char *key)
 {
-    static char buf[1 << 16];
     const char *tree = ipc_query("get_tree");
     if (!tree) {
         return -1;
     }
-    snprintf(buf, sizeof(buf), "%s", tree);
-    const char *views = strstr(buf, "\"views\":[");
+    const char *views = strstr(tree, "\"views\":[");
     if (!views) {
         return -1;
     }
-    char pat[32];
-    snprintf(pat, sizeof(pat), "\"id\":%d", id);
-    const char *p = strstr(views, pat);
+    const char *p = strchr(views, '[');
     if (!p) {
         return -1;
     }
-    char keypat[32];
-    snprintf(keypat, sizeof(keypat), "\"%s\":", key);
-    const char *v = strstr(p, keypat);
-    const char *next = strstr(p + 1, "\"id\":");
-    if (!v || (next && v > next)) {
-        return -1;
+    p++;
+
+    int depth = 0;
+    bool in_str = false;
+    const char *obj_start = NULL;
+    for (; *p; p++) {
+        char c = *p;
+        if (in_str) {
+            if (c == '\\' && *(p + 1)) {
+                p++;
+            } else if (c == '"') {
+                in_str = false;
+            }
+            continue;
+        }
+        if (c == '"') {
+            in_str = true;
+        } else if (c == '{') {
+            if (depth == 0) {
+                obj_start = p;
+            }
+            depth++;
+        } else if (c == '}') {
+            depth--;
+            if (depth == 0 && obj_start) {
+                const char *obj_end = p + 1;
+                const char *id_val = json_top_field(obj_start, obj_end, "id");
+                if (id_val && atoi(id_val) == id) {
+                    const char *val = json_top_field(obj_start, obj_end, key);
+                    if (!val) {
+                        return -1;
+                    }
+                    return strncmp(val, "true", 4) == 0 ? 1 : 0;
+                }
+                obj_start = NULL;
+            }
+        } else if (c == '[') {
+            depth++;
+        } else if (c == ']') {
+            if (depth == 0) {
+                break;
+            }
+            depth--;
+        }
     }
-    return strncmp(v + strlen(keypat), "true", 4) == 0 ? 1 : 0;
+    return -1;
 }
 
 /* 该视图此刻是否最小化；读不到返回 -1（和服务端的 false 区分开） */
@@ -440,7 +629,7 @@ static int view_minimized(int id)
 
 /*
  * 自检里的 switcher_snapshot 检查专门盯"快照里的每一项都还在 server->views
- * 里、且仍然 focusable"。面板开着的那一刻是最有价值的采样点：快照非空、
+ * 里、且仍然 restorable"。面板开着的那一刻是最有价值的采样点：快照非空、
  * 高亮有效、每一项都要对得上。漏挂 view_unmapped 监听时这里会红，而面板
  * 外观上看不出来（最多少一行）。
  */
@@ -697,6 +886,57 @@ int main(int argc, char **argv)
     CHECK(view_minimized(id_b) == 0, "round 4: b is restored");
     expect_switcher(false, 0, -1);
 
+    /* ---------- 第五轮：按键 press/release 配对（先按住的 Shift 与晚到的 Tab/Esc release） ---------- */
+    /*
+     * 钉住 seat 层吞键位图的两条对称边界：
+     *   1. 面板打开前已按下的 Shift，在面板打开后松开，release 必须放行给客户端
+     *      （否则 Escape 取消后焦点没变，客户端里的 Shift 会一直卡在按下）；
+     *   2. 面板打开期间被吞掉 press 的 Tab / Escape，即使在面板因 Escape 或松开
+     *      Alt 关闭之后才松开，晚到的 release 也必须被吞掉（不能漏成孤儿 release）。
+     */
+    xkb_mod_index_t shift_idx = xkb_keymap_mod_get_index(keymap, XKB_MOD_NAME_SHIFT);
+    uint32_t shift_mask = (shift_idx != XKB_MOD_INVALID) ? (1u << shift_idx) : 0;
+
+    send_mods(alt_mask | shift_mask);
+    send_key(KEY_LEFTSHIFT, true);
+    send_key(KEY_LEFTALT, true);
+    send_key(KEY_TAB, true); /* 按住 Tab 不松，打开面板（反向预选 index 2） */
+    expect_switcher(true, 3, 2);
+
+    /* 面板开着时先松开 Shift：它的 press 发给了客户端，release 必须配对放行 */
+    send_key(KEY_LEFTSHIFT, false);
+    send_mods(alt_mask);
+    CHECK(!client_held[KEY_LEFTSHIFT],
+          "Shift pressed before switcher opened is released on client when released mid-switch");
+
+    /* 按 Escape 取消面板（此时 Tab 仍按着）：面板立刻关闭，随后才松开 Escape、Tab、Alt */
+    send_key(KEY_ESC, true);
+    expect_switcher(false, 0, -1);
+    send_key(KEY_ESC, false);
+    send_key(KEY_TAB, false);
+    send_key(KEY_LEFTALT, false);
+    send_mods(0);
+    CHECK(focused_view() == id_b,
+          "Escape cancels switcher without changing focus (focus=%d, expected=%d)",
+          focused_view(), id_b);
+
+    /* 再验"先松 Alt 提交切焦点、后松 Tab"：新焦点窗口的 enter 与后续都不该收到孤儿 Tab↑ */
+    send_mods(alt_mask);
+    send_key(KEY_LEFTALT, true);
+    send_key(KEY_TAB, true);
+    expect_switcher(true, 3, 1);
+    send_key(KEY_LEFTALT, false);
+    send_mods(0);
+    expect_switcher(false, 0, -1);
+    send_key(KEY_TAB, false);
+
+    CHECK(orphan_releases == 0,
+          "no orphan key release leaked to the client (got %d)", orphan_releases);
+    CHECK(client_held_count() == 0,
+          "no key left stuck in pressed state on the client (got %d)", client_held_count());
+    CHECK(swallowed_leaks == 0,
+          "swallowed Tab/Escape keys never leaked to the client (got %d)", swallowed_leaks);
+
     /*
      * 收尾要干净：ASan 构建里 LeakSanitizer 会在 exit 时报掉没释放的 wl_proxy
      * 并让整条用例判 FAIL——而协议断言其实全过了，看着像功能坏了。
@@ -722,6 +962,9 @@ int main(int argc, char **argv)
     }
     zwp_virtual_keyboard_v1_destroy(vk);
     zwp_virtual_keyboard_manager_v1_destroy(vk_mgr);
+    if (wl_kb) {
+        wl_keyboard_release(wl_kb);
+    }
     wl_seat_release(seat);
     xdg_wm_base_destroy(wm_base);
     wl_shm_destroy(shm);

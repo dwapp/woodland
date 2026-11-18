@@ -11,6 +11,7 @@
  */
 #include "config.h"
 
+#include <wlr/types/wlr_keyboard.h>
 #include <wlr/types/wlr_layer_shell_v1.h>
 #include "scene.h"
 #include <wlr/types/wlr_seat.h>
@@ -107,8 +108,24 @@ void woodland_seat_focus_surface(struct woodland_server *server, struct wlr_surf
     }
     struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(server->seat);
     if (keyboard != NULL) {
-        wlr_seat_keyboard_notify_enter(server->seat, surface, keyboard->keycodes,
-                                       keyboard->num_keycodes, &keyboard->modifiers);
+        /*
+         * 过滤掉 press 已被合成器吞掉、但物理上仍按着的键（如按住 Tab 期间松开
+         * Alt 或按 Enter 触发切换焦点）：新焦点窗口没收过它们的 press，稍后它们
+         * 的 release 也会被 seat 层按 vt_swallowed_keys 吞掉，不能写进 enter 的
+         * 已按下键数组里，否则新窗口会以为那颗键一直按着。
+         */
+        uint32_t filtered[WLR_KEYBOARD_KEYS_CAP];
+        size_t nfiltered = 0;
+        for (size_t i = 0; i < keyboard->num_keycodes && nfiltered < WLR_KEYBOARD_KEYS_CAP; i++) {
+            uint32_t kc = keyboard->keycodes[i];
+            if (kc < sizeof(server->vt_swallowed_keys) * 8 &&
+                (server->vt_swallowed_keys[kc / 8] & (uint8_t)(1u << (kc % 8))) != 0) {
+                continue;
+            }
+            filtered[nfiltered++] = kc;
+        }
+        wlr_seat_keyboard_notify_enter(server->seat, surface, filtered,
+                                       nfiltered, &keyboard->modifiers);
     }
 }
 

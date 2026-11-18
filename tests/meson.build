@@ -457,7 +457,7 @@ if get_option('test').enabled()
              timeout: 60)
       endif
 
-      # Alt+Tab 切换器：探针开两个窗口 + 一块虚拟键盘，发 Alt↓ Tab↓ Tab↑ Alt↑，
+      # Alt+Tab 切换器：探针开三个窗口 + 一块虚拟键盘，发 Alt↓ Tab↓ Tab↑ Alt↑，
       # 用 get_focus / get_tree 断言"面板开了、高亮谁、松手后焦点落到谁"。
       # 这是唯一能验证"按键真的走到切换器"的用例——单测只覆盖选择逻辑。
       switcher_probe_srcs = [

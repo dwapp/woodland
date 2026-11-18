@@ -81,7 +81,7 @@ fi
 # 三窗口是故意的：两个窗口时正反切是同一件事，方向弄反了也看不出来。
 # 轨迹是唯一能证明"最小化只改了标记、没摘掉那一行"的地方——面板计数不变，
 # 变的是 min n=3 和提交时的 restore。
-echo "== 决策轨迹：4 次 begin / 4 次 commit / 2 次 restore / 1 次 min / 0 次 drop =="
+echo "== 决策轨迹：6 次 begin / 5 次 commit / 1 次 cancel / 2 次 restore / 1 次 min / 0 次 drop =="
 TRACE="$("$WCTL" -s "$SOCK" get_trace)" || smoke_fail "get_trace failed"
 
 # detail 只取前几个字判断（begin 后面还带 n=/dir=/sel=）
@@ -97,8 +97,9 @@ expect_trace() {
     fi
 }
 
-expect_trace "begin n=3" 4
-expect_trace "commit" 4
+expect_trace "begin n=3" 6
+expect_trace "commit" 5
+expect_trace "cancel" 1
 # 两次提交的目标都是最小化窗口：一次是面板开着时被最小化，一次是开面板前就最小化
 expect_trace "restore" 2
 # 第三轮在面板开着时把高亮项最小化：标记翻转一次，那一行必须留下。

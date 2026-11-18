@@ -206,9 +206,9 @@ int main(void)
     assert(woodland_window_switcher_handle_key(&server, XKB_KEY_Up,
                                                WL_KEYBOARD_KEY_STATE_PRESSED, 0));
     expect_status(&server, "\"active\":true", "\"count\":3", "\"index\":1");
-    /* 松开 Tab 不改变选择，也不关闭面板 */
-    assert(woodland_window_switcher_handle_key(&server, XKB_KEY_Tab,
-                                               WL_KEYBOARD_KEY_STATE_RELEASED, 0));
+    /* 松开 Tab 不由切换器状态机响应（由 seat 层吞键位图配对吞掉），不改选择也不关面板 */
+    assert(!woodland_window_switcher_handle_key(&server, XKB_KEY_Tab,
+                                                WL_KEYBOARD_KEY_STATE_RELEASED, 0));
     assert(woodland_window_switcher_is_active(&server));
     /* 其它字符键被吞掉但不动选择 */
     assert(woodland_window_switcher_handle_key(&server, XKB_KEY_x,

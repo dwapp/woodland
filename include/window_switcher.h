@@ -53,7 +53,7 @@ bool woodland_window_switcher_is_active(const struct woodland_server *server);
  * forward=false 是 Alt+Shift+Tab 的语义：从 z 序尾部往前选。
  * 已经在切换中时退化为 step()——按住 Alt 连按 Tab 的第二次及以后由
  * seat 的按键钩子直接调 step，走不到这里，这个分支只是防御。
- * 没有候选（一个可聚焦窗口都没有）时返回 false，不弹空面板。
+ * 没有候选（一个可恢复/可聚焦窗口都没有）时返回 false，不弹空面板。
  */
 bool woodland_window_switcher_begin(struct woodland_server *server, bool forward);
 
@@ -63,10 +63,11 @@ bool woodland_window_switcher_step(struct woodland_server *server, bool forward)
 /**
  * 键盘事件入口（press 与 release 都要过这里）。
  *
- * 激活期间键盘归切换器：Tab / ISO_Left_Tab / 方向键移动，Enter / 空格确认，
- * Escape 取消，松开 Alt 提交。返回 true 表示按键已被消费——调用方在激活
- * 期间应当无条件吞掉按键，不能让它漏进焦点窗口（否则按下 Tab 会在编辑器
- * 里插一个制表符）。
+ * 激活期间键盘归切换器：press 事件全部消费（Tab / ISO_Left_Tab / 方向键移动，
+ * Enter / 空格确认，Escape 取消，其余键也吞掉不漏进焦点窗口）；release 事件里
+ * 只有松开 Alt_L / Alt_R 会触发提交并返回 true，其余 release 返回 false。
+ * 至于 release 事件本身该被吞掉还是放行给客户端，由 seat 层按"该 keycode 的
+ * press 是否被合成器消费过"（位图）配对决定。
  */
 bool woodland_window_switcher_handle_key(struct woodland_server *server, xkb_keysym_t sym,
                                          uint32_t state, uint32_t modifiers);
