@@ -445,6 +445,16 @@ if get_option('test').enabled()
            is_parallel: false,
            timeout: 60)
 
+      # --debug-ctl 写命令：默认拒绝 + 开启后 move/maximize/focus/workspace/指针
+      test('smoke-debug-ctl',
+           find_program('sh'),
+           args: [meson.current_source_dir() / 'smoke' / 'run_debug_ctl_smoke.sh',
+                  woodland_bin.full_path(),
+                  wctl_bin.full_path(),
+                  simple_ssd_bin.full_path()],
+           is_parallel: false,
+           timeout: 90)
+
       if fs.exists(action_xml)
         test('smoke-multitask',
              find_program('sh'),

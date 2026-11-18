@@ -231,7 +231,7 @@ echo "== wctl options =="
 # 命令超长必须在 write 之前拒绝：snprintf 截断时返回的是"本来要写多少"，
 # 直接拿去 write 会从栈上读出去
 echo "== oversized command =="
-LONG="$(awk 'BEGIN{for(i=0;i<200;i++)printf "a"}')"
+LONG="$(awk 'BEGIN{for(i=0;i<400;i++)printf "a"}')"
 if "$WCTL" -s "$SOCK" "$LONG" 2>&1 | grep -q "command too long"; then
     :
 else

@@ -45,4 +45,18 @@ const char *woodland_ipc_path(const struct woodland_server *server);
 bool woodland_ipc_dispatch(struct woodland_server *server, const char *line,
                            struct woodland_json *out);
 
+/*
+ * 写命令（--debug-ctl 才可用，实现在 ipc/ctl.c）。
+ *
+ * ctl_dispatch：cmd 属于写命令族时返回 true 并写好 out（*ok 为响应的 ok），
+ * 不属于返回 false（调用方继续查只读命令）。未开 --debug-ctl 时写命令
+ * 回一条明确的 ok=false 错误，而不是装作不存在。
+ * ctl_help：把写命令的文档条目追加进 help 的 commands 数组（仅开启时）。
+ */
+struct woodland_json_arr;
+bool woodland_ipc_ctl_dispatch(struct woodland_server *server, const char *cmd,
+                               const char *args, struct woodland_json *out, bool *ok);
+void woodland_ipc_ctl_help(const struct woodland_server *server, struct woodland_json *out,
+                           struct woodland_json_arr *cmds);
+
 #endif
