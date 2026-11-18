@@ -29,9 +29,11 @@
  *   recorded_only 由它生成，单元测试钉住条目数，改档位不会只改一处。
  *
  * 特权判定：协议说"未授权的 bind 可以静默忽略请求甚至断开连接"。woodland
- * 没有 DDE 的 privileged 服务，Wayland 客户端本来就只能是同一个 uid，所以
- * 同 uid 即视为可信——和 compositor_action.c 的取舍一致，写在档位表旁边
- * 而不是藏起来。
+ * 是单用户 session 合成器，用户 socket 只能被同 uid 连接，别的用户连不上；
+ * 特权边界统一交给 wp_security_context_manager_v1（沙箱连接的 global 过滤
+ * 已藏起 manager 端；观测端 treeland_appearance_v1 在白名单里、沙箱可见）。
+ * woodland 不做 DDE 的 privileged 服务、也不逐连接比 uid，
+ * 与 compositor_action.c / shortcut.c / xwindow_control.c 的取舍一致。
  */
 #include <stdlib.h>
 #include <string.h>
@@ -951,8 +953,8 @@ static void manager_bind(struct wl_client *client, void *data, uint32_t version,
     wl_resource_set_implementation(resource, &manager_impl, mgr, manager_resource_destroy);
     wl_list_insert(&state->managers, &mgr->link);
 
-    /* 特权判定：同 uid 即可信（见文件头）。日志留一行，事后能查出谁连过。 */
-    wlr_log(WLR_INFO, "treeland-appearance-manager-v1 bound (same-uid client trusted)");
+    /* 特权判定：非沙箱即可信（见文件头）。日志留一行，事后能查出谁连过。 */
+    wlr_log(WLR_INFO, "treeland-appearance-manager-v1 bound (non-sandboxed client trusted)");
 }
 
 /* ==================== 配置热重载后的重播 ==================== */

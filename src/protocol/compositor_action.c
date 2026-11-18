@@ -17,10 +17,11 @@
  *   忽略：  枚举外的值（0、>30），静默忽略，但 wctl 里看得到。
  *
  * 权限：协议要求"必须拒绝非特权客户端的 bind"。woodland 是单用户 session
- * 合成器，没有 DDE 的 privilege 服务；这里只校验对端 uid 与合成器相同，
- * 挡住跨用户连接，同 uid 一律视为 session 内的 shell。**这不是 DDE 的特权
- * 判定**：按 app_id / 签名 / policy 授权得先有那套机制，属于单独一版；
- * 在此之前不假装实现了它（同 AGENTS.md 对 security-context 的取舍）。
+ * 合成器：socket 文件本身就是同 uid 才能连入，别的用户连不上；能连进来的
+ * 都是本 session 的进程。特权边界统一交给 wp_security_context_manager_v1——
+ * 沙箱连接由全局过滤器藏起这个 global，这里再判一次"无 security context"
+ * 只是纵深防御。woodland 不做 DDE 的按 app_id / 签名 / policy 授权，
+ * 不假装实现了它（同 AGENTS.md 对 security-context 的取舍）。
  *
  * 生命周期：一个 bind 一个 wl_resource，没有子对象、没有 surface 监听器；
  * 但需要一份 binding 链表——global 销毁并不会带走已 bind 的 resource，
@@ -29,7 +30,6 @@
  */
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
 
 #include <wayland-server-core.h>
 #include <wlr/util/log.h>
@@ -182,27 +182,13 @@ void woodland_protocol_compositor_action_status(struct woodland_server *server,
 /* ==================== bind / 请求 ==================== */
 
 /*
- * 最小权限校验：挡住跨用户连接。libwayland 在部分 fd 上取不到
- * SO_PEERCRED（uid == (uid_t)-1），这时按同 session 放行并留一条日志——
- * 没有别的判定手段，而误杀会连累同一连接上的其它 global（Xwayland、
- * in-process 客户端都走这条）。
+ * 最小权限校验：非沙箱即可信。单用户合成器的用户 socket 本身只接受同 uid
+ * 连接，这里不再逐连接比对 uid；唯一要挡的是带 security context 的沙箱
+ * 连接（它的 global 过滤已藏起本协议，这里是纵深防御）。
  */
-static bool client_allowed(struct wl_client *client, uid_t *out_uid)
+static bool client_allowed(struct woodland_server *server, struct wl_client *client)
 {
-    pid_t pid = 0;
-    uid_t uid = (uid_t)-1;
-    gid_t gid = 0;
-    wl_client_get_credentials(client, &pid, &uid, &gid);
-    (void)pid;
-    (void)gid;
-    if (out_uid) {
-        *out_uid = uid;
-    }
-    if (uid == (uid_t)-1) {
-        wlr_log(WLR_INFO, "compositor-action: no peer credentials, allowing bind");
-        return true;
-    }
-    return uid == getuid();
+    return !woodland_proto_security_context_is_sandboxed(server->proto, client);
 }
 
 static void binding_resource_destroy(struct wl_resource *resource)
@@ -303,14 +289,12 @@ static const struct treeland_compositor_action_v1_interface action_impl = {
 static void action_bind(struct wl_client *client, void *data, uint32_t version, uint32_t id)
 {
     struct woodland_proto_compositor_action *act = data;
-    uid_t uid = (uid_t)-1;
-    if (!client_allowed(client, &uid)) {
-        wlr_log(WLR_ERROR, "compositor-action: denied bind from uid %u (compositor uid %u)",
-                (unsigned)uid, (unsigned)getuid());
+    if (!client_allowed(act->server, client)) {
+        wlr_log(WLR_ERROR, "compositor-action: denied bind from sandboxed client");
         /* 协议没有自己的 error enum：用 wl_display 的 implementation 错误
          * 明确拒绝这次 bind，客户端拿不到对象，也不会把哑对象当成成功。 */
         wl_client_post_implementation_error(client,
-            "treeland_compositor_action_v1: bind rejected for a different user");
+            "treeland_compositor_action_v1: bind rejected for a sandboxed client");
         return;
     }
 
