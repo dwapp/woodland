@@ -302,7 +302,8 @@ bool woodland_config_reload(struct woodland_server *server)
     new_cfg->loaded_path = strdup(path);
 
     woodland_config_apply(server, new_cfg);
-    wlr_log(WLR_INFO, "config: reloaded successfully from %s", path);
+    wlr_log(WLR_INFO, "config: reloaded successfully from %s",
+            new_cfg->loaded_path ? new_cfg->loaded_path : "(unknown)");
     free(allocated_path);
     return true;
 }
