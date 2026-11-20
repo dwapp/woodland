@@ -19,9 +19,9 @@ jobs:
       - name: Install dependencies
         run: |
           pacman -Syu --noconfirm --needed \
-            meson ninja git \
+            meson ninja git python \
             wayland wayland-protocols libxkbcommon libinput \
-            pixman libdrm mesa lcms2 \
+            pixman libdrm mesa libglvnd lcms2 \
             systemd-libs seatd hwdata libliftoff libdisplay-info \
             libxcb xcb-util-errors xcb-util-wm \
             xcb-util-image xcb-util-renderutil libx11 \
@@ -32,23 +32,70 @@ jobs:
             weston imagemagick file xterm \
             openbsd-netcat scdoc
       - uses: actions/checkout@v4
-      # lswt 只有 AUR 包，而 capture / xwayland 两个 smoke 用它造 layer-shell
-      # 窗口。现场编一次；编不出来就让它俩自己 skip，不因此判流水线失败。
-      - name: Build lswt (optional)
-        continue-on-error: true
-        run: |
-          git clone --depth 1 https://git.sr.ht/~leon_plickat/lswt /tmp/lswt
-          make -C /tmp/lswt
-          bin="$(find /tmp/lswt -maxdepth 2 -type f -perm -u+x -name lswt | head -1)"
-          install -Dm755 "$bin" /usr/local/bin/lswt
-      - name: Setup
+      - name: Check dependencies
+        run: ./tools/check-deps.sh
+      - name: Build & Test (no-effects)
         run: |
           mkdir -p "$XDG_RUNTIME_DIR"
           chmod 700 "$XDG_RUNTIME_DIR"
           # 默认开启 effects（scenefx + fx_renderer），但 runner 没有 GPU：
           # 显式关掉，保持 pixman 纯软件渲染，让所有 smoke / 单测都能跑。
-          meson setup build -Dtest=enabled -Deffects=disabled
-      - name: Build
-        run: meson compile -C build
-      - name: Test
-        run: meson test -C build --print-errorlogs
+          ./tools/verify.sh --ci --no-effects-dir build --fail-on-skip
+      - name: Build & Unit Test (effects)
+        run: ./tools/verify.sh --single --build-dir build-effects --suite unit
+      - name: Upload verification artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-logs-build-and-test
+          path: |
+            build/meson-logs/verify-summary.json
+            build/meson-logs/smoke/
+            build-effects/meson-logs/verify-summary.json
+          if-no-files-found: ignore
+
+  asan-ubsan:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel
+    env:
+      XDG_RUNTIME_DIR: /tmp/xdg-runtime
+      ASAN_OPTIONS: detect_leaks=0:halt_on_error=1:abort_on_error=1
+      UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm --needed \
+            meson ninja git python \
+            wayland wayland-protocols libxkbcommon libinput \
+            pixman libdrm mesa libglvnd lcms2 \
+            systemd-libs seatd hwdata libliftoff libdisplay-info \
+            libxcb xcb-util-errors xcb-util-wm \
+            xcb-util-image xcb-util-renderutil libx11 \
+            cairo pango librsvg xorg-xwayland \
+            expat libffi \
+            wlr-protocols \
+            wayland-utils wlr-randr wl-clipboard grim jq \
+            weston imagemagick file xterm \
+            openbsd-netcat scdoc
+      - uses: actions/checkout@v4
+      - name: Setup, Build & Test (ASan + UBSan)
+        run: |
+          mkdir -p "$XDG_RUNTIME_DIR"
+          chmod 700 "$XDG_RUNTIME_DIR"
+          meson setup build-asan -Dtest=enabled -Deffects=disabled \
+            -Db_sanitize=address,undefined
+          if setarch "$(uname -m)" -R true 2>/dev/null; then
+            setarch "$(uname -m)" -R ./tools/verify.sh --ci --no-effects-dir build-asan --fail-on-skip
+          else
+            ./tools/verify.sh --ci --no-effects-dir build-asan --fail-on-skip
+          fi
+      - name: Upload ASan/UBSan artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-logs-asan-ubsan
+          path: |
+            build-asan/meson-logs/verify-summary.json
+            build-asan/meson-logs/smoke/
+          if-no-files-found: ignore

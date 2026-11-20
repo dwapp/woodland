@@ -19,7 +19,7 @@
 ### CI 仅跑 `-Deffects=disabled` 是结构性限制
 - **现象**：CI runner 上启用 effects 构建会直接死在 `failed to create allocator`。
 - **原因**：scenefx 0.5 的 `fx_renderer` 仅声明了 `WLR_BUFFER_CAP_DMABUF` 缓冲能力。`wlr_allocator_autocreate` 分配器在无 `SHM|DATA_PTR` 支持时，仅能尝试 udmabuf 与 gbm。CI 容器环境通常没有 `/dev/dri` 渲染节点，也无 `/dev/udmabuf` 设备。即使设置 `WLR_RENDERER_FORCE_SOFTWARE=1` 启动了 llvmpipe，allocator 仍无法创建。
-- **结论**：CI 仅跑 `-Deffects=disabled`（pixman 直出）。所有涉及 effects 的冒烟测试分支（圆角、阴影、模糊等）必须在本地具备 GPU/DRM 的环境中验证；场景级核心逻辑由不受此限制的单元测试（`test_effect.c`、`test_ssd.c` 等）兜底。
+- **结论**：CI 仅在 `-Deffects=disabled`（pixman 直出）上运行全量冒烟测试，`-Deffects=enabled` 仅运行编译与 `--suite unit`。所有涉及 effects 的冒烟测试分支（圆角、阴影、模糊等）仍必须在本地具备 GPU/DRM 的环境中验证；场景级核心逻辑由不受此限制的单元测试（`test_effect.c`、`test_ssd.c` 等）兜底。
 
 ---
 
