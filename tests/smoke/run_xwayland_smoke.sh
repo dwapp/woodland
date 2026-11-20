@@ -226,8 +226,10 @@ kill -TERM "$toggle_pid" 2>/dev/null || true
 "$XAPP" $XAPP_ARGS >"$WORK/xapp2.log" 2>&1 &
 second_pid=$!
 client_pids="$client_pids $second_pid"
-"$WCTL" -s "$SOCK" -t 5000 wait view_count count=2 >/dev/null \
-    || smoke_fail "second x11 window did not appear"
+"$WCTL" -s "$SOCK" -t 5000 wait view_count count=2 mapped=1 >/dev/null \
+    || smoke_fail "second x11 window did not map"
+"$WCTL" -s "$SOCK" -t 3000 wait view_mapped kind=x11 activated=0 ssd=1 >/dev/null \
+    || smoke_fail "first x11 window did not become inactive with SSD"
 grim "$WORK/focus-two.png"
 dim="$(identify -format '%wx%h' "$WORK/focus-two.png")"
 inactive_px="$(color_count_near "$WORK/focus-two.png" "$dim+0+0" "$TITLEBAR_DIM" 1%)"

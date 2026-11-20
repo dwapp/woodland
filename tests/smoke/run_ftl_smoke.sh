@@ -64,10 +64,6 @@ while [ "$i" -lt 100 ]; do
 done
 [ -n "$SOCK" ] || smoke_fail "debug socket never appeared"
 
-view_count() {
-    "$WCTL" -s "$SOCK" get_tree 2>/dev/null | jq -r '.count // -1'
-}
-
 wait_view_count() {
     "$WCTL" -s "$SOCK" -t 5000 wait view_count count="$1" >/dev/null 2>&1
 }

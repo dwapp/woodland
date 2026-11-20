@@ -190,6 +190,8 @@ run_build_variant() {
     if [ "$compile_rc" -eq 0 ]; then
         if [ -n "$SUITE" ]; then
             local run_suite=1
+            local effective_suite="$SUITE"
+            local lb="testlog-verify-suite"
             if [ "$effects_val" = "enabled" ] && ! has_gpu_allocator; then
                 case "$SUITE" in
                 smoke|needs-gpu|xwayland)
@@ -197,13 +199,18 @@ run_build_variant() {
                     log_msg "[verify] WARNING: $smoke_skip_reason (skipping $SUITE on $name)"
                     run_suite=0
                     ;;
+                quick)
+                    smoke_skip_reason="no /dev/dri/renderD* or /dev/udmabuf: skipping smoke tests in quick suite on effects build"
+                    log_msg "[verify] WARNING: $smoke_skip_reason"
+                    effective_suite="unit"
+                    lb="testlog-verify-unit"
+                    ;;
                 esac
             fi
             if [ "$run_suite" -eq 1 ]; then
-                log_msg "[verify] running suite '$SUITE' on $name..."
-                local lb="testlog-verify-suite"
+                log_msg "[verify] running suite '$effective_suite' on $name..."
                 local rc=0
-                run_cmd meson test -C "$dir" --suite "woodland:$SUITE" --print-errorlogs --logbase "$lb" || rc=$?
+                run_cmd meson test -C "$dir" --suite "woodland:$effective_suite" --print-errorlogs --logbase "$lb" || rc=$?
                 [ "$rc" -ne 0 ] && test_rc="$rc"
                 [ -f "$dir/meson-logs/$lb.json" ] && log_files+=("$dir/meson-logs/$lb.json")
             fi
@@ -282,10 +289,20 @@ def extract_details(stdout_text, stderr_text, result):
         return "", dump_dir
 
     if result == "SKIP":
+        for s in lines:
+            if "skip" in s.lower():
+                return s, dump_dir
         return lines[0], dump_dir
 
     for s in lines:
-        if s.startswith("FAIL:") or "Assertion" in s or "assertion" in s:
+        if (
+            s.startswith("FAIL:")
+            or "Assertion" in s
+            or "assertion" in s
+            or "ERROR: AddressSanitizer" in s
+            or "runtime error:" in s
+            or "SUMMARY:" in s
+        ):
             return s, dump_dir
     return lines[-1], dump_dir
 
@@ -463,7 +480,7 @@ else:
 
 if not ok:
     sys.exit(1)
-if fail_on_skip and total_skipped > 0:
+if fail_on_skip and (total_skipped > 0 or len(warnings) > 0):
     sys.exit(2)
 sys.exit(0)
 PY
