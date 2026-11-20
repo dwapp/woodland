@@ -8,7 +8,7 @@
 #      wctl get_tree 的 ssd.palette，不在这里抄十六进制
 #   3) override-redirect 窗口不产生 toplevel（unmanaged 路径），但像素上可见（红）
 #
-# 用法: sh run_xwayland_smoke.sh <woodland> <xoverride> [wctl]
+# 用法: sh run_xwayland_smoke.sh <woodland> <xoverride> [wctl] [wltop]
 set -eu
 
 . "$(dirname "$0")/lib.sh"
@@ -17,16 +17,28 @@ smoke_init xwayland
 BIN="${1:-./build/src/woodland}"
 XOVERRIDE="${2:-./build/tests/xoverride}"
 WCTL="${3:-./build/src/wctl/wctl}"
+WLTOP="${4:-./build/tests/wltop}"
 [ -x "$BIN" ] || { echo "binary not found: $BIN" >&2; exit 125; }
 [ -x "$WCTL" ] || { echo "wctl not found: $WCTL" >&2; exit 125; }
 
-for tool in Xwayland grim lswt convert identify file jq; do
+for tool in Xwayland grim convert identify file jq; do
     command -v "$tool" >/dev/null 2>&1 || {
         echo "$tool not found, skip xwayland smoke" >&2
         exit 77
     }
 done
 [ -x "$XOVERRIDE" ] || { echo "xoverride not built, skip" >&2; exit 77; }
+# toplevel 列举客户端：优先用仓库自带的 wltop，退回 PATH 里的 wltop / lswt。
+if [ -x "$WLTOP" ]; then
+    TOPLEVEL_TOOL="$WLTOP"
+elif command -v wltop >/dev/null 2>&1; then
+    TOPLEVEL_TOOL="$(command -v wltop)"
+elif command -v lswt >/dev/null 2>&1; then
+    TOPLEVEL_TOOL="$(command -v lswt)"
+else
+    echo "wltop (or lswt) not found, skip xwayland smoke" >&2
+    exit 77
+fi
 
 # 终端窗口最接近真实使用场景，但它要分配 pty；受限沙箱里没有 /dev/ptmx
 # 时退到 xlogo —— 同样是普通 X11 顶层窗口，只是不依赖 pty。
@@ -103,12 +115,12 @@ client_pids="$client_pids $!"
 toplevels=""
 i=0
 while [ "$i" -lt 80 ]; do
-    toplevels="$(lswt -j 2>/dev/null || true)"
+    toplevels="$("$TOPLEVEL_TOOL" -j 2>/dev/null || true)"
     echo "$toplevels" | grep -q "\"$XAPP\"" && break
     sleep 0.1; i=$((i+1))
 done
 echo "$toplevels" | grep -q "\"$XAPP\"" || {
-    echo "$XAPP toplevel not listed by lswt:" >&2
+    echo "$XAPP toplevel not listed by wltop:" >&2
     echo "$toplevels" >&2
     echo "--- client log ---" >&2
     cat "$WORK/xapp.log" >&2 || true
@@ -190,7 +202,7 @@ n="$(color_count "$WORK/popup.png" "160x120+500+400" "#FF0000")"
     exit 1
 }
 
-toplevels_after="$(lswt -j 2>/dev/null || true)"
+toplevels_after="$("$TOPLEVEL_TOOL" -j 2>/dev/null || true)"
 count_after="$(echo "$toplevels_after" | grep -c '"app_id"' || true)"
 [ "$count_before" = "$count_after" ] || {
     echo "override-redirect window leaked into toplevel list" \

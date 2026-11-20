@@ -49,10 +49,11 @@
 - **原因**：SSD 的标题栏和边框颜色有四层来源（客户端覆盖、配色方案、配置文件、内置默认），由 `woodland_ssd_get_palette()` 统一计算并反映在 `wctl get_tree` 的 `.ssd.palette` 中。
 - **规范**：脚本中不要硬编码十六进制颜色值，应始终通过 jq 提取生效调色板颜色作为断言期望。
 
-### `smoke-xwayland` 依赖缺失时会整条 SKIP
+### `smoke-xwayland` / `smoke-capture` 依赖缺失时会整条 SKIP
 - **现象**：本地运行测试时通过率看似 100%，合入 CI 或在另一台机器上失败。
-- **原因**：`smoke-xwayland` 依赖 `Xwayland`、`grim`、`lswt`、`convert`、`jq` 以及 `xterm` 或 `xlogo`。若缺失 xterm/xlogo，测试会以 exit code 77（SKIP）退出，断言根本没有执行。
-- **规范**：`meson test` 执行后务必核对 SKIP 名单，确认关键测试确实跑过。
+- **原因**：`smoke-xwayland` 依赖 `Xwayland`、`grim`、`convert`、`jq` 以及 `xterm` 或 `xlogo`；`smoke-capture` 依赖 `weston-simple-shm`。缺任一项脚本以 exit code 77（SKIP）退出，断言根本没有执行。
+- **toplevel 列举不再是外部依赖**：过去两个脚本依赖 AUR 包 `lswt`（读 `ext-foreign-toplevel-list-v1`），本机没装就整条 SKIP。现在仓库自带 `wltop`（`tests/smoke/wltop.c`，meson 目标 `tests/wltop`），由 meson 把它的路径作为脚本参数传入。它输出 lswt 兼容的 `-j` JSON（每个对象含 `app_id` / `title` / `identifier`），脚本优先用它，退回 PATH 里的 `wltop`，最后才是 `lswt`（兼容手动调用）。调试时可单独跑：`wltop`（表格）/`wltop -j`（JSON）/`wltop -j --wait-for APP_ID -t 2000`（等窗口出现）。
+- **规范**：`meson test` 执行后务必核对 SKIP 名单，确认关键测试确实跑过；看到 SKIP 先读 testlog 里的具体 "not found" 行，别误判成代码回归。
 
 ### 宿主 X 会话环境下 `smoke-xwindow-control` 报授权失败
 - **现象**：在宿主运行 X11 会话的桌面上运行 `smoke-xwindow-control` 时测试失败，日志出现 `Authorization required, but no authorization protocol specified`。
