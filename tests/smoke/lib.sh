@@ -23,6 +23,7 @@
 
 SMOKE_DUMPED=0
 SMOKE_EXITING=0
+SMOKE_COMP_PID=""
 
 # 脚本可以覆盖它；默认什么也不做
 smoke_cleanup() {
@@ -98,7 +99,7 @@ smoke_dump() {
     if [ -n "${WCTL:-}" ] && [ -x "${WCTL:-}" ] && [ -n "${SOCK:-}" ] \
             && [ -S "$SOCK" ]; then
         for _cmd in get_tree get_focus self_check get_trace get_listeners \
-            dump_scene; do
+            dump_scene screenshot; do
             "$WCTL" -s "$SOCK" -t 1000 "$_cmd" \
                 >"$SMOKE_DIR/$_cmd.json" 2>"$SMOKE_DIR/$_cmd.err" || :
         done
@@ -140,4 +141,62 @@ smoke_wait_socket() {
         _i=$((_i + 1))
     done
     return 1
+}
+
+# 等 Wayland socket 出现（跳过 .lock）；成功时设置并导出 WAYLAND_DISPLAY。
+smoke_wait_wayland() {
+    _tries="${1:-100}"
+    _dir="${XDG_RUNTIME_DIR:-}"
+    _i=0
+    while [ "$_i" -lt "$_tries" ]; do
+        for _f in "$_dir"/wayland-*; do
+            if [ -S "$_f" ]; then
+                WAYLAND_DISPLAY="${_f##*/}"
+                export WAYLAND_DISPLAY
+                return 0
+            fi
+        done
+        sleep 0.05
+        _i=$((_i + 1))
+    done
+    return 1
+}
+
+# 优雅停止一个进程：先 SIGTERM 轮询退出，超时再 SIGKILL。
+smoke_stop_pid() {
+    _pid="${1:-}"
+    _tries="${2:-50}"
+    [ -n "$_pid" ] || return 0
+    kill -TERM "$_pid" 2>/dev/null || true
+    _i=0
+    while kill -0 "$_pid" 2>/dev/null && [ "$_i" -lt "$_tries" ]; do
+        sleep 0.1
+        _i=$((_i + 1))
+    done
+    kill -KILL "$_pid" 2>/dev/null || true
+    wait "$_pid" 2>/dev/null || true
+}
+
+# 拉起 headless woodland 并等 Wayland/IPC 两个 socket 就绪。
+# 调用方需提前设好 $BIN、$XDG_RUNTIME_DIR、$SMOKE_LOG。
+smoke_start_compositor() {
+    SOCK=""
+    unset WAYLAND_DISPLAY
+    SMOKE_FLAGS="$*"
+    "$BIN" "$@" >"$SMOKE_LOG" 2>&1 &
+    SMOKE_COMP_PID=$!
+    smoke_wait_wayland 100 || smoke_fail "wayland socket did not appear"
+    smoke_wait_socket 100 || smoke_fail "debug socket did not appear"
+}
+
+smoke_stop_compositor() {
+    if [ -n "${SMOKE_COMP_PID:-}" ]; then
+        smoke_stop_pid "$SMOKE_COMP_PID"
+        SMOKE_COMP_PID=""
+    fi
+    SOCK=""
+    unset WAYLAND_DISPLAY
+    if [ -n "${XDG_RUNTIME_DIR:-}" ]; then
+        rm -f "$XDG_RUNTIME_DIR"/woodland-*.sock "$XDG_RUNTIME_DIR"/wayland-*
+    fi
 }

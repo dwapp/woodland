@@ -30,6 +30,7 @@
 
 struct wlr_xwayland;
 struct wlr_compositor;
+struct wlr_keyboard;
 /* wlr_session 只在 server 里存指针，模块要用它的字段时再各自 include */
 struct wlr_session;
 /* 上游协议（src/protocol）：整体不透明，外部只经 protocol.h 的接口访问 */
@@ -142,6 +143,7 @@ struct woodland_server {
     /* seat 与输入 */
     struct wlr_seat *seat;
     struct wl_list keyboards;                   // struct woodland_keyboard.link 链表头
+    struct wlr_keyboard *debug_keyboard;        // --debug-ctl 虚拟键盘
     struct wl_listener new_input;               // backend->events.new_input 监听器
     struct wl_listener request_cursor;          // seat->events.request_set_cursor
     struct wl_listener request_set_selection;   // seat->events.request_set_selection

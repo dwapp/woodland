@@ -141,7 +141,7 @@ check_tool "grim" "optional" "smoke-capture,smoke-xwayland,failure-screenshots" 
     "Arch: grim | Debian: grim"
 # toplevel 列举由仓库自带的 wltop（tests/smoke/wltop.c）提供，不再是外部依赖；
 # 这里不再检查 lswt。仅当手动以旧方式调用脚本且两者都缺时脚本才会 SKIP。
-check_tool "weston-simple-shm" "optional" "smoke-capture" \
+check_tool "weston-simple-shm" "optional" "smoke-capture(fallback:simple_ssd)" \
     "Arch: weston | Debian: weston"
 check_tool "file" "optional" "smoke-capture,smoke-xwayland" \
     "Arch: file | Debian: file"
@@ -151,10 +151,10 @@ check_tool "Xwayland" "optional" "smoke-xwayland,smoke-xwindow-control(real-x11)
 # xterm (with /dev/ptmx) OR xlogo satisfies smoke-xwayland's managed X11 app
 if [ -e /dev/ptmx ] && xterm_path="$(command -v xterm 2>/dev/null)"; then
     record_check "xterm-or-xlogo" "optional" "group" "ok" "xterm ($xterm_path)" \
-        "smoke-xwayland" "Arch: xterm or xorg-xlogo | Debian: xterm or x11-apps"
+        "smoke-xwayland(fallback:xoverride)" "Arch: xterm or xorg-xlogo | Debian: xterm or x11-apps"
 elif xlogo_path="$(command -v xlogo 2>/dev/null)"; then
     record_check "xterm-or-xlogo" "optional" "group" "ok" "xlogo ($xlogo_path)" \
-        "smoke-xwayland" "Arch: xterm or xorg-xlogo | Debian: xterm or x11-apps"
+        "smoke-xwayland(fallback:xoverride)" "Arch: xterm or xorg-xlogo | Debian: xterm or x11-apps"
 else
     if command -v xterm >/dev/null 2>&1 && [ ! -e /dev/ptmx ]; then
         detail="xterm present but /dev/ptmx unavailable, and xlogo missing"
@@ -162,7 +162,7 @@ else
         detail="neither xterm (with /dev/ptmx) nor xlogo found"
     fi
     record_check "xterm-or-xlogo" "optional" "group" "miss" "$detail" \
-        "smoke-xwayland" "Arch: xterm or xorg-xlogo | Debian: xterm or x11-apps"
+        "smoke-xwayland(fallback:xoverride)" "Arch: xterm or xorg-xlogo | Debian: xterm or x11-apps"
 fi
 
 check_tool "convert" "optional" "smoke-xwayland" \

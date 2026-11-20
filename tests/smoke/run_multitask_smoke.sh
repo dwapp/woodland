@@ -33,35 +33,14 @@ blur = true
 EOF
 
 export WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1
-SMOKE_FLAGS="--self-check --trace -c $CFG"
 SMOKE_LOG="$XDG_RUNTIME_DIR/woodland.log"
 
-comp_pid=""
 smoke_cleanup() {
-    if [ -n "$comp_pid" ]; then
-        kill -TERM "$comp_pid" 2>/dev/null || true
-        i=0
-        while kill -0 "$comp_pid" 2>/dev/null && [ "$i" -lt 50 ]; do
-            sleep 0.1; i=$((i+1))
-        done
-        kill -KILL "$comp_pid" 2>/dev/null || true
-        wait "$comp_pid" 2>/dev/null || true
-    fi
+    smoke_stop_compositor
     rm -rf "$XDG_RUNTIME_DIR"
 }
 
-"$BIN" --self-check --trace -c "$CFG" -s "$CLIENT" >"$SMOKE_LOG" 2>&1 &
-comp_pid=$!
-
-i=0
-while [ "$(ls "$XDG_RUNTIME_DIR/" 2>/dev/null | grep -c '^wayland-')" -eq 0 ] \
-        && [ "$i" -lt 100 ]; do
-    sleep 0.05; i=$((i+1))
-done
-socket_name="$(ls "$XDG_RUNTIME_DIR/" 2>/dev/null | grep '^wayland-' | head -1)"
-[ -n "$socket_name" ] || smoke_fail "wayland socket did not appear"
-export WAYLAND_DISPLAY="$socket_name"
-smoke_wait_socket 100 || smoke_fail "debug socket did not appear"
+smoke_start_compositor --self-check --trace -c "$CFG" -s "$CLIENT"
 
 wctl_cmd() {
     "$WCTL" -s "$SOCK" -t 1000 "$1"
@@ -79,7 +58,7 @@ echo "== 打开多任务视图（含真实客户表面离屏缩略图与帧提�
     || smoke_fail "multitask_view did not activate"
 # 经 pixel 同步触发一次真实离屏缩略图渲染与帧提交
 "$WCTL" -s "$SOCK" pixel 100 100 >/dev/null || smoke_fail "pixel render failed during multitask_view"
-kill -0 "$comp_pid" 2>/dev/null || smoke_fail "compositor crashed while rendering multitask_view"
+kill -0 "$SMOKE_COMP_PID" 2>/dev/null || smoke_fail "compositor crashed while rendering multitask_view"
 TREE="$(wctl_cmd get_tree)" || smoke_fail "get_tree failed after open_multitask_view"
 printf '%s' "$TREE" | jq -e \
     '.multitask_view.active == true
@@ -117,7 +96,7 @@ wctl_cmd reload_config >/dev/null || smoke_fail "reload_config failed"
 "$WCTL" -s "$SOCK" -t 2000 wait multitask active=1 card_count=1 thumb_count=1 >/dev/null \
     || smoke_fail "multitask_view (effects off) did not activate"
 "$WCTL" -s "$SOCK" pixel 100 100 >/dev/null || smoke_fail "pixel render failed (effects off)"
-kill -0 "$comp_pid" 2>/dev/null || smoke_fail "compositor crashed with effects disabled"
+kill -0 "$SMOKE_COMP_PID" 2>/dev/null || smoke_fail "compositor crashed with effects disabled"
 TREE="$(wctl_cmd get_tree)" || smoke_fail "get_tree failed (effects off)"
 printf '%s' "$TREE" | jq -e \
     '.effects == false

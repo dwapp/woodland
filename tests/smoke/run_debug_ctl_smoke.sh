@@ -25,44 +25,19 @@ export XDG_RUNTIME_DIR="$(mktemp -d)"
 export WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1
 
 SMOKE_LOG="$XDG_RUNTIME_DIR/woodland.log"
-comp_pid=""
+client1_pid=""
+client2_pid=""
 
 stop_comp() {
-    if [ -n "$comp_pid" ]; then
-        kill -TERM "$comp_pid" 2>/dev/null || true
-        i=0
-        while kill -0 "$comp_pid" 2>/dev/null && [ "$i" -lt 50 ]; do
-            sleep 0.1; i=$((i+1))
-        done
-        kill -KILL "$comp_pid" 2>/dev/null || true
-        wait "$comp_pid" 2>/dev/null || true
-        comp_pid=""
-    fi
-    rm -f "$XDG_RUNTIME_DIR"/woodland-*.sock
+    smoke_stop_pid "$client2_pid" 10
+    client2_pid=""
+    smoke_stop_pid "$client1_pid" 10
+    client1_pid=""
+    smoke_stop_compositor
 }
 smoke_cleanup() {
     stop_comp
     rm -rf "$XDG_RUNTIME_DIR"
-}
-
-# start_comp <额外参数...>：起合成器 + 客户端，等 socket 与 1 个视图
-start_comp() {
-    SMOKE_FLAGS="--self-check --trace $*"
-    # shellcheck disable=SC2086
-    "$BIN" --self-check --trace "$@" -s "$CLIENT" >"$SMOKE_LOG" 2>&1 &
-    comp_pid=$!
-    SOCK=""
-    i=0
-    while [ "$i" -lt 100 ]; do
-        for f in "$XDG_RUNTIME_DIR"/woodland-*.sock; do
-            [ -S "$f" ] && SOCK="$f"
-        done
-        [ -n "$SOCK" ] && break
-        sleep 0.05; i=$((i+1))
-    done
-    [ -n "$SOCK" ] || smoke_fail "debug socket never appeared"
-    "$WCTL" -s "$SOCK" -t 5000 wait view_mapped >/dev/null || smoke_fail "client never mapped"
-    return 0
 }
 
 # wctl 在 ok=false 时退出码为 1：这里要读响应，不能被 set -e 吃掉
@@ -70,23 +45,32 @@ w() { "$WCTL" -s "$SOCK" "$@" 2>&1 || true; }
 
 # ---------- 1. 默认只读 ----------
 echo "== disabled by default =="
-start_comp
+smoke_start_compositor --self-check --trace -s "$CLIENT"
+"$WCTL" -s "$SOCK" -t 5000 wait view_mapped >/dev/null || smoke_fail "client never mapped"
 ID="$(w get_tree | jq '.views[0].id')"
 BEFORE="$(w get_tree | jq -c '.views[0].outer')"
 w move "$ID" 300 200 | jq -e '.ok == false and (.error | test("--debug-ctl"))' >/dev/null \
     || smoke_fail "move must be refused without --debug-ctl"
 [ "$(w get_tree | jq -c '.views[0].outer')" = "$BEFORE" ] \
     || smoke_fail "a refused move changed the window"
-w help | jq -e '[.commands[].name] | index("move") | not' >/dev/null \
+w key 30 tap | jq -e '.ok == false and (.error | test("--debug-ctl"))' >/dev/null \
+    || smoke_fail "key must be refused without --debug-ctl"
+w screenshot --dump-ppm "$XDG_RUNTIME_DIR/nope.ppm" | jq -e '.ok == false and (.error | test("--debug-ctl"))' >/dev/null \
+    || smoke_fail "--dump-ppm must be refused without --debug-ctl"
+[ ! -e "$XDG_RUNTIME_DIR/nope.ppm" ] || smoke_fail "--dump-ppm wrote file without --debug-ctl"
+w help | jq -e '[.commands[].name] | (index("move") | not) and (index("key") | not)' >/dev/null \
     || smoke_fail "help must not list write commands when disabled"
 stop_comp
 
 # ---------- 2. 打开之后 ----------
 echo "== enabled =="
-start_comp --debug-ctl
+smoke_start_compositor --debug-ctl --self-check --trace
+"$CLIENT" --log-keys >"$XDG_RUNTIME_DIR/client1.log" 2>&1 &
+client1_pid=$!
+"$WCTL" -s "$SOCK" -t 5000 wait view_mapped >/dev/null || smoke_fail "client never mapped"
 ID="$(w get_tree | jq '.views[0].id')"
 
-w help | jq -e '[.commands[].name] | (index("move") != null) and (index("inject_key") != null)' >/dev/null \
+w help | jq -e '[.commands[].name] | (index("move") != null) and (index("inject_key") != null) and (index("key") != null)' >/dev/null \
     || smoke_fail "help should list write commands"
 
 w move "$ID" 300 200 | jq -e '.ok == true' >/dev/null || smoke_fail "move failed"
@@ -107,7 +91,7 @@ w workspace 1 | jq -e '.ok == true' >/dev/null || smoke_fail "workspace 1 failed
 
 w pointer_move 640 360 | jq -e '.ok == true' >/dev/null || smoke_fail "pointer_move failed"
 
-# fullscreen / resize / inject_key
+# fullscreen / resize / inject_key / key
 w fullscreen "$ID" 1 | jq -e '.ok == true' >/dev/null || smoke_fail "fullscreen failed"
 w get_tree | jq -e '.views[0].fullscreen == true' >/dev/null || smoke_fail "view should be fullscreen"
 w move "$ID" 5 5 | jq -e '.ok == false' >/dev/null || smoke_fail "move must be refused while fullscreen"
@@ -116,11 +100,86 @@ w fullscreen "$ID" 0 | jq -e '.ok == true' >/dev/null || smoke_fail "leave fulls
 w resize "$ID" 400 300 | jq -e '.ok == true' >/dev/null || smoke_fail "resize failed"
 w resize "$ID" 0 300 | jq -e '.ok == false' >/dev/null || smoke_fail "zero-size resize should fail"
 w focus_view "$ID" | jq -e ".ok == true" >/dev/null || smoke_fail "refocus failed"
-# headless 没有键盘设备：只能断言"没有键盘焦点"这条明确的错误；
-# 真正送键的路径要在有 seat keyboard 的会话里验证
-w inject_key 30 tap | jq -e '.ok == false and (.error | startswith("no keyboard focus"))' >/dev/null \
-    || smoke_fail "inject_key should report missing keyboard focus on a headless seat"
+"$WCTL" -s "$SOCK" -t 2000 wait focus view="$ID" >/dev/null || smoke_fail "focus never settled"
+
+echo "== inject_key -> real Wayland key delivery =="
+w inject_key 30 tap | jq -e '.ok == true' >/dev/null || smoke_fail "inject_key should succeed on focused client"
+i=0
+while [ "$i" -lt 40 ]; do
+    if grep -q '^KEY 30 1$' "$XDG_RUNTIME_DIR/client1.log" 2>/dev/null &&
+       grep -q '^KEY 30 0$' "$XDG_RUNTIME_DIR/client1.log" 2>/dev/null; then
+        break
+    fi
+    sleep 0.05; i=$((i+1))
+done
+grep -q '^KEY 30 1$' "$XDG_RUNTIME_DIR/client1.log" && grep -q '^KEY 30 0$' "$XDG_RUNTIME_DIR/client1.log" \
+    || smoke_fail "client did not receive inject_key events: $(cat "$XDG_RUNTIME_DIR/client1.log" 2>/dev/null || true)"
 w inject_key 30 smash | jq -e '.ok == false' >/dev/null || smoke_fail "bad key action should fail"
+
+w workspace 3 | jq -e '.ok == true' >/dev/null || smoke_fail "workspace 3 failed"
+w inject_key 30 tap | jq -e '.ok == false and (.error | startswith("no keyboard focus"))' >/dev/null \
+    || smoke_fail "inject_key should report missing keyboard focus on empty workspace"
+w workspace 1 | jq -e '.ok == true' >/dev/null || smoke_fail "workspace 1 failed"
+w focus_view "$ID" | jq -e '.ok == true' >/dev/null || smoke_fail "refocus on ws1 failed"
+
+echo "== debug virtual keyboard shortcuts / UI interactions =="
+w key 30 smash | jq -e '.ok == false' >/dev/null || smoke_fail "bad key action should fail"
+w key 0 tap | jq -e '.ok == false' >/dev/null || smoke_fail "zero keycode should fail"
+
+# 1) Alt+2 / Alt+1 切工作区
+w key 56 press | jq -e '.ok == true' >/dev/null || smoke_fail "Alt press failed"
+w key 3 tap | jq -e '.ok == true' >/dev/null || smoke_fail "2 tap failed"
+w key 56 release | jq -e '.ok == true' >/dev/null || smoke_fail "Alt release failed"
+"$WCTL" -s "$SOCK" -t 2000 wait workspace name=2 >/dev/null || smoke_fail "Alt+2 did not switch workspace"
+w key 56 press | jq -e '.ok == true' >/dev/null || smoke_fail "Alt press failed"
+w key 2 tap | jq -e '.ok == true' >/dev/null || smoke_fail "1 tap failed"
+w key 56 release | jq -e '.ok == true' >/dev/null || smoke_fail "Alt release failed"
+"$WCTL" -s "$SOCK" -t 2000 wait workspace name=1 >/dev/null || smoke_fail "Alt+1 did not switch back"
+
+# 2) Alt+S 多任务视图 + Esc 关闭
+w key 56 press | jq -e '.ok == true' >/dev/null || smoke_fail "Alt press failed"
+w key 31 tap | jq -e '.ok == true' >/dev/null || smoke_fail "S tap failed"
+w key 56 release | jq -e '.ok == true' >/dev/null || smoke_fail "Alt release failed"
+"$WCTL" -s "$SOCK" -t 2000 wait multitask active=1 >/dev/null || smoke_fail "Alt+S did not open multitask"
+w key 1 tap | jq -e '.ok == true' >/dev/null || smoke_fail "Esc tap failed"
+"$WCTL" -s "$SOCK" -t 2000 wait multitask active=0 >/dev/null || smoke_fail "Esc did not close multitask"
+
+# 3) 右键标题栏打开窗口菜单 + Esc 关闭
+w move "$ID" 200 150 | jq -e '.ok == true' >/dev/null || smoke_fail "move before menu failed"
+w pointer_move 260 160 | jq -e '.ok == true' >/dev/null || smoke_fail "pointer_move to titlebar failed"
+w pointer_button right click | jq -e '.ok == true' >/dev/null || smoke_fail "right click titlebar failed"
+"$WCTL" -s "$SOCK" -t 2000 wait window_menu active=1 >/dev/null || smoke_fail "right click did not open window_menu"
+w key 1 tap | jq -e '.ok == true' >/dev/null || smoke_fail "Esc menu failed"
+"$WCTL" -s "$SOCK" -t 2000 wait window_menu active=0 >/dev/null || smoke_fail "Esc did not close window_menu"
+
+# 4) 拖标题栏贴左边显示 snap_preview 并左半屏贴边
+w pointer_move 260 160 | jq -e '.ok == true' >/dev/null || smoke_fail "pointer_move to titlebar failed"
+w pointer_button left press | jq -e '.ok == true' >/dev/null || smoke_fail "left press failed"
+w pointer_move 2 360 | jq -e '.ok == true' >/dev/null || smoke_fail "drag to left edge failed"
+"$WCTL" -s "$SOCK" -t 2000 wait snap_preview active=1 | jq -e '.edges > 0' >/dev/null \
+    || smoke_fail "snap_preview did not activate on left edge drag"
+w pointer_button left release | jq -e '.ok == true' >/dev/null || smoke_fail "left release failed"
+"$WCTL" -s "$SOCK" -t 2000 wait snap_preview active=0 >/dev/null || smoke_fail "snap_preview did not clear on release"
+w get_tree | jq -e ".views[] | select(.id == $ID) | .outer[0] == 0" >/dev/null \
+    || smoke_fail "view did not snap to left edge"
+
+# 5) Alt+Tab 窗口切换器
+"$CLIENT" --title simple-ssd-2 >"$XDG_RUNTIME_DIR/client2.log" 2>&1 &
+client2_pid=$!
+"$WCTL" -s "$SOCK" -t 5000 wait view_mapped title=simple-ssd-2 >/dev/null || smoke_fail "2nd client never mapped"
+"$WCTL" -s "$SOCK" -t 2000 wait focus title=simple-ssd-2 >/dev/null || smoke_fail "2nd client never focused"
+BEFORE_FOCUS="$(w get_focus | jq -r '.view')"
+w key 56 press | jq -e '.ok == true' >/dev/null || smoke_fail "Alt press failed"
+w key 15 tap | jq -e '.ok == true' >/dev/null || smoke_fail "Tab tap failed"
+"$WCTL" -s "$SOCK" -t 2000 wait window_switcher active=1 >/dev/null || smoke_fail "Alt+Tab did not open switcher"
+w key 56 release | jq -e '.ok == true' >/dev/null || smoke_fail "Alt release failed"
+"$WCTL" -s "$SOCK" -t 2000 wait window_switcher active=0 >/dev/null || smoke_fail "Alt release did not commit switcher"
+AFTER_FOCUS="$(w get_focus | jq -r '.view')"
+[ "$AFTER_FOCUS" != "$BEFORE_FOCUS" ] || smoke_fail "Alt+Tab did not switch focus ($BEFORE_FOCUS -> $AFTER_FOCUS)"
+smoke_stop_pid "$client2_pid" 10
+client2_pid=""
+"$WCTL" -s "$SOCK" -t 3000 wait view_count count=1 >/dev/null || smoke_fail "2nd client did not unmap"
+
 w pointer_button left click | jq -e '.ok == true' >/dev/null || smoke_fail "pointer_button failed"
 
 # 坏参数：明确报错、不改状态、合成器不崩

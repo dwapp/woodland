@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #define _GNU_SOURCE
 #include <fcntl.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,11 +16,16 @@
 #define WIDTH 250
 #define HEIGHT 250
 
+static const char *opt_title = "simple-ssd";
+static bool opt_log_keys = false;
+
 static struct wl_display *display;
 static struct wl_compositor *compositor;
 static struct wl_shm *shm;
 static struct xdg_wm_base *wm_base;
 static struct zxdg_decoration_manager_v1 *deco_mgr;
+static struct wl_seat *seat;
+static struct wl_keyboard *keyboard;
 
 static struct wl_surface *surface;
 static struct xdg_surface *xdg_surface;
@@ -80,11 +86,107 @@ static const struct zxdg_toplevel_decoration_v1_listener deco_listener = {
     .configure = deco_configure,
 };
 
+static void kbd_keymap(void *data, struct wl_keyboard *k, uint32_t format,
+                       int32_t fd, uint32_t size)
+{
+    (void)data;
+    (void)k;
+    (void)format;
+    (void)size;
+    if (fd >= 0) {
+        close(fd);
+    }
+}
+
+static void kbd_enter(void *data, struct wl_keyboard *k, uint32_t serial,
+                      struct wl_surface *surf, struct wl_array *keys)
+{
+    (void)data;
+    (void)k;
+    (void)serial;
+    (void)surf;
+    (void)keys;
+}
+
+static void kbd_leave(void *data, struct wl_keyboard *k, uint32_t serial,
+                      struct wl_surface *surf)
+{
+    (void)data;
+    (void)k;
+    (void)serial;
+    (void)surf;
+}
+
+static void kbd_key(void *data, struct wl_keyboard *k, uint32_t serial,
+                    uint32_t time, uint32_t key, uint32_t state)
+{
+    (void)data;
+    (void)k;
+    (void)serial;
+    (void)time;
+    printf("KEY %u %u\n", key, state);
+    fflush(stdout);
+}
+
+static void kbd_modifiers(void *data, struct wl_keyboard *k, uint32_t serial,
+                          uint32_t mods_depressed, uint32_t mods_latched,
+                          uint32_t mods_locked, uint32_t group)
+{
+    (void)data;
+    (void)k;
+    (void)serial;
+    (void)mods_depressed;
+    (void)mods_latched;
+    (void)mods_locked;
+    (void)group;
+}
+
+static void kbd_repeat_info(void *data, struct wl_keyboard *k,
+                            int32_t rate, int32_t delay)
+{
+    (void)data;
+    (void)k;
+    (void)rate;
+    (void)delay;
+}
+
+static const struct wl_keyboard_listener keyboard_listener = {
+    .keymap = kbd_keymap,
+    .enter = kbd_enter,
+    .leave = kbd_leave,
+    .key = kbd_key,
+    .modifiers = kbd_modifiers,
+    .repeat_info = kbd_repeat_info,
+};
+
+static void seat_capabilities(void *data, struct wl_seat *s, uint32_t caps)
+{
+    (void)data;
+    if ((caps & WL_SEAT_CAPABILITY_KEYBOARD) && !keyboard) {
+        keyboard = wl_seat_get_keyboard(s);
+        wl_keyboard_add_listener(keyboard, &keyboard_listener, NULL);
+    } else if (!(caps & WL_SEAT_CAPABILITY_KEYBOARD) && keyboard) {
+        wl_keyboard_release(keyboard);
+        keyboard = NULL;
+    }
+}
+
+static void seat_name(void *data, struct wl_seat *s, const char *name)
+{
+    (void)data;
+    (void)s;
+    (void)name;
+}
+
+static const struct wl_seat_listener seat_listener = {
+    .capabilities = seat_capabilities,
+    .name = seat_name,
+};
+
 static void registry_global(void *data, struct wl_registry *registry, uint32_t name,
                             const char *interface, uint32_t version)
 {
     (void)data;
-    (void)version;
     if (strcmp(interface, wl_compositor_interface.name) == 0) {
         compositor = wl_registry_bind(registry, name, &wl_compositor_interface, 4);
     } else if (strcmp(interface, wl_shm_interface.name) == 0) {
@@ -94,6 +196,10 @@ static void registry_global(void *data, struct wl_registry *registry, uint32_t n
         xdg_wm_base_add_listener(wm_base, &wm_base_listener, NULL);
     } else if (strcmp(interface, zxdg_decoration_manager_v1_interface.name) == 0) {
         deco_mgr = wl_registry_bind(registry, name, &zxdg_decoration_manager_v1_interface, 1);
+    } else if (opt_log_keys && strcmp(interface, wl_seat_interface.name) == 0) {
+        uint32_t v = version < 5 ? version : 5;
+        seat = wl_registry_bind(registry, name, &wl_seat_interface, v);
+        wl_seat_add_listener(seat, &seat_listener, NULL);
     }
 }
 
@@ -141,8 +247,13 @@ static struct wl_buffer *create_buffer(void)
 
 int main(int argc, char *argv[])
 {
-    (void)argc;
-    (void)argv;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--log-keys") == 0) {
+            opt_log_keys = true;
+        } else if (strcmp(argv[i], "--title") == 0 && i + 1 < argc) {
+            opt_title = argv[++i];
+        }
+    }
     display = wl_display_connect(NULL);
     if (!display) {
         fprintf(stderr, "cannot connect to display\n");
@@ -164,7 +275,7 @@ int main(int argc, char *argv[])
     xdg_surface_add_listener(xdg_surface, &xdg_surface_listener, NULL);
     xdg_toplevel = xdg_surface_get_toplevel(xdg_surface);
     xdg_toplevel_add_listener(xdg_toplevel, &toplevel_listener, NULL);
-    xdg_toplevel_set_title(xdg_toplevel, "simple-ssd");
+    xdg_toplevel_set_title(xdg_toplevel, opt_title);
     xdg_toplevel_set_app_id(xdg_toplevel, "org.woodland.simple-ssd");
 
     if (deco_mgr) {

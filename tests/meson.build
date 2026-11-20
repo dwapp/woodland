@@ -15,6 +15,7 @@ if get_option('test').enabled()
   ext_ftl_xml = wp_datadir / 'staging' / 'ext-foreign-toplevel-list' / 'ext-foreign-toplevel-list-v1.xml'
   wltop_bin = disabler()
   wltop_arg = []
+  wltop_path = ''
   if wayland_client_dep.found() and wp_dep.found() and wayland_scanner.found() and fs.exists(ext_ftl_xml)
     wltop_bin = executable('wltop',
       [
@@ -30,6 +31,7 @@ if get_option('test').enabled()
       ],
       dependencies: [wayland_client_dep])
     wltop_arg = [wltop_bin.full_path()]
+    wltop_path = wltop_bin.full_path()
   endif
 
   # Xwayland 冒烟用的小客户端：建一个 override-redirect 窗口
@@ -73,20 +75,15 @@ if get_option('test').enabled()
   # 调试接口（wctl）：只断言状态，不数像素
   # 依赖 simple_ssd 客户端（显式请求 SERVER_SIDE SSD）
 
-  test('smoke-capture',
-       find_program('sh'),
-       args: [meson.current_source_dir() / 'smoke' / 'run_capture_smoke.sh',
-              woodland_bin.full_path()] + wltop_arg,
-       suite: ['smoke'],
-       is_parallel: false,
-       timeout: 60)
+  capture_client_args = []
 
   # output-management：test 不许有副作用、apply 必须生效、多 head 必须可见。
   # 依赖 wlr-randr（没有则脚本自己 skip）。
   test('smoke-output-mgmt',
        find_program('sh'),
        args: [meson.current_source_dir() / 'smoke' / 'run_output_mgmt_smoke.sh',
-              woodland_bin.full_path()],
+              woodland_bin.full_path(),
+              wctl_bin.full_path()],
        suite: ['smoke'],
        is_parallel: false,
        timeout: 60)
@@ -462,6 +459,7 @@ if get_option('test').enabled()
       ]
       simple_ssd_bin = executable('simple_ssd', simple_ssd_srcs,
                                   dependencies: [wayland_client_dep])
+      capture_client_args = [simple_ssd_bin.full_path()]
 
       test('smoke-decoration',
            find_program('sh'),
@@ -601,4 +599,13 @@ if get_option('test').enabled()
            timeout: 90)
     endif
   endif
+
+  test('smoke-capture',
+       find_program('sh'),
+       args: [meson.current_source_dir() / 'smoke' / 'run_capture_smoke.sh',
+              woodland_bin.full_path(),
+              wltop_path] + capture_client_args,
+       suite: ['smoke'],
+       is_parallel: false,
+       timeout: 60)
 endif

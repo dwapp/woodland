@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "scene.h"
 #include <wlr/render/wlr_texture.h>
@@ -123,6 +124,24 @@ static struct woodland_output *first_enabled_output(struct woodland_server *serv
     return NULL;
 }
 
+static struct woodland_output *find_output_by_name(struct woodland_server *server,
+                                                   const char *name)
+{
+    if (!server || !server->outputs.next || !name || !name[0]) {
+        return NULL;
+    }
+    struct woodland_output *wo;
+    wl_list_for_each(wo, &server->outputs, link) {
+        if (wo->wlr_output && wo->wlr_output->name &&
+            strcmp(wo->wlr_output->name, name) == 0 &&
+            wo->wlr_output->enabled && wo->scene_output &&
+            wo->wlr_output->renderer) {
+            return wo;
+        }
+    }
+    return NULL;
+}
+
 static void logical_point_to_buffer_box(const struct wlr_box *logical_pt,
                                         const struct wlr_box *obox,
                                         struct wlr_output *wlr_output,
@@ -152,6 +171,7 @@ static void logical_point_to_buffer_box(const struct wlr_box *logical_pt,
 }
 
 static bool sample_output_region(struct woodland_server *server,
+                                 const char *output_name,
                                  const struct wlr_box *req_box,
                                  bool full_output,
                                  struct sampled_region *sr,
@@ -163,19 +183,29 @@ static bool sample_output_region(struct woodland_server *server,
         return false;
     }
 
+    if (!full_output &&
+        ((int64_t)req_box->x + (int64_t)req_box->width > INT32_MAX ||
+         (int64_t)req_box->y + (int64_t)req_box->height > INT32_MAX ||
+         (int64_t)req_box->x + (int64_t)req_box->width < INT32_MIN ||
+         (int64_t)req_box->y + (int64_t)req_box->height < INT32_MIN)) {
+        snprintf(err, err_cap, "region coordinates overflow");
+        return false;
+    }
+
     struct woodland_output *wo = NULL;
     struct wlr_output *wlr_output = NULL;
-    if (full_output) {
+    bool explicit_output = output_name && output_name[0] != '\0';
+    if (explicit_output) {
+        wo = find_output_by_name(server, output_name);
+        wlr_output = wo ? wo->wlr_output : NULL;
+        if (!wo || !wlr_output) {
+            snprintf(err, err_cap, "output not found or disabled");
+            return false;
+        }
+    } else if (full_output) {
         wo = first_enabled_output(server);
         wlr_output = wo ? wo->wlr_output : NULL;
     } else {
-        if ((int64_t)req_box->x + (int64_t)req_box->width > INT32_MAX ||
-            (int64_t)req_box->y + (int64_t)req_box->height > INT32_MAX ||
-            (int64_t)req_box->x + (int64_t)req_box->width < INT32_MIN ||
-            (int64_t)req_box->y + (int64_t)req_box->height < INT32_MIN) {
-            snprintf(err, err_cap, "region coordinates overflow");
-            return false;
-        }
         wlr_output = wlr_output_layout_output_at(server->output_layout,
                                                  (double)req_box->x, (double)req_box->y);
         wo = find_output_wrapper(server, wlr_output);
@@ -316,7 +346,7 @@ bool woodland_ipc_sample_pixel(struct woodland_server *server, int lx, int ly,
 {
     struct wlr_box req = {.x = lx, .y = ly, .width = 1, .height = 1};
     struct sampled_region sr;
-    if (!sample_output_region(server, &req, false, &sr, err, err_cap)) {
+    if (!sample_output_region(server, NULL, &req, false, &sr, err, err_cap)) {
         return false;
     }
     memcpy(rgba, sr.pixels, 4);
@@ -675,7 +705,7 @@ bool woodland_ipc_cmd_pixel(struct woodland_server *server, const char *args,
     struct wlr_box req = {.x = lx, .y = ly, .width = 1, .height = 1};
     struct sampled_region sr;
     char err[128];
-    if (!sample_output_region(server, &req, false, &sr, err, sizeof(err))) {
+    if (!sample_output_region(server, NULL, &req, false, &sr, err, sizeof(err))) {
         respond_inspect_error(out, "pixel", err);
         return false;
     }
@@ -811,6 +841,42 @@ static int cmp_bucket_desc(const void *a, const void *b)
     return ba->rgba > bb->rgba ? 1 : 0;
 }
 
+static bool write_ppm_rgb(const char *path, int width, int height, const uint8_t *rgba)
+{
+    if (!path || !path[0] || width <= 0 || height <= 0 || !rgba) {
+        return false;
+    }
+    uint8_t *row = malloc((size_t)width * 3);
+    if (!row) {
+        return false;
+    }
+    FILE *fp = fopen(path, "wb");
+    if (!fp) {
+        free(row);
+        return false;
+    }
+    bool ok = fprintf(fp, "P6\n%d %d\n255\n", width, height) > 0;
+    for (int y = 0; ok && y < height; y++) {
+        const uint8_t *src = rgba + ((size_t)y * (size_t)width) * 4;
+        for (int x = 0; x < width; x++) {
+            row[x * 3 + 0] = src[x * 4 + 0];
+            row[x * 3 + 1] = src[x * 4 + 1];
+            row[x * 3 + 2] = src[x * 4 + 2];
+        }
+        if (fwrite(row, 1, (size_t)width * 3, fp) != (size_t)width * 3) {
+            ok = false;
+        }
+    }
+    if (fclose(fp) != 0) {
+        ok = false;
+    }
+    free(row);
+    if (!ok) {
+        unlink(path);
+    }
+    return ok;
+}
+
 bool woodland_ipc_cmd_screenshot(struct woodland_server *server, const char *args,
                                  struct woodland_json *out)
 {
@@ -818,19 +884,24 @@ bool woodland_ipc_cmd_screenshot(struct woodland_server *server, const char *arg
     struct wlr_box req = {0};
     bool has_expect = false;
     uint32_t expect_arg_rgb = 0;
+    bool has_output = false;
+    char output_name[64] = {0};
+    bool has_dump_ppm = false;
+    char dump_ppm[256] = {0};
     int tolerance = INSPECT_DEFAULT_TOLERANCE;
     int pos_vals[4] = {0};
     int pos_count = 0;
 
-    char tok[128];
+    char tok[320];
     const char *p = args;
     while ((p = woodland_ipc_next_token(p, tok, sizeof(tok))) != NULL) {
         if (strcmp(tok, "--region") == 0) {
             char val[128];
             p = woodland_ipc_next_token(p, val, sizeof(val));
             if (!p || !parse_box_csv(val, &req) || has_region || pos_count > 0) {
-                respond_inspect_error(out, "screenshot",
-                                      "usage: screenshot [--region x,y,w,h] [--expect #rrggbb] [--tolerance N]");
+                respond_inspect_error(
+                    out, "screenshot",
+                    "usage: screenshot [--output NAME] [--region x,y,w,h] [--expect #rrggbb] [--tolerance N] [--dump-ppm PATH]");
                 return false;
             }
             has_region = true;
@@ -841,6 +912,40 @@ bool woodland_ipc_cmd_screenshot(struct woodland_server *server, const char *arg
                 return false;
             }
             has_region = true;
+        } else if (strcmp(tok, "--output") == 0) {
+            char val[64];
+            p = woodland_ipc_next_token(p, val, sizeof(val));
+            if (!p || !val[0]) {
+                respond_inspect_error(out, "screenshot", "invalid --output name");
+                return false;
+            }
+            snprintf(output_name, sizeof(output_name), "%s", val);
+            has_output = true;
+        } else if (strncmp(tok, "--output=", 9) == 0 || strncmp(tok, "output=", 7) == 0) {
+            const char *val = (tok[0] == '-') ? tok + 9 : tok + 7;
+            if (!val[0]) {
+                respond_inspect_error(out, "screenshot", "invalid output name");
+                return false;
+            }
+            snprintf(output_name, sizeof(output_name), "%s", val);
+            has_output = true;
+        } else if (strcmp(tok, "--dump-ppm") == 0) {
+            char val[256];
+            p = woodland_ipc_next_token(p, val, sizeof(val));
+            if (!p || !val[0]) {
+                respond_inspect_error(out, "screenshot", "invalid --dump-ppm path");
+                return false;
+            }
+            snprintf(dump_ppm, sizeof(dump_ppm), "%s", val);
+            has_dump_ppm = true;
+        } else if (strncmp(tok, "--dump-ppm=", 11) == 0 || strncmp(tok, "dump_ppm=", 9) == 0) {
+            const char *val = (tok[0] == '-') ? tok + 11 : tok + 9;
+            if (!val[0]) {
+                respond_inspect_error(out, "screenshot", "invalid dump-ppm path");
+                return false;
+            }
+            snprintf(dump_ppm, sizeof(dump_ppm), "%s", val);
+            has_dump_ppm = true;
         } else if (strcmp(tok, "--expect") == 0) {
             char val[64];
             p = woodland_ipc_next_token(p, val, sizeof(val));
@@ -908,10 +1013,23 @@ bool woodland_ipc_cmd_screenshot(struct woodland_server *server, const char *arg
         return false;
     }
 
+    if (has_dump_ppm && !server->debug_ctl) {
+        respond_inspect_error(out, "screenshot", "--dump-ppm requires --debug-ctl");
+        return false;
+    }
+
     struct sampled_region sr;
     char err[128];
-    if (!sample_output_region(server, &req, !has_region, &sr, err, sizeof(err))) {
+    if (!sample_output_region(server, has_output ? output_name : NULL,
+                              &req, !has_region, &sr, err, sizeof(err))) {
         respond_inspect_error(out, "screenshot", err);
+        return false;
+    }
+
+    if (has_dump_ppm &&
+        !write_ppm_rgb(dump_ppm, sr.buffer_box.width, sr.buffer_box.height, sr.pixels)) {
+        sampled_region_finish(&sr);
+        respond_inspect_error(out, "screenshot", "failed to write ppm file");
         return false;
     }
 
@@ -992,6 +1110,9 @@ bool woodland_ipc_cmd_screenshot(struct woodland_server *server, const char *arg
     woodland_json_obj_bool(&obj, "ok", true);
     woodland_json_obj_str(&obj, "cmd", "screenshot");
     woodland_json_obj_str(&obj, "output", sr.wo->wlr_output->name);
+    if (has_dump_ppm) {
+        woodland_json_obj_str(&obj, "dumped_ppm", dump_ppm);
+    }
     woodland_json_obj_key(&obj, "region");
     woodland_json_int_array(out, region_arr, 4);
     woodland_json_obj_key(&obj, "buffer_box");

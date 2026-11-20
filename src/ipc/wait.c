@@ -38,6 +38,7 @@ enum wait_kind {
     WAIT_MULTITASK,
     WAIT_WINDOW_MENU,
     WAIT_WINDOW_SWITCHER,
+    WAIT_SNAP_PREVIEW,
     WAIT_OUTPUT_COUNT,
     WAIT_PIXEL,
     WAIT_TRACE,
@@ -359,6 +360,7 @@ static bool parse_condition_name(const char *name, enum wait_kind *out_kind,
         {"multitask", WAIT_MULTITASK},
         {"window_menu", WAIT_WINDOW_MENU},
         {"window_switcher", WAIT_WINDOW_SWITCHER},
+        {"snap_preview", WAIT_SNAP_PREVIEW},
         {"output_count", WAIT_OUTPUT_COUNT},
         {"pixel", WAIT_PIXEL},
         {"trace", WAIT_TRACE},
@@ -544,6 +546,7 @@ bool woodland_ipc_wait_parse(const char *args, struct woodland_ipc_wait **out_wa
             break;
         case WAIT_WINDOW_MENU:
         case WAIT_WINDOW_SWITCHER:
+        case WAIT_SNAP_PREVIEW:
             if (strcmp(k, "active") == 0) {
                 if (!parse_bool_str(v, &w->active)) {
                     snprintf(err, err_cap, "active must be 0|1|true|false");
@@ -667,6 +670,7 @@ bool woodland_ipc_wait_parse(const char *args, struct woodland_ipc_wait **out_wa
     case WAIT_MULTITASK:
     case WAIT_WINDOW_MENU:
     case WAIT_WINDOW_SWITCHER:
+    case WAIT_SNAP_PREVIEW:
         if (!w->has_active) {
             snprintf(err, err_cap, "%s requires active=0|1", w->cond_name);
             free(w);
@@ -986,6 +990,21 @@ bool woodland_ipc_wait_eval(struct woodland_server *server,
         *matched = true;
         write_wait_match_header(&obj, wait, elapsed_ms);
         woodland_json_obj_bool(&obj, "active", active);
+        woodland_json_obj_close(&obj);
+        return true;
+    }
+    case WAIT_SNAP_PREVIEW: {
+        const struct woodland_snap_preview *sp = &server->snap_preview;
+        bool active = (sp->edges != 0 && sp->tree && sp->tree->node.enabled);
+        if (active != wait->active) {
+            return true;
+        }
+        *matched = true;
+        write_wait_match_header(&obj, wait, elapsed_ms);
+        woodland_json_obj_bool(&obj, "active", active);
+        if (active) {
+            woodland_json_obj_int(&obj, "edges", (long long)sp->edges);
+        }
         woodland_json_obj_close(&obj);
         return true;
     }

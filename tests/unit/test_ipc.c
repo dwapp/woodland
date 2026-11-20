@@ -112,8 +112,29 @@ int main(void) {
     assert(!dispatch_cmd(&server, "screenshot --bogus", buf, sizeof(buf)));
     assert(!dispatch_cmd(&server, "screenshot 0 0 0 10", buf, sizeof(buf)));
     assert(!dispatch_cmd(&server, "screenshot --region 2147483640,0,100,100", buf, sizeof(buf)));
+    assert(!dispatch_cmd(&server, "screenshot --dump-ppm /tmp/should-not-exist.ppm", buf, sizeof(buf)));
+    assert(strstr(buf, "--debug-ctl") != NULL);
+    server.debug_ctl = true;
+    assert(!dispatch_cmd(&server, "screenshot --output missing", buf, sizeof(buf)));
+    server.debug_ctl = false;
     assert(!dispatch_cmd(&server, "screenshot", buf, sizeof(buf)));
     assert(strstr(buf, "\"cmd\":\"screenshot\"") != NULL);
+
+    /* key: 默认只读拒绝，启用 --debug-ctl 后无虚拟键盘明确报错，help 列出 key */
+    assert(!dispatch_cmd(&server, "key 30 tap", buf, sizeof(buf)));
+    assert(strstr(buf, "--debug-ctl") != NULL);
+    server.debug_ctl = true;
+    assert(dispatch_cmd(&server, "help", buf, sizeof(buf)));
+    assert(strstr(buf, "\"name\":\"key\"") != NULL);
+    assert(!dispatch_cmd(&server, "key 30 tap", buf, sizeof(buf)));
+    assert(strstr(buf, "debug keyboard unavailable") != NULL);
+    server.debug_ctl = false;
+
+    /* wait snap_preview */
+    assert(dispatch_cmd(&server, "wait snap_preview active=0", buf, sizeof(buf)));
+    assert(strstr(buf, "\"matched\":true") != NULL);
+    assert(!dispatch_cmd(&server, "wait snap_preview active=1", buf, sizeof(buf)));
+    assert(strstr(buf, "\"matched\":false") != NULL);
 
     /* wait: 坏条件、未知参数、同步命中/未命中 */
     assert(!dispatch_cmd(&server, "wait", buf, sizeof(buf)));

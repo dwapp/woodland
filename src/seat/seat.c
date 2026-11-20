@@ -4,6 +4,7 @@
 #include <stdlib.h>
 
 #include <wlr/backend/session.h>
+#include <wlr/interfaces/wlr_keyboard.h>
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_data_device.h>
 #include <wlr/types/wlr_input_device.h>
@@ -375,6 +376,67 @@ void woodland_seat_new_keyboard(struct woodland_server *server, struct wlr_input
     wlr_seat_set_keyboard(server->seat, wlr_keyboard);
 
     wl_list_insert(&server->keyboards, &keyboard->link);
+}
+
+static const struct wlr_keyboard_impl debug_keyboard_impl = {
+    .name = "woodland-debug-keyboard",
+};
+
+bool woodland_seat_init_debug_keyboard(struct woodland_server *server)
+{
+    if (!server || !server->seat) {
+        return false;
+    }
+    if (server->debug_keyboard) {
+        return true;
+    }
+
+    struct wlr_keyboard *kb = calloc(1, sizeof(*kb));
+    if (!kb) {
+        return false;
+    }
+    wlr_keyboard_init(kb, &debug_keyboard_impl, "woodland-debug-keyboard");
+    woodland_seat_new_keyboard(server, &kb->base);
+    if (wl_list_empty(&kb->base.events.destroy.listener_list)) {
+        wlr_keyboard_finish(kb);
+        free(kb);
+        return false;
+    }
+    wlr_seat_set_capabilities(server->seat,
+                              WL_SEAT_CAPABILITY_POINTER | WL_SEAT_CAPABILITY_KEYBOARD);
+    server->debug_keyboard = kb;
+    return true;
+}
+
+void woodland_seat_finish_debug_keyboard(struct woodland_server *server)
+{
+    if (!server || !server->debug_keyboard) {
+        return;
+    }
+    struct wlr_keyboard *kb = server->debug_keyboard;
+    server->debug_keyboard = NULL;
+    wlr_keyboard_finish(kb);
+    free(kb);
+    if (server->seat && wl_list_empty(&server->keyboards)) {
+        wlr_seat_set_capabilities(server->seat, WL_SEAT_CAPABILITY_POINTER);
+    }
+}
+
+bool woodland_seat_debug_key(struct woodland_server *server, uint32_t keycode,
+                             bool pressed, uint32_t time_msec)
+{
+    if (!server || !server->debug_keyboard) {
+        return false;
+    }
+    struct wlr_keyboard_key_event ev = {
+        .time_msec = time_msec,
+        .keycode = keycode,
+        .update_state = true,
+        .state = pressed ? WL_KEYBOARD_KEY_STATE_PRESSED
+                         : WL_KEYBOARD_KEY_STATE_RELEASED,
+    };
+    wlr_keyboard_notify_key(server->debug_keyboard, &ev);
+    return true;
 }
 
 static void server_new_pointer(struct woodland_server *server, struct wlr_input_device *device)

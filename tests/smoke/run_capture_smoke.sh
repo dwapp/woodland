@@ -4,7 +4,7 @@
 # 用 grim 抓整屏（zwlr_screencopy_v1 / ext-image-copy-capture-v1）、
 # 区域、以及按 identifier 抓单个窗口（ext-foreign-toplevel-image-capture-source-v1）。
 #
-# 用法: sh run_capture_smoke.sh <woodland 二进制路径> [wltop 二进制路径]
+# 用法: sh run_capture_smoke.sh <woodland 二进制路径> [wltop 二进制路径] [fallback simple_ssd]
 set -eu
 
 . "$(dirname "$0")/lib.sh"
@@ -12,9 +12,10 @@ smoke_init capture
 
 BIN="${1:-./build/src/woodland}"
 WLTOP="${2:-./build/tests/wltop}"
+FALLBACK_CLIENT="${3:-./build/tests/simple_ssd}"
 [ -x "$BIN" ] || { echo "binary not found: $BIN" >&2; exit 125; }
 
-for tool in grim weston-simple-shm file; do
+for tool in grim file; do
     command -v "$tool" >/dev/null 2>&1 || {
         echo "$tool not found, skip capture smoke" >&2
         exit 77
@@ -33,45 +34,36 @@ else
     exit 77
 fi
 
+if command -v weston-simple-shm >/dev/null 2>&1; then
+    CLIENT_CMD=weston-simple-shm
+    CLIENT_MATCH=org.freedesktop.weston.simple-shm
+elif [ -n "$FALLBACK_CLIENT" ] && [ -x "$FALLBACK_CLIENT" ]; then
+    CLIENT_CMD="$FALLBACK_CLIENT"
+    CLIENT_MATCH=org.woodland.simple-ssd
+else
+    echo "neither weston-simple-shm nor simple_ssd available, skip capture smoke" >&2
+    exit 77
+fi
+
 unset WAYLAND_DISPLAY
 export XDG_RUNTIME_DIR="$(mktemp -d)"
+export WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1
 WORK="$(mktemp -d)"
 
-comp_pid=""
 client_pid=""
 
 smoke_cleanup() {
-    [ -n "$client_pid" ] && kill -TERM "$client_pid" 2>/dev/null || true
-    if [ -n "$comp_pid" ]; then
-        kill -TERM "$comp_pid" 2>/dev/null || true
-        i=0
-        while kill -0 "$comp_pid" 2>/dev/null && [ "$i" -lt 50 ]; do
-            sleep 0.1; i=$((i+1))
-        done
-        kill -KILL "$comp_pid" 2>/dev/null || true
-        wait "$comp_pid" 2>/dev/null || true
-    fi
+    smoke_stop_pid "$client_pid" 10
+    client_pid=""
+    smoke_stop_compositor
     rm -rf "$XDG_RUNTIME_DIR" "$WORK"
 }
 
 SMOKE_LOG="$XDG_RUNTIME_DIR/woodland.log"
-WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1 "$BIN" \
-    >"$SMOKE_LOG" 2>&1 &
-comp_pid=$!
-
-i=0
-while [ "$(ls "$XDG_RUNTIME_DIR/" 2>/dev/null | grep -c '^wayland-')" -eq 0 ] && [ "$i" -lt 50 ]; do
-    sleep 0.1; i=$((i+1))
-done
-socket_name="$(ls "$XDG_RUNTIME_DIR/" 2>/dev/null | grep '^wayland-' | head -1)"
-if [ -z "$socket_name" ]; then
-    echo "wayland socket did not appear" >&2
-    exit 1
-fi
-export WAYLAND_DISPLAY="$socket_name"
+smoke_start_compositor
 
 # 一个 250x250 的客户端窗口，作为截图目标
-weston-simple-shm >"$WORK/client.log" 2>&1 &
+"$CLIENT_CMD" >"$WORK/client.log" 2>&1 &
 client_pid=$!
 
 # 协议是异步的：轮询 wltop 直到窗口出现在列表里
@@ -79,11 +71,11 @@ toplevels=""
 i=0
 while [ "$i" -lt 50 ]; do
     toplevels="$("$TOPLEVEL_TOOL" -j 2>/dev/null || true)"
-    echo "$toplevels" | grep -q 'simple-shm' && break
+    echo "$toplevels" | grep -q "$CLIENT_MATCH" && break
     sleep 0.1; i=$((i+1))
 done
-echo "$toplevels" | grep -q 'org.freedesktop.weston.simple-shm' || {
-    echo "wltop did not list the weston-simple-shm toplevel:" >&2
+echo "$toplevels" | grep -q "$CLIENT_MATCH" || {
+    echo "wltop did not list $CLIENT_MATCH toplevel:" >&2
     echo "$toplevels" >&2
     exit 1
 }

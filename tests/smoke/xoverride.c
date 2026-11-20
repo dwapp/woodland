@@ -115,6 +115,12 @@ int main(int argc, char *argv[]) {
                           (int16_t)x, (int16_t)y, (uint16_t)w, (uint16_t)h, 0,
                           XCB_WINDOW_CLASS_INPUT_OUTPUT, screen->root_visual,
                           mask, val_managed);
+        static const char wm_class[] = "xoverride\0xoverride";
+        static const char wm_name[] = "xoverride";
+        xcb_change_property(conn, XCB_PROP_MODE_REPLACE, win, XCB_ATOM_WM_CLASS,
+                            XCB_ATOM_STRING, 8, sizeof(wm_class), wm_class);
+        xcb_change_property(conn, XCB_PROP_MODE_REPLACE, win, XCB_ATOM_WM_NAME,
+                            XCB_ATOM_STRING, 8, sizeof(wm_name) - 1, wm_name);
         xcb_map_window(conn, win);
         xcb_flush(conn);
         printf("managed window 0x%x at %d,%d %dx%d\n", win, x, y, w, h);

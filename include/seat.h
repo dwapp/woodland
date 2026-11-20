@@ -29,6 +29,12 @@ void woodland_seat_focus_surface(struct woodland_server *server, struct wlr_surf
 /** 为输入设备（含虚拟键盘）创建并接入键盘。 */
 void woodland_seat_new_keyboard(struct woodland_server *server, struct wlr_input_device *device);
 
+/** --debug-ctl 虚拟键盘：在 headless 等无物理键盘环境下提供完整键盘与快捷键链路。 */
+bool woodland_seat_init_debug_keyboard(struct woodland_server *server);
+void woodland_seat_finish_debug_keyboard(struct woodland_server *server);
+bool woodland_seat_debug_key(struct woodland_server *server, uint32_t keycode,
+                             bool pressed, uint32_t time_msec);
+
 /**
  * XF86Switch_VT_1..12 keysym → VT 号（1..12）；不是 VT 切换键则返回 0。
  * 纯函数，单测见 tests/unit/test_seat.c。

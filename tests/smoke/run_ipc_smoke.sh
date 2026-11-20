@@ -31,36 +31,13 @@ export XDG_RUNTIME_DIR="$(mktemp -d)"
 export WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1
 
 SMOKE_LOG="$XDG_RUNTIME_DIR/woodland.log"
-comp_pid=""
 
 smoke_cleanup() {
-    if [ -n "$comp_pid" ]; then
-        kill -TERM "$comp_pid" 2>/dev/null || true
-        i=0
-        while kill -0 "$comp_pid" 2>/dev/null && [ "$i" -lt 50 ]; do
-            sleep 0.1; i=$((i+1))
-        done
-        kill -KILL "$comp_pid" 2>/dev/null || true
-        wait "$comp_pid" 2>/dev/null || true
-    fi
+    smoke_stop_compositor
     rm -rf "$XDG_RUNTIME_DIR"
 }
 
-SMOKE_FLAGS="--self-check --trace"
-"$BIN" --self-check --trace -s "$CLIENT" >"$SMOKE_LOG" 2>&1 &
-comp_pid=$!
-
-# 等调试 socket 出现
-SOCK=""
-i=0
-while [ "$i" -lt 100 ]; do
-    for f in "$XDG_RUNTIME_DIR"/woodland-*.sock; do
-        [ -S "$f" ] && SOCK="$f"
-    done
-    [ -n "$SOCK" ] && break
-    sleep 0.05; i=$((i+1))
-done
-[ -n "$SOCK" ] || smoke_fail "debug socket never appeared"
+smoke_start_compositor --self-check --trace -s "$CLIENT"
 
 # 等窗口 map 上来
 "$WCTL" -s "$SOCK" -t 5000 wait view_mapped >/dev/null || smoke_fail "client never mapped"
@@ -285,12 +262,9 @@ if grep -q "self-check" "$SMOKE_LOG"; then
 fi
 
 # 正常退出后 socket 必须被清掉，否则下次 bind 会被残留文件挡住（虽然会被 unlink）
-kill -TERM "$comp_pid" 2>/dev/null || true
-i=0
-while kill -0 "$comp_pid" 2>/dev/null && [ "$i" -lt 50 ]; do
-    sleep 0.1; i=$((i+1))
-done
-comp_pid=""
-[ -e "$SOCK" ] && smoke_fail "socket left behind: $SOCK"
+SAVED_SOCK="$SOCK"
+smoke_stop_pid "$SMOKE_COMP_PID"
+SMOKE_COMP_PID=""
+[ -e "$SAVED_SOCK" ] && smoke_fail "socket left behind: $SAVED_SOCK"
 
 echo "ipc smoke OK"

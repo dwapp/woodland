@@ -230,6 +230,7 @@ static const struct ipc_field_doc pixel_fields[] = {
 
 static const struct ipc_field_doc screenshot_fields[] = {
     {"output", "str", "output name"},
+    {"dumped_ppm", "str", "optional path written by --dump-ppm (requires --debug-ctl)"},
     {"region", "int[4]", "sampled logical layout box [x,y,w,h]"},
     {"buffer_box", "int[4]", "sampled buffer box [bx,by,bw,bh]"},
     {"total_pixels", "int", "pixels sampled"},
@@ -244,7 +245,7 @@ static const struct ipc_field_doc screenshot_fields[] = {
 static const struct ipc_field_doc wait_fields[] = {
     {"condition", "str",
      "view_mapped|view_unmapped|view_count|focus|workspace|multitask|"
-     "window_menu|window_switcher|output_count|pixel|trace"},
+     "window_menu|window_switcher|snap_preview|output_count|pixel|trace"},
     {"matched", "bool", "true when condition held before timeout"},
     {"elapsed_ms", "int", "time waited in ms"},
     {"timeout_ms", "int", "timeout limit in ms (present on timeout)"},

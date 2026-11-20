@@ -41,53 +41,41 @@ else
 fi
 
 # 终端窗口最接近真实使用场景，但它要分配 pty；受限沙箱里没有 /dev/ptmx
-# 时退到 xlogo —— 同样是普通 X11 顶层窗口，只是不依赖 pty。
+# 时退到 xlogo；都没有时退到内置的 xoverride --managed-window，避免无意义 SKIP。
 if [ -e /dev/ptmx ] && command -v xterm >/dev/null 2>&1; then
     XAPP=xterm
     XAPP_ARGS="-geometry 60x12"
-else
-    command -v xlogo >/dev/null 2>&1 || {
-        echo "neither xterm nor xlogo available, skip" >&2; exit 77; }
+    XAPP_MATCH=xterm
+elif command -v xlogo >/dev/null 2>&1; then
     XAPP=xlogo
     XAPP_ARGS="-geometry 300x200"
+    XAPP_MATCH=xlogo
+else
+    XAPP="$XOVERRIDE"
+    XAPP_ARGS="--managed-window 0 0 300 200"
+    XAPP_MATCH=xoverride
 fi
 
 unset WAYLAND_DISPLAY
 export XDG_RUNTIME_DIR="$(mktemp -d)"
 WORK="$(mktemp -d)"
 
-comp_pid=""
 client_pids=""
 
 smoke_cleanup() {
     for p in $client_pids; do
-        kill -TERM "$p" 2>/dev/null || true
+        smoke_stop_pid "$p" 10
     done
-    if [ -n "$comp_pid" ]; then
-        kill -TERM "$comp_pid" 2>/dev/null || true
-        i=0
-        while kill -0 "$comp_pid" 2>/dev/null && [ "$i" -lt 50 ]; do
-            sleep 0.1; i=$((i+1))
-        done
-        kill -KILL "$comp_pid" 2>/dev/null || true
-        wait "$comp_pid" 2>/dev/null || true
-    fi
+    smoke_stop_compositor
     rm -rf "$XDG_RUNTIME_DIR" "$WORK"
 }
 
 SMOKE_LOG="$WORK/comp.log"
 WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1 \
     "$BIN" >"$SMOKE_LOG" 2>&1 &
-comp_pid=$!
+SMOKE_COMP_PID=$!
 
-i=0
-while [ "$(ls "$XDG_RUNTIME_DIR/" 2>/dev/null | grep -c '^wayland-')" -eq 0 ] \
-        && [ "$i" -lt 50 ]; do
-    sleep 0.1; i=$((i+1))
-done
-socket_name="$(ls "$XDG_RUNTIME_DIR/" 2>/dev/null | grep '^wayland-' | head -1)"
-[ -n "$socket_name" ] || { echo "wayland socket did not appear" >&2; exit 1; }
-export WAYLAND_DISPLAY="$socket_name"
+smoke_wait_wayland 50 || { echo "wayland socket did not appear" >&2; exit 1; }
 
 # DISPLAY 由合成器在 start 时写进日志（Xwayland lazy 模式，名字在 init 时就定了）
 i=0
@@ -116,10 +104,10 @@ toplevels=""
 i=0
 while [ "$i" -lt 80 ]; do
     toplevels="$("$TOPLEVEL_TOOL" -j 2>/dev/null || true)"
-    echo "$toplevels" | grep -q "\"$XAPP\"" && break
+    echo "$toplevels" | grep -q "\"$XAPP_MATCH\"" && break
     sleep 0.1; i=$((i+1))
 done
-echo "$toplevels" | grep -q "\"$XAPP\"" || {
+echo "$toplevels" | grep -q "\"$XAPP_MATCH\"" || {
     echo "$XAPP toplevel not listed by wltop:" >&2
     echo "$toplevels" >&2
     echo "--- client log ---" >&2

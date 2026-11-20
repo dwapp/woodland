@@ -16,6 +16,7 @@
 #include <errno.h>
 #include <linux/input-event-codes.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -27,6 +28,7 @@
 
 #include "focus.h"
 #include "ipc.h"
+#include "seat.h"
 #include "ssd.h"
 #include "trace.h"
 #include "util/json.h"
@@ -58,6 +60,8 @@ static const struct ctl_cmd_doc ctl_docs[] = {
      "emit a button through the real cursor handler (click = press + release)"},
     {"inject_key", "inject_key <linux_keycode> <press|release|tap>",
      "send a key to the focused client only (bypasses compositor shortcuts)"},
+    {"key", "key <linux_keycode> <press|release|tap>",
+     "emit a real key event on the debug virtual keyboard (goes through shortcuts, switcher, menu, IME, and client)"},
 };
 
 #define CTL_CMD_COUNT (sizeof(ctl_docs) / sizeof(ctl_docs[0]))
@@ -314,8 +318,8 @@ static bool ctl_pointer_button(struct woodland_server *server, const char *args,
     return true;
 }
 
-static bool ctl_inject_key(struct woodland_server *server, const char *args,
-                           struct woodland_json *out)
+static bool parse_key_action(const char *cmd, const char *args, struct woodland_json *out,
+                             uint32_t *keycode_out, bool *press_out, bool *release_out)
 {
     char code[16], action[16], extra[8];
     const char *rest = next_token(args, code, sizeof(code));
@@ -323,28 +327,66 @@ static bool ctl_inject_key(struct woodland_server *server, const char *args,
     long keycode;
     if (!rest || next_token(rest, extra, sizeof(extra)) || !parse_long(code, &keycode) ||
         keycode <= 0 || keycode > 0x2ff) {
-        respond(out, "inject_key", false, "usage: inject_key <linux_keycode> <press|release|tap>");
-        return false;
-    }
-    if (!server->seat || !server->seat->keyboard_state.focused_surface) {
-        respond(out, "inject_key", false, "no keyboard focus (headless seats have no keyboard)");
+        char msg[80];
+        snprintf(msg, sizeof(msg), "usage: %s <linux_keycode> <press|release|tap>", cmd);
+        respond(out, cmd, false, msg);
         return false;
     }
     bool press = strcmp(action, "press") == 0 || strcmp(action, "tap") == 0;
     bool release = strcmp(action, "release") == 0 || strcmp(action, "tap") == 0;
     if (!press && !release) {
-        respond(out, "inject_key", false, "action must be press|release|tap");
+        respond(out, cmd, false, "action must be press|release|tap");
+        return false;
+    }
+    *keycode_out = (uint32_t)keycode;
+    *press_out = press;
+    *release_out = release;
+    return true;
+}
+
+static bool ctl_inject_key(struct woodland_server *server, const char *args,
+                           struct woodland_json *out)
+{
+    uint32_t keycode = 0;
+    bool press = false, release = false;
+    if (!parse_key_action("inject_key", args, out, &keycode, &press, &release)) {
+        return false;
+    }
+    if (!server->seat || !server->seat->keyboard_state.focused_surface) {
+        respond(out, "inject_key", false, "no keyboard focus");
         return false;
     }
     if (press) {
-        wlr_seat_keyboard_notify_key(server->seat, now_msec(), (uint32_t)keycode,
+        wlr_seat_keyboard_notify_key(server->seat, now_msec(), keycode,
                                      WL_KEYBOARD_KEY_STATE_PRESSED);
     }
     if (release) {
-        wlr_seat_keyboard_notify_key(server->seat, now_msec(), (uint32_t)keycode,
+        wlr_seat_keyboard_notify_key(server->seat, now_msec(), keycode,
                                      WL_KEYBOARD_KEY_STATE_RELEASED);
     }
     respond(out, "inject_key", true, NULL);
+    return true;
+}
+
+static bool ctl_key(struct woodland_server *server, const char *args,
+                    struct woodland_json *out)
+{
+    uint32_t keycode = 0;
+    bool press = false, release = false;
+    if (!parse_key_action("key", args, out, &keycode, &press, &release)) {
+        return false;
+    }
+    if (!server->debug_keyboard) {
+        respond(out, "key", false, "debug keyboard unavailable");
+        return false;
+    }
+    if (press) {
+        woodland_seat_debug_key(server, keycode, true, now_msec());
+    }
+    if (release) {
+        woodland_seat_debug_key(server, keycode, false, now_msec());
+    }
+    respond(out, "key", true, NULL);
     return true;
 }
 
@@ -377,6 +419,8 @@ bool woodland_ipc_ctl_dispatch(struct woodland_server *server, const char *cmd, 
         *ok = ctl_pointer_button(server, args, out);
     } else if (strcmp(cmd, "inject_key") == 0) {
         *ok = ctl_inject_key(server, args, out);
+    } else if (strcmp(cmd, "key") == 0) {
+        *ok = ctl_key(server, args, out);
     } else {
         *ok = ctl_view_cmd(server, cmd, args, out);
     }

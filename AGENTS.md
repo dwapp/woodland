@@ -47,11 +47,11 @@ wctl dump_scene | jq '.nodes'  # 完整场景图，排查图层遮挡或节点�
 wctl self_check | jq .         # 不变量断言状态检查
 wctl get_trace  | jq .         # 导出决策轨迹环形缓冲
 wctl pixel <x> <y>             # 采样像素并返回颜色与场景归因/期望来源
-wctl screenshot --region x,y,w,h [--expect #rrggbb]  # 区域主色统计与期望匹配度
+wctl screenshot [--output NAME] [--region x,y,w,h] [--expect #rrggbb] [--dump-ppm PATH]  # 区域主色统计、期望匹配与可选 PPM 落盘（--dump-ppm 需 --debug-ctl）
 wctl wait <cond> [key=val...]  # 等待事件/状态/像素就绪（替代脚本 sleep）
 ```
 
-- **开启写命令**：启动加 `--debug-ctl`（`wctl focus_view <id>`、`wctl move <id> <x> <y>`、`wctl resize <id> <w> <h>`、`wctl close <id>`、`wctl inject_key <code> tap` 等，完整清单见 `wctl help`）。
+- **开启写命令**：启动加 `--debug-ctl`（会自动接入 headless 虚拟键盘；支持 `wctl focus_view <id>`、`wctl move <id> <x> <y>`、`wctl resize <id> <w> <h>`、`wctl close <id>`、`wctl key <code> tap`、`wctl inject_key <code> tap`、`wctl screenshot --dump-ppm` 等，完整清单见 `wctl help`）。
 - **决策追踪**：启动加 `--trace`，记入 4096 条状态转移环形缓冲，用 `what` 权威标签（`include/trace.h`）与 `detail` 决策依据排查因果。
 - **状态自检**：启动加 `--self-check`，在 idle 阶段自动断言视图链表、焦点、SSD 几何与壁纸根节点不变量。
 

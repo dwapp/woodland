@@ -27,8 +27,6 @@ mkdir -p "$XDG_CONFIG_HOME"
 export WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1
 
 SMOKE_LOG="$XDG_RUNTIME_DIR/woodland.log"
-SMOKE_FLAGS="--self-check --trace"
-comp_pid=""
 probe_pid=""
 SOCK=""
 TREE=""
@@ -39,30 +37,11 @@ smoke_cleanup() {
         kill -KILL "$probe_pid" 2>/dev/null || true
         probe_pid=""
     fi
-    if [ -n "$comp_pid" ]; then
-        kill -TERM "$comp_pid" 2>/dev/null || true
-        i=0
-        while kill -0 "$comp_pid" 2>/dev/null && [ "$i" -lt 50 ]; do
-            sleep 0.1; i=$((i+1))
-        done
-        kill -KILL "$comp_pid" 2>/dev/null || true
-        wait "$comp_pid" 2>/dev/null || true
-    fi
+    smoke_stop_compositor
     rm -rf "$XDG_RUNTIME_DIR"
 }
 
-"$BIN" --self-check --trace >"$SMOKE_LOG" 2>&1 &
-comp_pid=$!
-
-i=0
-while [ "$i" -lt 100 ]; do
-    for f in "$XDG_RUNTIME_DIR"/woodland-*.sock; do
-        [ -S "$f" ] && SOCK="$f"
-    done
-    [ -n "$SOCK" ] && break
-    sleep 0.05; i=$((i+1))
-done
-[ -n "$SOCK" ] || smoke_fail "debug socket never appeared"
+smoke_start_compositor --self-check --trace
 
 wait_view_count() {
     "$WCTL" -s "$SOCK" -t 5000 wait view_count count="$1" >/dev/null 2>&1

@@ -23,41 +23,16 @@ mkdir -p "$XDG_CONFIG_HOME"
 export WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1
 
 SMOKE_LOG="$XDG_RUNTIME_DIR/woodland.log"
-SMOKE_FLAGS="--debug-ctl --self-check --trace"
-comp_pid=""
 client_pid=""
 
 smoke_cleanup() {
-    if [ -n "$client_pid" ]; then
-        kill -TERM "$client_pid" 2>/dev/null || true
-        wait "$client_pid" 2>/dev/null || true
-        client_pid=""
-    fi
-    if [ -n "$comp_pid" ]; then
-        kill -TERM "$comp_pid" 2>/dev/null || true
-        i=0
-        while kill -0 "$comp_pid" 2>/dev/null && [ "$i" -lt 50 ]; do
-            sleep 0.1; i=$((i+1))
-        done
-        kill -KILL "$comp_pid" 2>/dev/null || true
-        wait "$comp_pid" 2>/dev/null || true
-        comp_pid=""
-    fi
+    smoke_stop_pid "$client_pid" 10
+    client_pid=""
+    smoke_stop_compositor
     rm -rf "$XDG_RUNTIME_DIR"
 }
 
-"$BIN" --debug-ctl --self-check --trace >"$SMOKE_LOG" 2>&1 &
-comp_pid=$!
-
-i=0
-while [ "$(ls "$XDG_RUNTIME_DIR/" 2>/dev/null | grep -c '^wayland-')" -eq 0 ] && [ "$i" -lt 100 ]; do
-    sleep 0.05; i=$((i+1))
-done
-socket_name="$(ls "$XDG_RUNTIME_DIR/" 2>/dev/null | grep '^wayland-' | head -1)"
-[ -n "$socket_name" ] || smoke_fail "wayland socket did not appear"
-export WAYLAND_DISPLAY="$socket_name"
-
-smoke_wait_socket 100 || smoke_fail "debug socket never appeared"
+smoke_start_compositor --debug-ctl --self-check --trace
 
 "$CLIENT" >"$XDG_RUNTIME_DIR/client.log" 2>&1 &
 client_pid=$!
@@ -139,6 +114,29 @@ echo "$SC_VIEW" | jq -e \
      and .match.expected_hex == "#333333"
      and .match.ratio_milli >= 950' >/dev/null \
     || smoke_fail "client screenshot assertion failed: $SC_VIEW"
+
+echo "== 7b. screenshot --output and --dump-ppm =="
+SC_OUT="$("$WCTL" -s "$SOCK" screenshot --output HEADLESS-1)" \
+    || smoke_fail "screenshot --output HEADLESS-1 failed: ${SC_OUT:-}"
+echo "$SC_OUT" | jq -e '.ok == true and .output == "HEADLESS-1"' >/dev/null \
+    || smoke_fail "unexpected screenshot --output result: $SC_OUT"
+rc=0
+SC_BAD="$("$WCTL" -s "$SOCK" screenshot --output NO-SUCH-OUTPUT 2>&1)" || rc=$?
+[ "$rc" -ne 0 ] && echo "$SC_BAD" | jq -e '.ok == false' >/dev/null \
+    || smoke_fail "screenshot --output NO-SUCH-OUTPUT should fail: $SC_BAD"
+
+PPM_PATH="$XDG_RUNTIME_DIR/crop.ppm"
+SC_PPM="$("$WCTL" -s "$SOCK" screenshot --region "${content_x},${content_y},64,64" --dump-ppm "$PPM_PATH")" \
+    || smoke_fail "screenshot --dump-ppm failed: ${SC_PPM:-}"
+echo "$SC_PPM" | jq -e --arg p "$PPM_PATH" '.ok == true and .dumped_ppm == $p' >/dev/null \
+    || smoke_fail "unexpected --dump-ppm result: $SC_PPM"
+[ -s "$PPM_PATH" ] || smoke_fail "dumped ppm file missing: $PPM_PATH"
+head -n 3 "$PPM_PATH" | tr '\n' ' ' | grep -q '^P6 64 64 255 ' \
+    || smoke_fail "unexpected PPM header in $PPM_PATH"
+ppm_size="$(wc -c < "$PPM_PATH")"
+hdr_size="$(head -n 3 "$PPM_PATH" | wc -c)"
+[ "$((ppm_size - hdr_size))" -eq $((64 * 64 * 3)) ] \
+    || smoke_fail "unexpected PPM payload size: $ppm_size - $hdr_size"
 
 echo "== 8. move + wait pixel =="
 "$WCTL" -s "$SOCK" move 1 400 200 | jq -e '.ok == true' >/dev/null \

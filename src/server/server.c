@@ -508,6 +508,10 @@ bool woodland_server_start(struct woodland_server *server)
 
     setenv("WAYLAND_DISPLAY", socket, true);
 
+    if (server->debug_ctl && !woodland_seat_init_debug_keyboard(server)) {
+        wlr_log(WLR_ERROR, "failed to init debug virtual keyboard");
+    }
+
     /* 调试接口：路径按 wayland socket 名派生，并导出 WOODLAND_IPC。
      * 起不来只记日志——调试面挂了不该影响合成器本身。 */
     if (!woodland_ipc_init(server, socket)) {
@@ -574,6 +578,7 @@ void woodland_server_finish(struct woodland_server *server)
 #endif
     woodland_selfcheck_finish(server);
     woodland_ipc_finish(server);
+    woodland_seat_finish_debug_keyboard(server);
     /* 协议层摘掉挂在 cursor/seat/output_layout 上的监听器，
      * 必须早于这些对象被销毁 */
     woodland_protocol_finish(server);
