@@ -239,7 +239,7 @@ static bool parse_u32_str(const char *s, uint32_t *out)
     return true;
 }
 
-static uint64_t monotonic_ms(void)
+uint64_t woodland_ipc_monotonic_ms(void)
 {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -271,10 +271,6 @@ static bool parse_view_kv(struct wait_view_filter *f, const char *k, const char 
         f->has_app_id = true;
         return true;
     }
-    if (!allow_full_attrs) {
-        snprintf(err, err_cap, "unknown parameter '%s'", k);
-        return false;
-    }
     if (strcmp(k, "kind") == 0) {
         if (strcmp(v, "xdg") == 0) {
             f->kind = WOODLAND_VIEW_XDG;
@@ -286,6 +282,10 @@ static bool parse_view_kv(struct wait_view_filter *f, const char *k, const char 
         }
         f->has_kind = true;
         return true;
+    }
+    if (!allow_full_attrs) {
+        snprintf(err, err_cap, "unknown parameter '%s'", k);
+        return false;
     }
     if (strcmp(k, "workspace") == 0) {
         snprintf(f->workspace, sizeof(f->workspace), "%s", v);
@@ -400,7 +400,7 @@ bool woodland_ipc_wait_parse(const char *args, struct woodland_ipc_wait **out_wa
     w->cond_name = canonical;
     w->timeout_ms = WAIT_DEFAULT_TIMEOUT_MS;
     w->tolerance = 2;
-    w->start_ms = monotonic_ms();
+    w->start_ms = woodland_ipc_monotonic_ms();
 
     char tok[192];
     while ((p = woodland_ipc_next_token(p, tok, sizeof(tok))) != NULL) {
@@ -643,6 +643,11 @@ bool woodland_ipc_wait_parse(const char *args, struct woodland_ipc_wait **out_wa
             free(w);
             return false;
         }
+        if (w->has_min && w->has_max && w->min > w->max) {
+            snprintf(err, err_cap, "min cannot exceed max");
+            free(w);
+            return false;
+        }
         break;
     case WAIT_FOCUS:
         if (w->has_none && w->none &&
@@ -694,6 +699,33 @@ bool woodland_ipc_wait_parse(const char *args, struct woodland_ipc_wait **out_wa
     }
 
     *out_wait = w;
+    return true;
+}
+
+bool woodland_ipc_wait_validate_runtime(const struct woodland_server *server,
+                                        const struct woodland_ipc_wait *wait,
+                                        char *err, size_t err_cap)
+{
+    if (!wait) {
+        snprintf(err, err_cap, "invalid wait state");
+        return false;
+    }
+    switch (wait->kind) {
+    case WAIT_TRACE:
+        if (!woodland_trace_enabled()) {
+            snprintf(err, err_cap, "trace is disabled (start with --trace)");
+            return false;
+        }
+        break;
+    case WAIT_PIXEL:
+        if (!server || !server->scene || !server->renderer || !server->output_layout) {
+            snprintf(err, err_cap, "renderer or output layout unavailable");
+            return false;
+        }
+        break;
+    default:
+        break;
+    }
     return true;
 }
 
@@ -985,16 +1017,7 @@ bool woodland_ipc_wait_eval(struct woodland_server *server,
         if (!woodland_ipc_sample_pixel(server, wait->x, wait->y, rgba, err, sizeof(err))) {
             return true;
         }
-        int er = (int)((wait->hex_rgb >> 16) & 0xFF);
-        int eg = (int)((wait->hex_rgb >> 8) & 0xFF);
-        int eb = (int)(wait->hex_rgb & 0xFF);
-        int dr = abs((int)rgba[0] - er);
-        int dg = abs((int)rgba[1] - eg);
-        int db = abs((int)rgba[2] - eb);
-        int delta = dr > dg ? dr : dg;
-        if (db > delta) {
-            delta = db;
-        }
+        int delta = woodland_ipc_rgb_delta(rgba, wait->hex_rgb);
         if (delta > wait->tolerance) {
             return true;
         }
@@ -1065,6 +1088,16 @@ bool woodland_ipc_cmd_wait_sync(struct woodland_server *server, const char *args
         woodland_json_obj_str(&obj, "cmd", "wait");
         woodland_json_obj_str(&obj, "error", err);
         woodland_json_obj_close(&obj);
+        return false;
+    }
+    if (!woodland_ipc_wait_validate_runtime(server, wait, err, sizeof(err))) {
+        struct woodland_json_obj obj;
+        woodland_json_obj_open(&obj, out);
+        woodland_json_obj_bool(&obj, "ok", false);
+        woodland_json_obj_str(&obj, "cmd", "wait");
+        woodland_json_obj_str(&obj, "error", err);
+        woodland_json_obj_close(&obj);
+        woodland_ipc_wait_free(wait);
         return false;
     }
 

@@ -30,6 +30,22 @@ static void test_next_token(void) {
 
     p = woodland_ipc_next_token(p, tok, sizeof(tok));
     assert(p == NULL);
+
+    /* 空引号参数（title="" / ""） */
+    p = "  title=\"\"  \"\" ";
+    p = woodland_ipc_next_token(p, tok, sizeof(tok));
+    assert(p != NULL && strcmp(tok, "title=") == 0);
+    p = woodland_ipc_next_token(p, tok, sizeof(tok));
+    assert(p != NULL && strcmp(tok, "") == 0);
+    assert(woodland_ipc_next_token(p, tok, sizeof(tok)) == NULL);
+}
+
+static void test_rgb_delta(void) {
+    uint8_t px[4] = {100, 150, 200, 255};
+    assert(woodland_ipc_rgb_delta(px, 0x6496c8u) == 0);
+    assert(woodland_ipc_rgb_delta(px, 0x6296c8u) == 2);
+    assert(woodland_ipc_rgb_delta(px, 0x6491c8u) == 5);
+    assert(woodland_ipc_rgb_delta(px, 0x6496ffu) == 55);
 }
 
 static void test_parse_hex_rgb(void) {
@@ -62,6 +78,7 @@ static bool dispatch_cmd(struct woodland_server *server, const char *line, char 
 int main(void) {
     test_next_token();
     test_parse_hex_rgb();
+    test_rgb_delta();
 
     struct woodland_server server = {0};
     wl_list_init(&server.views);
@@ -94,6 +111,7 @@ int main(void) {
     assert(!dispatch_cmd(&server, "screenshot --tolerance 999", buf, sizeof(buf)));
     assert(!dispatch_cmd(&server, "screenshot --bogus", buf, sizeof(buf)));
     assert(!dispatch_cmd(&server, "screenshot 0 0 0 10", buf, sizeof(buf)));
+    assert(!dispatch_cmd(&server, "screenshot --region 2147483640,0,100,100", buf, sizeof(buf)));
     assert(!dispatch_cmd(&server, "screenshot", buf, sizeof(buf)));
     assert(strstr(buf, "\"cmd\":\"screenshot\"") != NULL);
 
@@ -102,9 +120,17 @@ int main(void) {
     assert(!dispatch_cmd(&server, "wait unknown_cond", buf, sizeof(buf)));
     assert(!dispatch_cmd(&server, "wait view_mapped bogus=1", buf, sizeof(buf)));
     assert(!dispatch_cmd(&server, "wait view_count", buf, sizeof(buf)));
+    assert(!dispatch_cmd(&server, "wait view_count min=5 max=2", buf, sizeof(buf)));
     assert(!dispatch_cmd(&server, "wait workspace", buf, sizeof(buf)));
     assert(!dispatch_cmd(&server, "wait pixel x=1 y=2 hex=bad", buf, sizeof(buf)));
     assert(!dispatch_cmd(&server, "wait trace what=action timeout=0", buf, sizeof(buf)));
+
+    /* 未开 --trace 时 wait trace 应立即明确报错 */
+    assert(!dispatch_cmd(&server, "wait trace what=action", buf, sizeof(buf)));
+    assert(strstr(buf, "trace is disabled") != NULL);
+
+    assert(dispatch_cmd(&server, "wait view_unmapped kind=x11", buf, sizeof(buf)));
+    assert(strstr(buf, "\"matched\":true") != NULL);
 
     assert(dispatch_cmd(&server, "wait view_count count=0", buf, sizeof(buf)));
     assert(strstr(buf, "\"ok\":true") != NULL);

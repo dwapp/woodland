@@ -182,14 +182,19 @@ static bool append_escaped_str(char *buf, size_t cap, int *pos, const char *s) {
     return true;
 }
 
-static bool append_arg(char *buf, size_t cap, int *pos, const char *arg) {
+static bool append_arg(char *buf, size_t cap, int *pos, const char *arg,
+                       bool *bad_newline) {
+    if (strpbrk(arg, "\r\n") != NULL) {
+        *bad_newline = true;
+        return false;
+    }
     if (*pos < 0 || *pos + 2 >= (int)cap) {
         return false;
     }
     buf[(*pos)++] = ' ';
 
-    bool has_space = strchr(arg, ' ') != NULL || strchr(arg, '\t') != NULL;
-    if (!has_space) {
+    bool needs_quote = (arg[0] == '\0' || strpbrk(arg, " \t\"\\") != NULL);
+    if (!needs_quote) {
         int more = snprintf(buf + *pos, cap - (size_t)*pos, "%s", arg);
         if (more < 0 || *pos + more >= (int)cap) {
             return false;
@@ -203,7 +208,7 @@ static bool append_arg(char *buf, size_t cap, int *pos, const char *arg) {
     if (eq && eq > arg) {
         key_eq_val = true;
         for (const char *p = arg; p < eq; p++) {
-            if (*p == ' ' || *p == '\t') {
+            if (*p == ' ' || *p == '\t' || *p == '"' || *p == '\\') {
                 key_eq_val = false;
                 break;
             }
@@ -211,14 +216,24 @@ static bool append_arg(char *buf, size_t cap, int *pos, const char *arg) {
     }
 
     if (key_eq_val) {
+        const char *val = eq + 1;
+        bool val_needs_quote = (val[0] == '\0' || strpbrk(val, " \t\"\\") != NULL);
+        if (!val_needs_quote) {
+            int more = snprintf(buf + *pos, cap - (size_t)*pos, "%s", arg);
+            if (more < 0 || *pos + more >= (int)cap) {
+                return false;
+            }
+            *pos += more;
+            return true;
+        }
         size_t klen = (size_t)(eq - arg) + 1;
-        if (*pos + (int)klen + 2 >= (int)cap) {
+        if (klen >= cap || *pos + (int)klen + 2 >= (int)cap) {
             return false;
         }
         memcpy(buf + *pos, arg, klen);
         *pos += (int)klen;
         buf[(*pos)++] = '"';
-        if (!append_escaped_str(buf, cap, pos, eq + 1)) {
+        if (!append_escaped_str(buf, cap, pos, val)) {
             return false;
         }
         if (*pos + 1 >= (int)cap) {
@@ -228,6 +243,9 @@ static bool append_arg(char *buf, size_t cap, int *pos, const char *arg) {
         return true;
     }
 
+    if (*pos + 2 >= (int)cap) {
+        return false;
+    }
     buf[(*pos)++] = '"';
     if (!append_escaped_str(buf, cap, pos, arg)) {
         return false;
@@ -327,22 +345,28 @@ int main(int argc, char *argv[]) {
 
     /* 命令名后面的参数原样拼进同一行（写命令：move 3 100 200）。
      * 容量按"够用且有上限"定：超出就拒发，不发被截断的半条命令 */
-    char request[256];
+    char request[1024];
+    bool bad_newline = strpbrk(cmd, "\r\n") != NULL;
     int request_len = snprintf(request, sizeof(request), "%s", cmd);
-    bool arg_ok = request_len >= 0 && (size_t)request_len < sizeof(request);
+    bool arg_ok = !bad_newline && request_len >= 0 && (size_t)request_len < sizeof(request);
     for (int i = optind + 1; arg_ok && i < argc; i++) {
-        arg_ok = append_arg(request, sizeof(request), &request_len, argv[i]);
+        arg_ok = append_arg(request, sizeof(request), &request_len, argv[i], &bad_newline);
     }
     if (arg_ok && is_wait && !has_wait_timeout) {
         char tbuf[32];
         snprintf(tbuf, sizeof(tbuf), "timeout=%d", wait_timeout_ms);
-        arg_ok = append_arg(request, sizeof(request), &request_len, tbuf);
+        arg_ok = append_arg(request, sizeof(request), &request_len, tbuf, &bad_newline);
     }
     if (arg_ok && request_len >= 0 && (size_t)request_len + 2 <= sizeof(request)) {
         request[request_len++] = '\n';
         request[request_len] = '\0';
     } else {
-        request_len = (int)sizeof(request);   /* 触发下面的"过长"分支 */
+        request_len = (int)sizeof(request);   /* 触发下面的错误分支 */
+    }
+    if (bad_newline) {
+        fprintf(stderr, "wctl: command arguments cannot contain newlines\n");
+        close(fd);
+        return 2;
     }
     /* snprintf 返回"本来要写多少"，截断时它会大于缓冲：直接拿去 write
      * 会从栈上读出去，把后面的内存发给对端 */
@@ -370,7 +394,7 @@ int main(int argc, char *argv[]) {
             }
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 fprintf(stderr, "wctl: timed out after %d ms waiting for reply\n",
-                        timeout_ms);
+                        read_timeout_ms);
             } else {
                 fprintf(stderr, "wctl: read failed: %s\n", strerror(errno));
             }

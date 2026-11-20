@@ -169,9 +169,36 @@ static bool sample_output_region(struct woodland_server *server,
         wo = first_enabled_output(server);
         wlr_output = wo ? wo->wlr_output : NULL;
     } else {
+        if ((int64_t)req_box->x + (int64_t)req_box->width > INT32_MAX ||
+            (int64_t)req_box->y + (int64_t)req_box->height > INT32_MAX ||
+            (int64_t)req_box->x + (int64_t)req_box->width < INT32_MIN ||
+            (int64_t)req_box->y + (int64_t)req_box->height < INT32_MIN) {
+            snprintf(err, err_cap, "region coordinates overflow");
+            return false;
+        }
         wlr_output = wlr_output_layout_output_at(server->output_layout,
                                                  (double)req_box->x, (double)req_box->y);
         wo = find_output_wrapper(server, wlr_output);
+        if ((!wo || !wlr_output || !wo->scene_output || !wlr_output->enabled ||
+             !wlr_output->renderer) &&
+            server->outputs.next) {
+            struct woodland_output *cand;
+            wl_list_for_each(cand, &server->outputs, link) {
+                if (!cand->wlr_output || !cand->wlr_output->enabled ||
+                    !cand->scene_output || !cand->wlr_output->renderer) {
+                    continue;
+                }
+                struct wlr_box cand_box = {0};
+                wlr_output_layout_get_box(server->output_layout, cand->wlr_output, &cand_box);
+                struct wlr_box tmp = {0};
+                if (wlr_box_intersection(&tmp, req_box, &cand_box) &&
+                    tmp.width > 0 && tmp.height > 0) {
+                    wo = cand;
+                    wlr_output = cand->wlr_output;
+                    break;
+                }
+            }
+        }
     }
 
     if (!wo || !wlr_output || !wo->scene_output || !wlr_output->enabled ||
@@ -324,6 +351,11 @@ static unsigned float_to_byte(float v)
     return (unsigned)(v * 255.0f + 0.5f);
 }
 
+static bool rect_is_opaque(const struct wlr_scene_rect *rect)
+{
+    return rect->color[3] >= 0.999f;
+}
+
 static uint32_t rect_color_rgb(const struct wlr_scene_rect *rect)
 {
     return (float_to_byte(rect->color[0]) << 16) |
@@ -331,7 +363,22 @@ static uint32_t rect_color_rgb(const struct wlr_scene_rect *rect)
            float_to_byte(rect->color[2]);
 }
 
-static int max_rgb_delta(const uint8_t rgba[4], uint32_t expected_rgb)
+static bool try_set_rect_expected(struct wlr_scene_node *hit, bool *has_expected,
+                                  uint32_t *expected_rgb)
+{
+    if (hit->type != WLR_SCENE_NODE_RECT) {
+        return false;
+    }
+    const struct wlr_scene_rect *rect = wlr_scene_rect_from_node(hit);
+    if (!rect_is_opaque(rect)) {
+        return false;
+    }
+    *has_expected = true;
+    *expected_rgb = rect_color_rgb(rect);
+    return true;
+}
+
+int woodland_ipc_rgb_delta(const uint8_t rgba[4], uint32_t expected_rgb)
 {
     int er = (int)((expected_rgb >> 16) & 0xFF);
     int eg = (int)((expected_rgb >> 8) & 0xFF);
@@ -456,32 +503,22 @@ void woodland_ipc_write_pixel_source(struct woodland_server *server, int lx, int
                 case WOODLAND_SSD_BUTTON_CLOSE:
                     kind = "ssd.button.close";
                     local_src = "ssd.button";
-                    if (hit->type == WLR_SCENE_NODE_RECT) {
-                        local_expected = true;
-                        local_rgb = rect_color_rgb(wlr_scene_rect_from_node(hit));
-                    }
+                    try_set_rect_expected(hit, &local_expected, &local_rgb);
                     break;
                 case WOODLAND_SSD_BUTTON_MAXIMIZE:
                     kind = "ssd.button.maximize";
                     local_src = "ssd.button";
-                    if (hit->type == WLR_SCENE_NODE_RECT) {
-                        local_expected = true;
-                        local_rgb = rect_color_rgb(wlr_scene_rect_from_node(hit));
-                    }
+                    try_set_rect_expected(hit, &local_expected, &local_rgb);
                     break;
                 case WOODLAND_SSD_BUTTON_MINIMIZE:
                     kind = "ssd.button.minimize";
                     local_src = "ssd.button";
-                    if (hit->type == WLR_SCENE_NODE_RECT) {
-                        local_expected = true;
-                        local_rgb = rect_color_rgb(wlr_scene_rect_from_node(hit));
-                    }
+                    try_set_rect_expected(hit, &local_expected, &local_rgb);
                     break;
                 default:
                     kind = "ssd.decoration";
                     if (hit->type == WLR_SCENE_NODE_RECT) {
-                        local_expected = true;
-                        local_rgb = rect_color_rgb(wlr_scene_rect_from_node(hit));
+                        try_set_rect_expected(hit, &local_expected, &local_rgb);
                         local_src = "scene.rect";
                     } else {
                         local_src = "scene.buffer";
@@ -529,8 +566,7 @@ void woodland_ipc_write_pixel_source(struct woodland_server *server, int lx, int
             } else if (server->snap_preview.tree && node_in_tree(hit, server->snap_preview.tree)) {
                 kind = "snap_preview";
                 if (hit->type == WLR_SCENE_NODE_RECT) {
-                    local_expected = true;
-                    local_rgb = rect_color_rgb(wlr_scene_rect_from_node(hit));
+                    try_set_rect_expected(hit, &local_expected, &local_rgb);
                     local_src = "snap_preview.rect";
                 } else {
                     local_src = "snap_preview";
@@ -542,8 +578,7 @@ void woodland_ipc_write_pixel_source(struct woodland_server *server, int lx, int
                        node_in_tree(hit, server->multitask_view->tree)) {
                 kind = "multitask_view";
                 if (hit->type == WLR_SCENE_NODE_RECT) {
-                    local_expected = true;
-                    local_rgb = rect_color_rgb(wlr_scene_rect_from_node(hit));
+                    try_set_rect_expected(hit, &local_expected, &local_rgb);
                     local_src = "multitask_view.rect";
                 } else {
                     local_src = "multitask_view";
@@ -552,8 +587,7 @@ void woodland_ipc_write_pixel_source(struct woodland_server *server, int lx, int
                        node_in_tree(hit, server->window_menu->tree)) {
                 kind = "window_menu";
                 if (hit->type == WLR_SCENE_NODE_RECT) {
-                    local_expected = true;
-                    local_rgb = rect_color_rgb(wlr_scene_rect_from_node(hit));
+                    try_set_rect_expected(hit, &local_expected, &local_rgb);
                     local_src = "window_menu.rect";
                 } else {
                     local_src = "window_menu";
@@ -561,8 +595,7 @@ void woodland_ipc_write_pixel_source(struct woodland_server *server, int lx, int
             } else {
                 kind = "overlay";
                 if (hit->type == WLR_SCENE_NODE_RECT) {
-                    local_expected = true;
-                    local_rgb = rect_color_rgb(wlr_scene_rect_from_node(hit));
+                    try_set_rect_expected(hit, &local_expected, &local_rgb);
                     local_src = "scene.rect";
                 } else {
                     local_src = "scene.buffer";
@@ -587,7 +620,7 @@ void woodland_ipc_write_pixel_source(struct woodland_server *server, int lx, int
     if (local_expected) {
         char ehex[8];
         snprintf(ehex, sizeof(ehex), "#%06x", local_rgb & 0xFFFFFFu);
-        int delta = max_rgb_delta(rgba, local_rgb);
+        int delta = woodland_ipc_rgb_delta(rgba, local_rgb);
         woodland_json_obj_str(&src, "expected_hex", ehex);
         woodland_json_obj_str(&src, "expected_source", local_src);
         woodland_json_obj_bool(&src, "matches_expected", delta <= INSPECT_DEFAULT_TOLERANCE);
@@ -908,7 +941,7 @@ bool woodland_ipc_cmd_screenshot(struct woodland_server *server, const char *arg
             if (top_len == INSPECT_TOP_COLORS) {
                 qsort(top, top_len, sizeof(top[0]), cmp_bucket_desc);
             }
-        } else if (hist.buckets[i].count > top[INSPECT_TOP_COLORS - 1].count) {
+        } else if (cmp_bucket_desc(&hist.buckets[i], &top[INSPECT_TOP_COLORS - 1]) < 0) {
             top[INSPECT_TOP_COLORS - 1] = hist.buckets[i];
             qsort(top, INSPECT_TOP_COLORS, sizeof(top[0]), cmp_bucket_desc);
         }
@@ -1046,7 +1079,7 @@ bool woodland_ipc_cmd_screenshot(struct woodland_server *server, const char *arg
         uint64_t match_count = 0;
         for (uint64_t i = 0; i < total_pixels; i++) {
             const uint8_t *px = sr.pixels + i * 4;
-            if (max_rgb_delta(px, target_rgb) <= tolerance) {
+            if (woodland_ipc_rgb_delta(px, target_rgb) <= tolerance) {
                 match_count++;
             }
         }

@@ -72,10 +72,6 @@ EFFECTS="$("$WCTL" -s "$SOCK" get_tree | jq -r '.effects')"
 # 默认配置是开的，所以这里的期望值写死"画"。"关掉后不长角"由 smoke-bg-effect
 # 的禁用场景覆盖。
 
-view_count() {
-    "$WCTL" -s "$SOCK" get_tree 2>/dev/null | jq -r '.count // -1'
-}
-
 # 等到视图数回到 0（上一个场景的窗口撤干净）
 wait_view_count() {
     "$WCTL" -s "$SOCK" -t 5000 wait view_count count="$1" >/dev/null 2>&1

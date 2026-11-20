@@ -62,11 +62,23 @@ smoke_wait_socket 100 || smoke_fail "debug socket never appeared"
 "$CLIENT" >"$XDG_RUNTIME_DIR/client.log" 2>&1 &
 client_pid=$!
 
-echo "== 1. wait view_mapped =="
-MAP_RES="$("$WCTL" -s "$SOCK" -t 5000 wait view_mapped title=simple-ssd app_id=org.woodland.simple-ssd)" \
+echo "== 1. wait view_mapped (with quoted title) =="
+MAP_RES="$("$WCTL" -s "$SOCK" -t 5000 wait view_mapped "title=simple-ssd" app_id=org.woodland.simple-ssd)" \
     || smoke_fail "wait view_mapped failed: ${MAP_RES:-}"
 echo "$MAP_RES" | jq -e '.ok == true and .matched == true and .view.id == 1' >/dev/null \
     || smoke_fail "unexpected wait view_mapped result: $MAP_RES"
+
+echo "== 1b. wait trace (end-to-end over IPC) =="
+WTRACE="$("$WCTL" -s "$SOCK" -t 2000 wait trace what=map obj=1)" \
+    || smoke_fail "wait trace failed: ${WTRACE:-}"
+echo "$WTRACE" | jq -e '.ok == true and .matched == true and .what == "map" and .obj == 1' >/dev/null \
+    || smoke_fail "unexpected wait trace result: $WTRACE"
+
+echo "== 1c. partially off-output screenshot clipping =="
+SC_CLIP="$("$WCTL" -s "$SOCK" screenshot --region -10,-10,200,200)" \
+    || smoke_fail "clipped screenshot failed: ${SC_CLIP:-}"
+echo "$SC_CLIP" | jq -e '.ok == true and .region == [0, 0, 190, 190]' >/dev/null \
+    || smoke_fail "unexpected clipped screenshot region: $SC_CLIP"
 
 echo "== 2. read geometry & palette =="
 TREE="$("$WCTL" -s "$SOCK" get_tree)" || smoke_fail "get_tree failed"

@@ -82,8 +82,16 @@ static void client_update_events(struct woodland_ipc_client *client) {
     if (!client->source) {
         return;
     }
-    uint32_t mask = (client->out_off < client->out_len) ? WL_EVENT_WRITABLE
-                                                        : WL_EVENT_READABLE;
+    uint32_t mask;
+    if (client->out_off < client->out_len) {
+        mask = WL_EVENT_WRITABLE;
+    } else if (client->wait && client->len >= sizeof(client->buf) - 1) {
+        /* 缓冲满且处于 wait 状态时停掉 READABLE，防止 epoll 水平触发死循环；
+         * EPOLLHUP / EPOLLERR 仍会上报。 */
+        mask = 0;
+    } else {
+        mask = WL_EVENT_READABLE;
+    }
     wl_event_source_fd_update(client->source, mask);
 }
 
@@ -116,12 +124,6 @@ static bool client_send(struct woodland_ipc_client *client,
     memcpy(client->out + client->out_len, data, len);
     client->out_len += len;
     return client_flush(client);
-}
-
-static uint64_t ipc_monotonic_ms(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)ts.tv_nsec / 1000000ULL;
 }
 
 static void client_clear_wait(struct woodland_ipc_client *client) {
@@ -160,7 +162,7 @@ static void ipc_wait_check_client(struct woodland_ipc_client *client) {
         return;
     }
 
-    uint64_t now = ipc_monotonic_ms();
+    uint64_t now = woodland_ipc_monotonic_ms();
     uint64_t start = woodland_ipc_wait_start_ms(client->wait);
     uint64_t elapsed = (now >= start) ? (now - start) : 0;
     int timeout_ms = woodland_ipc_wait_timeout_ms(client->wait);
@@ -270,6 +272,27 @@ static void ipc_on_workspace_changed(struct wl_listener *listener, void *data) {
     ipc_schedule_wait_check(server);
 }
 
+static bool client_send_wait_error(struct woodland_ipc_client *client, const char *err) {
+    struct woodland_json out;
+    woodland_json_init(&out);
+    struct woodland_json_obj obj;
+    woodland_json_obj_open(&obj, &out);
+    woodland_json_obj_bool(&obj, "ok", false);
+    woodland_json_obj_str(&obj, "cmd", "wait");
+    woodland_json_obj_str(&obj, "error", err);
+    woodland_json_obj_close(&obj);
+    if (!woodland_json_ok(&out)) {
+        woodland_json_finish(&out);
+        woodland_json_init(&out);
+        woodland_json_raw(&out, "{\"ok\":false,\"cmd\":\"wait\",\"error\":\"out of memory\"}");
+    }
+    woodland_json_raw(&out, "\n");
+    bool ok = client_send(client, woodland_json_data(&out),
+                          woodland_json_len(&out));
+    woodland_json_finish(&out);
+    return ok;
+}
+
 /* 处理一行命令，返回 false 表示连接不可用需要断开 */
 static bool client_handle_line(struct woodland_ipc_client *client, char *line) {
     /* 去掉尾部空白（含 telnet/nc 带来的 \r） */
@@ -300,24 +323,11 @@ static bool client_handle_line(struct woodland_ipc_client *client, char *line) {
         struct woodland_ipc_wait *wait = NULL;
         char err[128];
         if (!woodland_ipc_wait_parse(start + fn, &wait, err, sizeof(err))) {
-            struct woodland_json out;
-            woodland_json_init(&out);
-            struct woodland_json_obj obj;
-            woodland_json_obj_open(&obj, &out);
-            woodland_json_obj_bool(&obj, "ok", false);
-            woodland_json_obj_str(&obj, "cmd", "wait");
-            woodland_json_obj_str(&obj, "error", err);
-            woodland_json_obj_close(&obj);
-            if (!woodland_json_ok(&out)) {
-                woodland_json_finish(&out);
-                woodland_json_init(&out);
-                woodland_json_raw(&out, "{\"ok\":false,\"cmd\":\"wait\",\"error\":\"out of memory\"}");
-            }
-            woodland_json_raw(&out, "\n");
-            bool ok = client_send(client, woodland_json_data(&out),
-                                  woodland_json_len(&out));
-            woodland_json_finish(&out);
-            return ok;
+            return client_send_wait_error(client, err);
+        }
+        if (!woodland_ipc_wait_validate_runtime(client->server, wait, err, sizeof(err))) {
+            woodland_ipc_wait_free(wait);
+            return client_send_wait_error(client, err);
         }
 
         struct woodland_json out;
@@ -430,6 +440,7 @@ static int client_event(int fd, uint32_t mask, void *data) {
     }
 
     if (client->wait && client->len >= sizeof(client->buf) - 1) {
+        client_update_events(client);
         return 0;
     }
 
