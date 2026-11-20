@@ -1,24 +1,37 @@
 #!/usr/bin/env sh
 # 端到端验证截图链路：headless woodland + weston-simple-shm，
-# 用 lswt 读窗口列表（ext-foreign-toplevel-list-v1），
+# 用自带的 wltop 读窗口列表（ext-foreign-toplevel-list-v1），
 # 用 grim 抓整屏（zwlr_screencopy_v1 / ext-image-copy-capture-v1）、
 # 区域、以及按 identifier 抓单个窗口（ext-foreign-toplevel-image-capture-source-v1）。
 #
-# 用法: sh run_capture_smoke.sh <woodland 二进制路径>
+# 用法: sh run_capture_smoke.sh <woodland 二进制路径> [wltop 二进制路径]
 set -eu
 
 . "$(dirname "$0")/lib.sh"
 smoke_init capture
 
 BIN="${1:-./build/src/woodland}"
+WLTOP="${2:-./build/tests/wltop}"
 [ -x "$BIN" ] || { echo "binary not found: $BIN" >&2; exit 125; }
 
-for tool in grim lswt weston-simple-shm file; do
+for tool in grim weston-simple-shm file; do
     command -v "$tool" >/dev/null 2>&1 || {
         echo "$tool not found, skip capture smoke" >&2
         exit 77
     }
 done
+# toplevel 列举客户端：优先用 meson 传进来的仓库自带 wltop；手动调用时允许
+# 退回 PATH 里的 wltop，最后才是外部 lswt（兼容旧的调用方式）。
+if [ -x "$WLTOP" ]; then
+    TOPLEVEL_TOOL="$WLTOP"
+elif command -v wltop >/dev/null 2>&1; then
+    TOPLEVEL_TOOL="$(command -v wltop)"
+elif command -v lswt >/dev/null 2>&1; then
+    TOPLEVEL_TOOL="$(command -v lswt)"
+else
+    echo "wltop (or lswt) not found, skip capture smoke" >&2
+    exit 77
+fi
 
 unset WAYLAND_DISPLAY
 export XDG_RUNTIME_DIR="$(mktemp -d)"
@@ -61,16 +74,16 @@ export WAYLAND_DISPLAY="$socket_name"
 weston-simple-shm >"$WORK/client.log" 2>&1 &
 client_pid=$!
 
-# 协议是异步的：轮询 lswt 直到窗口出现在列表里
+# 协议是异步的：轮询 wltop 直到窗口出现在列表里
 toplevels=""
 i=0
 while [ "$i" -lt 50 ]; do
-    toplevels="$(lswt -j 2>/dev/null || true)"
+    toplevels="$("$TOPLEVEL_TOOL" -j 2>/dev/null || true)"
     echo "$toplevels" | grep -q 'simple-shm' && break
     sleep 0.1; i=$((i+1))
 done
 echo "$toplevels" | grep -q 'org.freedesktop.weston.simple-shm' || {
-    echo "lswt did not list the weston-simple-shm toplevel:" >&2
+    echo "wltop did not list the weston-simple-shm toplevel:" >&2
     echo "$toplevels" >&2
     exit 1
 }
@@ -99,7 +112,7 @@ size="$(png_size "$WORK/region.png")"
 identifier="$(echo "$toplevels" \
     | sed -n 's/.*"identifier": "\([^"]*\)".*/\1/p' | head -1)"
 if [ -z "$identifier" ]; then
-    echo "no toplevel identifier in lswt output" >&2
+    echo "no toplevel identifier in wltop output" >&2
     exit 1
 fi
 grim -T "$identifier" "$WORK/toplevel.png"

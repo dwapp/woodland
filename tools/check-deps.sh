@@ -139,8 +139,8 @@ check_tool "wlr-randr" "optional" "smoke-output-mgmt" \
     "Arch: wlr-randr | Debian: wlr-randr"
 check_tool "grim" "optional" "smoke-capture,smoke-xwayland,failure-screenshots" \
     "Arch: grim | Debian: grim"
-check_tool "lswt" "optional" "smoke-capture,smoke-xwayland" \
-    "Arch: AUR lswt (https://git.sr.ht/~leon_plickat/lswt)"
+# toplevel 列举由仓库自带的 wltop（tests/smoke/wltop.c）提供，不再是外部依赖；
+# 这里不再检查 lswt。仅当手动以旧方式调用脚本且两者都缺时脚本才会 SKIP。
 check_tool "weston-simple-shm" "optional" "smoke-capture" \
     "Arch: weston | Debian: weston"
 check_tool "file" "optional" "smoke-capture,smoke-xwayland" \

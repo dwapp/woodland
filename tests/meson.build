@@ -9,6 +9,29 @@ if get_option('test').enabled()
   endif
   subdir('unit')
 
+  # wltop：仓库自带的 toplevel 列举客户端，取代外部 lswt（capture/xwayland
+  # 冒烟要用它读 ext-foreign-toplevel-list-v1，拿到 app_id 与 identifier）。
+  # 过去这两个用例因本机没装 lswt 而 SKIP；自带客户端后不再依赖发行版打包。
+  ext_ftl_xml = wp_datadir / 'staging' / 'ext-foreign-toplevel-list' / 'ext-foreign-toplevel-list-v1.xml'
+  wltop_bin = disabler()
+  wltop_arg = []
+  if wayland_client_dep.found() and wp_dep.found() and wayland_scanner.found() and fs.exists(ext_ftl_xml)
+    wltop_bin = executable('wltop',
+      [
+        'smoke/wltop.c',
+        custom_target('wltop-ext-ftl-client-header',
+          input: ext_ftl_xml,
+          output: 'ext-foreign-toplevel-list-v1-client-protocol.h',
+          command: [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@']),
+        custom_target('wltop-ext-ftl-client-code',
+          input: ext_ftl_xml,
+          output: 'ext-foreign-toplevel-list-v1-protocol.c',
+          command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@']),
+      ],
+      dependencies: [wayland_client_dep])
+    wltop_arg = [wltop_bin.full_path()]
+  endif
+
   # Xwayland 冒烟用的小客户端：建一个 override-redirect 窗口
   xcb_dep = dependency('xcb', required: false)
   xoverride_bin = disabler()
@@ -53,7 +76,7 @@ if get_option('test').enabled()
   test('smoke-capture',
        find_program('sh'),
        args: [meson.current_source_dir() / 'smoke' / 'run_capture_smoke.sh',
-              woodland_bin.full_path()],
+              woodland_bin.full_path()] + wltop_arg,
        suite: ['smoke'],
        is_parallel: false,
        timeout: 60)
@@ -376,7 +399,7 @@ if get_option('test').enabled()
                 woodland_bin.full_path(),
                 xoverride_bin.full_path(),
                 # 标题栏底色的期望值由合成器自报（ssd.palette），脚本不再抄常量
-                wctl_bin.full_path()],
+                wctl_bin.full_path()] + wltop_arg,
          suite: ['smoke', 'xwayland'],
          is_parallel: false,
          timeout: 90)
