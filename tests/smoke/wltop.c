@@ -31,6 +31,7 @@
  *   77 ext-foreign-toplevel-list-v1 is not advertised (treat as SKIP)
  */
 #define _GNU_SOURCE
+#include <errno.h>
 #include <poll.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -194,7 +195,13 @@ static void registry_global(void *data, struct wl_registry *reg, uint32_t name,
 {
     (void)data;
     if (strcmp(interface, ext_foreign_toplevel_list_v1_interface.name) == 0) {
-        uint32_t v = version < 1 ? 1 : version;
+        /* Never bind a version newer than the generated bindings understand;
+         * otherwise the compositor could send events we cannot demarshal. */
+        uint32_t supported = (uint32_t)ext_foreign_toplevel_list_v1_interface.version;
+        uint32_t v = version < supported ? version : supported;
+        if (v < 1) {
+            v = 1;
+        }
         list = wl_registry_bind(reg, name, &ext_foreign_toplevel_list_v1_interface, v);
         ext_foreign_toplevel_list_v1_add_listener(list, &list_listener, NULL);
     }
@@ -236,17 +243,30 @@ static bool matches_wait(const struct toplevel *t)
            strcmp(t->app_id, wait_app_id) == 0;
 }
 
-static int count_ready(void)
+/* A toplevel is part of the printable snapshot only when its properties are
+ * complete. With --wait-for, restrict output to the requested app_id so the
+ * printed result agrees with the exit status (a miss prints an empty array). */
+static bool should_print(const struct toplevel *t)
 {
-    int n = 0;
+    if (!t->done || t->closed) {
+        return false;
+    }
+    if (wait_app_id && (!t->app_id || strcmp(t->app_id, wait_app_id) != 0)) {
+        return false;
+    }
+    return true;
+}
+
+static bool any_printable(void)
+{
     struct toplevel *t;
     wl_list_for_each(t, &toplevels, link)
     {
-        if (t->done && !t->closed) {
-            n++;
+        if (should_print(t)) {
+            return true;
         }
     }
-    return n;
+    return false;
 }
 
 static bool any_match(void)
@@ -261,8 +281,12 @@ static bool any_match(void)
     return false;
 }
 
-/* Drive the event loop until all handles have received `done` (a stable
- * snapshot) or the deadline passes. Returns 0 on success, -1 on error. */
+/* Drive the event loop until the initial `finished` burst has been pumped
+ * (wlroots sends every handle's details + `done` before `finished`, so this is
+ * a complete snapshot) and, in --wait-for mode, the target has shown up — or
+ * the deadline passes. Using `finished` rather than "any handle ready" avoids
+ * emitting a partial snapshot on compositors that deliver events in batches.
+ * Returns 0 on success, -1 on error. */
 static int settle(long deadline_ms)
 {
     for (;;) {
@@ -285,10 +309,7 @@ static int settle(long deadline_ms)
         if (wl_display_dispatch_pending(display) < 0 || wl_display_get_error(display) != 0) {
             return -1;
         }
-        if (list_done || count_ready() > 0) {
-            return 0;
-        }
-        if (now_ms() >= deadline_ms) {
+        if ((list_done && (!wait_app_id || any_match())) || now_ms() >= deadline_ms) {
             return 0;
         }
     }
@@ -302,7 +323,7 @@ static void print_snapshot(void)
         bool first = true;
         wl_list_for_each(t, &toplevels, link)
         {
-            if (!t->done || t->closed) {
+            if (!should_print(t)) {
                 continue;
             }
             printf("%s\n  {\n    \"app_id\": ", first ? "" : ",");
@@ -325,7 +346,7 @@ static void print_snapshot(void)
         }
         wl_list_for_each(t, &toplevels, link)
         {
-            if (!t->done || t->closed) {
+            if (!should_print(t)) {
                 continue;
             }
             printf("%-28.28s %-32.32s %s\n", t->app_id ? t->app_id : "-",
@@ -353,7 +374,15 @@ int main(int argc, char *argv[])
             wait_app_id = argv[++i];
         } else if ((strcmp(argv[i], "-t") == 0 || strcmp(argv[i], "--timeout") == 0) &&
                    i + 1 < argc) {
-            timeout_ms = atoi(argv[++i]);
+            const char *arg = argv[++i];
+            char *end;
+            errno = 0;
+            long ms = strtol(arg, &end, 10);
+            if (errno != 0 || end == arg || *end != '\0' || ms < 0 || ms > 3600000) {
+                fprintf(stderr, "wltop: invalid timeout: %s\n", arg);
+                return 1;
+            }
+            timeout_ms = (int)ms;
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             puts("usage: wltop [-j|--json] [-1|--one] [-q|--quiet]\n"
                  "             [--wait-for APP_ID] [-t|--timeout MS]\n"
@@ -389,29 +418,19 @@ int main(int argc, char *argv[])
     }
 
     long deadline = now_ms() + (wait_app_id ? timeout_ms : 500);
-    for (;;) {
-        if (settle(deadline) != 0) {
-            fprintf(stderr, "wltop: display error while collecting toplevels\n");
-            toplevels_clear();
-            ext_foreign_toplevel_list_v1_destroy(list);
-            wl_registry_destroy(registry);
-            wl_display_disconnect(display);
-            return 1;
-        }
-        if (!wait_app_id || any_match() || now_ms() >= deadline) {
-            break;
-        }
-        /* Still waiting: the compositor may map a toplevel a moment later.
-         * Keep pumping with roundtrips so new toplevel events arrive. */
-        if (wl_display_roundtrip(display) < 0) {
-            break;
-        }
+    if (settle(deadline) != 0) {
+        fprintf(stderr, "wltop: display error while collecting toplevels\n");
+        toplevels_clear();
+        ext_foreign_toplevel_list_v1_destroy(list);
+        wl_registry_destroy(registry);
+        wl_display_disconnect(display);
+        return 1;
     }
 
-    /* --wait-for: success means the requested app_id showed up; a snapshot
-     * with other windows still present is a miss. Without it, any toplevel
-     * makes the snapshot a success. */
-    int rc = wait_app_id ? (any_match() ? 0 : 1) : (count_ready() > 0 ? 0 : 1);
+    /* Exit status agrees with what print_snapshot() emits: success means at
+     * least one toplevel was actually printed (the requested one under
+     * --wait-for). */
+    int rc = any_printable() ? 0 : 1;
     print_snapshot();
 
     toplevels_clear();
