@@ -34,9 +34,16 @@ if wlroots_sub.found() and wlroots.type_name() == 'internal'
   )
 endif
 
-# scenefx（随 effects 选项，默认启用；关闭时走 wlroots 直出，wrap 文件保留作占位）
-scenefx = dependency('scenefx-0.5', fallback: 'scenefx',
-                     required: get_option('effects'))
+# scenefx must match wlroots' build source: both subprojects or both system
+# libs. Mixing them (wlroots subproject + system scenefx) reverses the link
+# order and the shared wlr_scene_* symbols bind to wlroots' smaller struct,
+# so scenefx's set_blur_data writes OOB and crashes on first output.
+if get_option('effects').enabled() and wlroots.type_name() == 'internal'
+  scenefx_sub = subproject('scenefx', default_options: ['examples=false'])
+  scenefx = scenefx_sub.get_variable('scenefx')
+else
+  scenefx = dependency('scenefx-0.5', required: get_option('effects'))
+endif
 
 wayland_server = dependency('wayland-server')
 # woodland-shortcutd 是同一个 libwayland 包里的客户端库，装 wayland-server
