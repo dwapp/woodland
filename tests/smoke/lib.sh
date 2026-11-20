@@ -54,7 +54,7 @@ _smoke_exit() {
     # INT/TERM 之后还会触发 EXIT，只处理一次
     [ "$SMOKE_EXITING" = 1 ] && return 0
     SMOKE_EXITING=1
-    if [ "$_rc" -ne 0 ]; then
+    if [ "$_rc" -ne 0 ] && [ "$_rc" -ne 77 ]; then
         smoke_dump "$_rc"
     fi
     smoke_cleanup

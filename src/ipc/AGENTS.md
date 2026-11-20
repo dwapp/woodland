@@ -4,7 +4,9 @@
 
 `src/ipc` 负责为 `wctl` 调试工具提供 Unix Domain Socket 通信与 JSON 协议分发：
 - `src/ipc/ipc.c`：Socket 创建（`$XDG_RUNTIME_DIR/woodland-<socket>.sock`）、客户端连接管理与文本行解析。
-- `src/ipc/commands.c`：只读查询命令（`get_tree`、`get_focus`、`dump_scene`、`get_trace`、`self_check` 等）及权威命令文档表 `ipc_cmd_docs`。
+- `src/ipc/commands.c`：只读查询命令（`get_tree`、`get_focus`、`dump_scene`、`get_trace`、`self_check`、`pixel`、`screenshot` 等）及权威命令文档表 `ipc_cmd_docs`。
+- `src/ipc/inspect.c`：渲染像素与区域统计断言（`pixel`、`screenshot` 采样与场景归因）。
+- `src/ipc/wait.c`：结构化事件/状态/像素等待引擎（`wait` 命令与同步/异步求值）。
 - `src/ipc/ctl.c`：受控写操作实现（`focus_view`、`move`、`resize`、`maximize`、`fullscreen`、`pointer_move`、`inject_key` 等）。
 
 ## 2. 关键硬约束

@@ -19,6 +19,11 @@
 meson setup build -Dtest=enabled        # 首次配置（自动下载 wrap 依赖）
 meson compile -C build                  # 编译（-Werror 警告即错误）
 meson test -C build --print-errorlogs   # 运行全部测试
+meson test -C build --suite quick       # 子集分层：quick | unit | smoke | xwayland | needs-gpu
+./tools/verify.sh                       # 一键双构建（effects + no-effects）验证并高亮 SKIP 警告
+./tools/verify.sh --quick               # 仅快速子集（compile + --suite quick）
+./tools/verify.sh --json                # 输出机器可读 JSON 摘要（支持 --fail-on-skip）
+./tools/check-deps.sh                   # 检查构建/冒烟依赖（支持 --json / --strict）
 ```
 
 - **特性开关**（`meson_options.txt`）：`effects`（默认 true）、`xwayland`（默认 true）、`tiling-layout`（默认 false）、`test`（默认 false）。由 `build/config.h` 导出 `WOODLAND_HAVE_*` 宏。
@@ -41,6 +46,9 @@ wctl get_focus  | jq .         # 当前键盘与指针焦点视图
 wctl dump_scene | jq '.nodes'  # 完整场景图，排查图层遮挡或节点可见性
 wctl self_check | jq .         # 不变量断言状态检查
 wctl get_trace  | jq .         # 导出决策轨迹环形缓冲
+wctl pixel <x> <y>             # 采样像素并返回颜色与场景归因/期望来源
+wctl screenshot --region x,y,w,h [--expect #rrggbb]  # 区域主色统计与期望匹配度
+wctl wait <cond> [key=val...]  # 等待事件/状态/像素就绪（替代脚本 sleep）
 ```
 
 - **开启写命令**：启动加 `--debug-ctl`（`wctl focus_view <id>`、`wctl move <id> <x> <y>`、`wctl resize <id> <w> <h>`、`wctl close <id>`、`wctl inject_key <code> tap` 等，完整清单见 `wctl help`）。

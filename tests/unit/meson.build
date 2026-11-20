@@ -2,51 +2,51 @@ test_log = executable('test_log', 'test_log.c',
   dependencies: [scene_deps, wayland_server],
   include_directories: woodland_inc,
   link_with: util_lib)
-test('log', test_log)
+test('log', test_log, suite: ['unit', 'quick'])
 
 test_output = executable('test_output', 'test_output.c',
   dependencies: [scene_deps, wayland_server],
   include_directories: woodland_inc,
   link_with: [output_lib, session_lock_lib, cursor_lib, shell_lib, layer_lib, ssd_lib, effect_lib, workspace_lib, capture_lib, util_lib])
-test('output', test_output)
+test('output', test_output, suite: ['unit', 'quick'])
 
 test_cursor = executable('test_cursor', 'test_cursor.c',
   dependencies: [scene_deps, wayland_server],
   include_directories: woodland_inc,
   link_with: [cursor_lib, util_lib])
-test('cursor', test_cursor)
+test('cursor', test_cursor, suite: ['unit', 'quick'])
 
 test_seat = executable('test_seat', 'test_seat.c',
   dependencies: [scene_deps, wayland_server, xkbcommon],
   include_directories: woodland_inc,
   # seat.c 现在会调 protocol 层的 idle / 快捷键抑制钩子
   link_with: [cursor_lib, output_lib, shell_lib, seat_lib, session_lock_lib, ime_lib, workspace_lib, layer_lib, ssd_lib, effect_lib, protocol_lib, util_lib])
-test('seat', test_seat)
+test('seat', test_seat, suite: ['unit', 'quick'])
 
 test_workspace = executable('test_workspace', 'test_workspace.c',
   dependencies: [scene_deps, wayland_server],
   include_directories: woodland_inc,
   # workspace 切换会回调焦点回退（focus.c 在 shell_lib 里）
   link_with: [output_lib, cursor_lib, shell_lib, workspace_lib, ssd_lib, effect_lib, layer_lib, seat_lib, session_lock_lib, ime_lib, capture_lib, util_lib])
-test('workspace', test_workspace)
+test('workspace', test_workspace, suite: ['unit', 'quick'])
 
 test_view = executable('test_view', 'test_view.c',
   dependencies: [scene_deps, wayland_server],
   include_directories: woodland_inc,
   link_with: [output_lib, cursor_lib, shell_lib, layer_lib, ssd_lib, effect_lib, workspace_lib, session_lock_lib, capture_lib, util_lib] + xwayland_libs)
-test('view', test_view)
+test('view', test_view, suite: ['unit', 'quick'])
 
 test_layer = executable('test_layer', 'test_layer.c',
   dependencies: [scene_deps, wayland_server],
   include_directories: woodland_inc,
   link_with: [output_lib, cursor_lib, layer_lib, shell_lib, seat_lib, session_lock_lib, ime_lib, workspace_lib, ssd_lib, effect_lib, util_lib])
-test('layer', test_layer)
+test('layer', test_layer, suite: ['unit', 'quick'])
 
 test_ssd = executable('test_ssd', 'test_ssd.c',
   dependencies: [scene_deps, wayland_server],
   include_directories: woodland_inc,
   link_with: [ssd_lib, effect_lib, cursor_lib, shell_lib, output_lib, layer_lib, workspace_lib, session_lock_lib, capture_lib, util_lib])
-test('ssd', test_ssd)
+test('ssd', test_ssd, suite: ['unit', 'quick'])
 
 # 圆角/模糊的"意图 → 参数"换算：不建 compositor，两种构建都要过
 test_effect = executable('test_effect', 'test_effect.c',
@@ -54,31 +54,31 @@ test_effect = executable('test_effect', 'test_effect.c',
   include_directories: woodland_inc,
   # effect_lib 在前：它引用 ssd_lib 的标题栏判定，静态库要按这个顺序解符号
   link_with: [effect_lib, ssd_lib, config_lib, cursor_lib, shell_lib, output_lib, layer_lib, workspace_lib, session_lock_lib, capture_lib, util_lib])
-test('effect', test_effect)
+test('effect', test_effect, suite: ['unit', 'quick'])
 
 test_placement = executable('test_placement', 'test_placement.c',
   dependencies: [scene_deps, wayland_server],
   include_directories: woodland_inc,
   link_with: [output_lib, cursor_lib, shell_lib, ssd_lib, effect_lib, workspace_lib, layer_lib, session_lock_lib, capture_lib, util_lib])
-test('placement', test_placement)
+test('placement', test_placement, suite: ['unit', 'quick'])
 
 test_focus = executable('test_focus', 'test_focus.c',
   dependencies: [scene_deps, wayland_server],
   include_directories: woodland_inc,
   link_with: [output_lib, cursor_lib, shell_lib, ssd_lib, effect_lib, workspace_lib, layer_lib, session_lock_lib, capture_lib, util_lib])
-test('focus', test_focus)
+test('focus', test_focus, suite: ['unit', 'quick'])
 
 test_capture = executable('test_capture', 'test_capture.c',
   dependencies: [scene_deps, wayland_server],
   include_directories: woodland_inc,
   link_with: [capture_lib, util_lib])
-test('capture', test_capture)
+test('capture', test_capture, suite: ['unit', 'quick'])
 
 test_json = executable('test_json', 'test_json.c',
   dependencies: [scene_deps, wayland_server],
   include_directories: woodland_inc,
   link_with: util_lib)
-test('json', test_json)
+test('json', test_json, suite: ['unit', 'quick'])
 
 # selfcheck.c 编译在 shell_lib 里（和 focus/placement 同处），
 # 所以这里链 shell_lib 而不是单独的库
@@ -87,40 +87,40 @@ test_selfcheck = executable('test_selfcheck', 'test_selfcheck.c',
   include_directories: woodland_inc,
   link_with: [output_lib, cursor_lib, shell_lib, ssd_lib, effect_lib, workspace_lib, layer_lib,
               session_lock_lib, capture_lib, util_lib])
-test('selfcheck', test_selfcheck)
+test('selfcheck', test_selfcheck, suite: ['unit', 'quick'])
 
 # trace 是叶子模块（只链 util），所以这里单独链它，不用把 shell/output 拖进来
 test_trace = executable('test_trace', 'test_trace.c',
   dependencies: [scene_deps, wayland_server],
   include_directories: woodland_inc,
   link_with: [trace_lib, util_lib])
-test('trace', test_trace)
+test('trace', test_trace, suite: ['unit', 'quick'])
 
 # listener 同样是 util 叶子模块
 test_listener = executable('test_listener', 'test_listener.c',
   dependencies: [scene_deps, wayland_server],
   include_directories: woodland_inc,
   link_with: util_lib)
-test('listener', test_listener)
+test('listener', test_listener, suite: ['unit', 'quick'])
 
 test_drm_lease = executable('test_drm_lease', 'test_drm_lease.c',
   dependencies: [scene_deps, wayland_server],
   include_directories: woodland_inc,
   link_with: [protocol_lib, output_lib, cursor_lib, shell_lib, seat_lib, session_lock_lib, ime_lib, workspace_lib, layer_lib, ssd_lib, effect_lib, capture_lib, util_lib])
-test('drm_lease', test_drm_lease)
+test('drm_lease', test_drm_lease, suite: ['unit', 'quick'])
 
 test_pointer_constraints = executable('test_pointer_constraints', 'test_pointer_constraints.c',
   dependencies: [scene_deps, wayland_server],
   include_directories: woodland_inc,
   link_with: [cursor_lib, protocol_lib, output_lib, shell_lib, seat_lib, session_lock_lib, ime_lib, workspace_lib, layer_lib, ssd_lib, effect_lib, capture_lib, util_lib])
-test('pointer_constraints', test_pointer_constraints)
+test('pointer_constraints', test_pointer_constraints, suite: ['unit', 'quick'])
 
 if wayland_client_dep.found()
   test_syncobj = executable('test_syncobj', 'test_syncobj.c',
     dependencies: [scene_deps, wayland_server, wayland_client_dep],
     include_directories: woodland_inc,
     link_with: [protocol_lib, output_lib, cursor_lib, shell_lib, seat_lib, session_lock_lib, ime_lib, workspace_lib, layer_lib, ssd_lib, capture_lib, util_lib])
-  test('syncobj', test_syncobj)
+  test('syncobj', test_syncobj, suite: ['unit', 'quick'])
 endif
 sec_ctx_xml = wp_datadir / 'staging' / 'security-context' / 'security-context-v1.xml'
 test_sec_ctx_srcs = ['test_security_context.c']
@@ -144,14 +144,14 @@ test_security_context = executable('test_security_context', test_sec_ctx_srcs,
   dependencies: test_sec_ctx_deps,
   include_directories: woodland_inc,
   link_with: [protocol_lib] + xwayland_libs + [output_lib, cursor_lib, shell_lib, seat_lib, session_lock_lib, ime_lib, workspace_lib, layer_lib, ssd_lib, effect_lib, capture_lib, util_lib, trace_lib, ipc_lib])
-test('security_context', test_security_context)
+test('security_context', test_security_context, suite: ['unit', 'quick'])
 
 
 test_config = executable('test_config', 'test_config.c',
   dependencies: [scene_deps, wayland_server, xkbcommon],
   include_directories: woodland_inc,
   link_with: [config_lib, util_lib, trace_lib, output_lib, cursor_lib, shell_lib, seat_lib, session_lock_lib, ime_lib, workspace_lib, layer_lib, ssd_lib, effect_lib, capture_lib, ipc_lib, protocol_lib])
-test('config', test_config)
+test('config', test_config, suite: ['unit', 'quick'])
 
 # treeland-compositor-action 的动作表 / 工作区映射：纯逻辑，不建 display。
 # protocol_lib 里的 compositor_action.c.o 会拉入 workspace 切换、trace 和
@@ -162,7 +162,7 @@ test_compositor_action = executable('test_compositor_action', 'test_compositor_a
   link_with: [protocol_lib, workspace_lib, trace_lib, util_lib, shell_lib,
               output_lib, cursor_lib, layer_lib, ssd_lib, effect_lib, seat_lib,
               session_lock_lib, ime_lib, capture_lib])
-test('compositor_action', test_compositor_action)
+test('compositor_action', test_compositor_action, suite: ['unit', 'quick'])
 
 # treeland-appearance / -manager：set_* 分档表、越界裁剪、字体描述串的拆分合成。
 # 纯逻辑，不建 display；裁剪上界来自 cursor.h / ssd.h，字体串解析在 ssd_lib
@@ -173,7 +173,7 @@ test_appearance = executable('test_appearance', 'test_appearance.c',
   link_with: [protocol_lib, workspace_lib, trace_lib, util_lib, shell_lib,
               output_lib, cursor_lib, layer_lib, ssd_lib, effect_lib, seat_lib,
               session_lock_lib, ime_lib, capture_lib])
-test('appearance', test_appearance)
+test('appearance', test_appearance, suite: ['unit', 'quick'])
 
 # treeland-foreign-toplevel-manager-v3：state 数组编码（纯函数）。
 # 链接列表跟 test_compositor_action 一样长——protocol_lib 里的族文件互相引用
@@ -184,7 +184,7 @@ test_foreign_toplevel = executable('test_foreign_toplevel', 'test_foreign_toplev
   link_with: [protocol_lib, workspace_lib, trace_lib, util_lib, shell_lib,
               output_lib, cursor_lib, layer_lib, ssd_lib, effect_lib, seat_lib,
               session_lock_lib, ime_lib, capture_lib])
-test('foreign_toplevel', test_foreign_toplevel)
+test('foreign_toplevel', test_foreign_toplevel, suite: ['unit', 'quick'])
 
 # treeland-xwindow-control-v1：fixed 取整、目标坐标饱和、状态默认值。
 # 纯逻辑，不建 display；xwindow_control.c.o 会经 security_context.c.o 拉入
@@ -196,7 +196,7 @@ test_xwindow_control = executable('test_xwindow_control', 'test_xwindow_control.
   link_with: [protocol_lib, workspace_lib, trace_lib, util_lib, shell_lib,
               output_lib, cursor_lib, layer_lib, ssd_lib, effect_lib, seat_lib,
               session_lock_lib, ime_lib, capture_lib])
-test('xwindow_control', test_xwindow_control)
+test('xwindow_control', test_xwindow_control, suite: ['unit', 'quick'])
 
 # treeland-shortcut-manager-v3：PortableText 解析 / 有效性 / 匹配 / 动作分档。
 # 纯逻辑，但 shortcut.c.o 会拉入窗口与工作区动作，链接列表跟
@@ -207,7 +207,7 @@ test_shortcut = executable('test_shortcut', 'test_shortcut.c',
   link_with: [protocol_lib, workspace_lib, trace_lib, util_lib, shell_lib,
               output_lib, cursor_lib, layer_lib, ssd_lib, effect_lib, seat_lib,
               session_lock_lib, ime_lib, capture_lib, ipc_lib])
-test('shortcut', test_shortcut)
+test('shortcut', test_shortcut, suite: ['unit', 'quick'])
 
 vk_xml = meson.project_source_root() + '/subprojects/wlroots/protocol/virtual-keyboard-unstable-v1.xml'
 im_xml = meson.project_source_root() + '/subprojects/wlroots/protocol/input-method-unstable-v2.xml'
@@ -231,7 +231,7 @@ test_ime = executable('test_ime', test_ime_srcs,
   dependencies: test_ime_deps,
   include_directories: woodland_inc,
   link_with: [ime_lib, seat_lib, session_lock_lib, cursor_lib, output_lib, shell_lib, workspace_lib, layer_lib, ssd_lib, effect_lib, protocol_lib, util_lib])
-test('ime', test_ime)
+test('ime', test_ime, suite: ['unit', 'quick'])
 
 if wayland_client_dep.found() and wayland_scanner.found() and wp_datadir != ''
   session_lock_xml = wp_datadir / 'staging' / 'ext-session-lock' / 'ext-session-lock-v1.xml'
@@ -249,7 +249,7 @@ if wayland_client_dep.found() and wayland_scanner.found() and wp_datadir != ''
       dependencies: [scene_deps, wayland_server, wayland_client_dep, xkbcommon, fontconfig_dep, cairo, pangocairo],
       include_directories: woodland_inc,
       link_with: [session_lock_lib, output_lib, cursor_lib, shell_lib, seat_lib, ime_lib, protocol_lib, workspace_lib, layer_lib, ssd_lib, effect_lib, capture_lib, util_lib])
-    test('session_lock', test_session_lock)
+    test('session_lock', test_session_lock, suite: ['unit', 'quick'])
   endif
 endif
 
@@ -268,7 +268,7 @@ if wayland_client_dep.found() and wayland_scanner.found()
       dependencies: [scene_deps, wayland_server, wayland_client_dep],
       include_directories: woodland_inc,
       link_with: [protocol_lib, output_lib, cursor_lib, shell_lib, seat_lib, ime_lib, session_lock_lib, workspace_lib, layer_lib, ssd_lib, effect_lib, capture_lib, util_lib])
-    test('gamma_control', test_gamma_control)
+    test('gamma_control', test_gamma_control, suite: ['unit', 'quick'])
   endif
 
 if wayland_client_dep.found() and wayland_scanner.found() and wp_datadir != ''
@@ -286,7 +286,7 @@ if wayland_client_dep.found() and wayland_scanner.found() and wp_datadir != ''
       dependencies: [scene_deps, wayland_server, wayland_client_dep],
       include_directories: [woodland_inc, include_directories('../../src/protocol')],
       link_with: [protocol_lib, output_lib, cursor_lib, shell_lib, seat_lib, ime_lib, session_lock_lib, workspace_lib, layer_lib, ssd_lib, effect_lib, capture_lib, util_lib, config_lib, trace_lib])
-    test('tearing', test_tearing)
+    test('tearing', test_tearing, suite: ['unit', 'quick'])
   endif
 endif
 endif
@@ -297,18 +297,18 @@ test_dnd = executable('test_dnd', 'test_dnd.c',
   dependencies: [scene_deps, wayland_server],
   include_directories: woodland_inc,
   link_with: [dnd_lib, trace_lib, util_lib])
-test('dnd', test_dnd)
+test('dnd', test_dnd, suite: ['unit', 'quick'])
 test_window_menu = executable('test_window_menu', 'test_window_menu.c',
   dependencies: [scene_deps, wayland_server, pangocairo, cairo, xkbcommon],
   include_directories: woodland_inc,
   link_with: [shell_lib, output_lib, cursor_lib, workspace_lib, ssd_lib, effect_lib, layer_lib, session_lock_lib, capture_lib, util_lib, trace_lib, dnd_lib] + xwayland_libs)
-test('window_menu', test_window_menu)
+test('window_menu', test_window_menu, suite: ['unit', 'quick'])
 
 test_multitask_view = executable('test_multitask_view', 'test_multitask_view.c',
   dependencies: [scene_deps, wayland_server, pangocairo, cairo, xkbcommon],
   include_directories: woodland_inc,
   link_with: [shell_lib, output_lib, cursor_lib, workspace_lib, ssd_lib, effect_lib, layer_lib, session_lock_lib, capture_lib, util_lib, trace_lib, dnd_lib] + xwayland_libs)
-test('multitask_view', test_multitask_view)
+test('multitask_view', test_multitask_view, suite: ['unit', 'quick'])
 
 # Alt+Tab 切换器：下标轮转、候选快照、中途掉窗口。要真 scene（面板是 cairo
 # 画的 buffer），所以依赖列表跟 test_window_menu 一样。
@@ -316,7 +316,7 @@ test_window_switcher = executable('test_window_switcher', 'test_window_switcher.
   dependencies: [scene_deps, wayland_server, pangocairo, cairo, xkbcommon],
   include_directories: woodland_inc,
   link_with: [shell_lib, output_lib, cursor_lib, workspace_lib, ssd_lib, effect_lib, layer_lib, session_lock_lib, capture_lib, util_lib, trace_lib, dnd_lib] + xwayland_libs)
-test('window_switcher', test_window_switcher)
+test('window_switcher', test_window_switcher, suite: ['unit', 'quick'])
 
 # 环境探测：只是字符串判断，但 woodland_desktop_is_dde() 决定合成器要不要
 # 在会话里拉 woodland-shortcutd（判错会抢走 DDE 的全局快捷键）。
@@ -324,16 +324,24 @@ test_env = executable('test_env', 'test_env.c',
   dependencies: [scene_deps, wayland_server],
   include_directories: woodland_inc,
   link_with: util_lib)
-test('env', test_env)
+test('env', test_env, suite: ['unit', 'quick'])
 
 # woodland-shortcutd 的配置层与命令启动器：不连 display，只测"用户写了什么、
 # 我们打算注册什么、命令怎么起"。协议交互由 smoke-shortcutd 覆盖。
 test_shortcutd_config = executable('test_shortcutd_config', 'test_shortcutd_config.c',
   include_directories: woodland_inc,
   link_with: shortcutd_core_lib)
-test('shortcutd_config', test_shortcutd_config)
+test('shortcutd_config', test_shortcutd_config, suite: ['unit', 'quick'])
 
 test_shortcutd_spawn = executable('test_shortcutd_spawn', 'test_shortcutd_spawn.c',
   include_directories: woodland_inc,
   link_with: shortcutd_core_lib)
-test('shortcutd_spawn', test_shortcutd_spawn)
+test('shortcutd_spawn', test_shortcutd_spawn, suite: ['unit', 'quick'])
+
+test_ipc = executable('test_ipc', 'test_ipc.c',
+  dependencies: [scene_deps, wayland_server, xkbcommon, cairo, pangocairo],
+  include_directories: [woodland_inc, include_directories('../../src/ipc')],
+  link_with: [ipc_lib, util_lib, trace_lib, shell_lib, output_lib, workspace_lib,
+              ssd_lib, effect_lib, cursor_lib, layer_lib, seat_lib, session_lock_lib,
+              ime_lib, capture_lib, config_lib, protocol_lib, dnd_lib] + xwayland_libs)
+test('ipc', test_ipc, suite: ['unit', 'quick'])

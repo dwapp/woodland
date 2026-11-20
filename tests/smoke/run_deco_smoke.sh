@@ -78,13 +78,7 @@ view_count() {
 
 # 等到视图数回到 0（上一个场景的窗口撤干净）
 wait_view_count() {
-    _want="$1"
-    _i=0
-    while [ "$_i" -lt 100 ]; do
-        [ "$(view_count)" = "$_want" ] && return 0
-        sleep 0.05; _i=$((_i+1))
-    done
-    return 1
+    "$WCTL" -s "$SOCK" -t 5000 wait view_count count="$1" >/dev/null 2>&1
 }
 
 # 起一个探针并等它就绪，然后把这一刻的 get_tree 抓进 $TREE

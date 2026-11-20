@@ -1,5 +1,6 @@
 /build/
 /build-asan/
+/build-noeffects/
 /.worktrees/
 /subprojects/packagecache/
 /subprojects/wlroots/

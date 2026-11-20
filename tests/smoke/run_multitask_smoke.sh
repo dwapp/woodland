@@ -68,21 +68,17 @@ wctl_cmd() {
 }
 
 # 等真实客户端窗口完成 map 与首帧提交
-i=0
-while [ "$i" -lt 100 ]; do
-    if wctl_cmd get_tree 2>/dev/null | jq -e '.count >= 1 and .views[0].mapped == true' >/dev/null 2>&1; then
-        break
-    fi
-    sleep 0.05; i=$((i+1))
-done
+"$WCTL" -s "$SOCK" -t 5000 wait view_mapped >/dev/null || smoke_fail "client never mapped"
 TREE="$(wctl_cmd get_tree)" || smoke_fail "get_tree failed after client map"
 printf '%s' "$TREE" | jq -e '.count == 1 and .multitask_view.active == false' >/dev/null \
     || smoke_fail "unexpected initial state: $TREE"
 
 echo "== 打开多任务视图（含真实客户表面离屏缩略图与帧提交）=="
 "$PROBE" --trigger 16 || smoke_fail "open_multitask_view trigger failed"
-# 留出至少数帧时间，让 headless 输出经 fx_renderer/pixman 实际提交带缩略图的帧
-sleep 0.15
+"$WCTL" -s "$SOCK" -t 2000 wait multitask active=1 card_count=1 thumb_count=1 >/dev/null \
+    || smoke_fail "multitask_view did not activate"
+# 经 pixel 同步触发一次真实离屏缩略图渲染与帧提交
+"$WCTL" -s "$SOCK" pixel 100 100 >/dev/null || smoke_fail "pixel render failed during multitask_view"
 kill -0 "$comp_pid" 2>/dev/null || smoke_fail "compositor crashed while rendering multitask_view"
 TREE="$(wctl_cmd get_tree)" || smoke_fail "get_tree failed after open_multitask_view"
 printf '%s' "$TREE" | jq -e \
@@ -118,7 +114,9 @@ enabled = false
 EOF
 wctl_cmd reload_config >/dev/null || smoke_fail "reload_config failed"
 "$PROBE" --trigger 16 || smoke_fail "open_multitask_view (effects off) failed"
-sleep 0.1
+"$WCTL" -s "$SOCK" -t 2000 wait multitask active=1 card_count=1 thumb_count=1 >/dev/null \
+    || smoke_fail "multitask_view (effects off) did not activate"
+"$WCTL" -s "$SOCK" pixel 100 100 >/dev/null || smoke_fail "pixel render failed (effects off)"
 kill -0 "$comp_pid" 2>/dev/null || smoke_fail "compositor crashed with effects disabled"
 TREE="$(wctl_cmd get_tree)" || smoke_fail "get_tree failed (effects off)"
 printf '%s' "$TREE" | jq -e \

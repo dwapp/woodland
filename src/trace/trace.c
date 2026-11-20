@@ -118,6 +118,31 @@ uint32_t woodland_trace_total(void) {
     return trace.total;
 }
 
+bool woodland_trace_has_match(const char *what, uint32_t obj, bool filter_obj,
+                              const char *detail_substr) {
+    if (!trace.enabled || !trace.entries || !what || !what[0]) {
+        return false;
+    }
+    uint32_t count = woodland_trace_count();
+    uint32_t oldest = trace.total < TRACE_CAPACITY ? 0 : trace.next;
+    for (uint32_t i = 0; i < count; i++) {
+        const struct trace_entry *entry =
+            &trace.entries[(oldest + i) % TRACE_CAPACITY];
+        if (strcmp(entry->what, what) != 0) {
+            continue;
+        }
+        if (filter_obj && entry->obj != obj) {
+            continue;
+        }
+        if (detail_substr && detail_substr[0] &&
+            strstr(entry->detail, detail_substr) == NULL) {
+            continue;
+        }
+        return true;
+    }
+    return false;
+}
+
 void woodland_trace_dump(struct woodland_json *out) {
     uint32_t count = woodland_trace_count();
 
