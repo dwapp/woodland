@@ -41,6 +41,9 @@ static void usage(const char *name) {
            "  ping        liveness probe\n"
            "  get_config  active runtime configuration\n"
            "  reload_config reload configuration from file\n"
+           "  pixel <x> <y>  sample pixel color & scene attribution\n"
+           "  screenshot [--region x,y,w,h] [--expect #rrggbb] [--tolerance N]\n"
+           "  wait <condition> [key=val...] [timeout=MS]\n"
            "\n"
            "write commands (only when woodland runs with --debug-ctl; see `help`):\n"
            "  focus_view <id> | close <id> | move <id> <x> <y> | resize <id> <w> <h>\n"
@@ -161,9 +164,85 @@ static int connect_with_retry(const char *path, int timeout_ms) {
     }
 }
 
+static bool append_escaped_str(char *buf, size_t cap, int *pos, const char *s) {
+    for (size_t i = 0; s[i]; i++) {
+        if (s[i] == '"' || s[i] == '\\') {
+            if (*pos + 2 >= (int)cap) {
+                return false;
+            }
+            buf[(*pos)++] = '\\';
+            buf[(*pos)++] = s[i];
+        } else {
+            if (*pos + 1 >= (int)cap) {
+                return false;
+            }
+            buf[(*pos)++] = s[i];
+        }
+    }
+    return true;
+}
+
+static bool append_arg(char *buf, size_t cap, int *pos, const char *arg) {
+    if (*pos < 0 || *pos + 2 >= (int)cap) {
+        return false;
+    }
+    buf[(*pos)++] = ' ';
+
+    bool has_space = strchr(arg, ' ') != NULL || strchr(arg, '\t') != NULL;
+    if (!has_space) {
+        int more = snprintf(buf + *pos, cap - (size_t)*pos, "%s", arg);
+        if (more < 0 || *pos + more >= (int)cap) {
+            return false;
+        }
+        *pos += more;
+        return true;
+    }
+
+    const char *eq = strchr(arg, '=');
+    bool key_eq_val = false;
+    if (eq && eq > arg) {
+        key_eq_val = true;
+        for (const char *p = arg; p < eq; p++) {
+            if (*p == ' ' || *p == '\t') {
+                key_eq_val = false;
+                break;
+            }
+        }
+    }
+
+    if (key_eq_val) {
+        size_t klen = (size_t)(eq - arg) + 1;
+        if (*pos + (int)klen + 2 >= (int)cap) {
+            return false;
+        }
+        memcpy(buf + *pos, arg, klen);
+        *pos += (int)klen;
+        buf[(*pos)++] = '"';
+        if (!append_escaped_str(buf, cap, pos, eq + 1)) {
+            return false;
+        }
+        if (*pos + 1 >= (int)cap) {
+            return false;
+        }
+        buf[(*pos)++] = '"';
+        return true;
+    }
+
+    buf[(*pos)++] = '"';
+    if (!append_escaped_str(buf, cap, pos, arg)) {
+        return false;
+    }
+    if (*pos + 1 >= (int)cap) {
+        return false;
+    }
+    buf[(*pos)++] = '"';
+    return true;
+}
+
 int main(int argc, char *argv[]) {
     const char *socket_path = NULL;
     int timeout_ms = 2000;
+    bool timeout_explicit = false;
 
     static const struct option long_opts[] = {
         {"socket", required_argument, NULL, 's'},
@@ -173,7 +252,8 @@ int main(int argc, char *argv[]) {
     };
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "s:t:h", long_opts, NULL)) != -1) {
+    /* '+' 阻止 GNU getopt 重排参数：子命令的 --region / -5 必须原样传给服务端 */
+    while ((opt = getopt_long(argc, argv, "+s:t:h", long_opts, NULL)) != -1) {
         switch (opt) {
         case 's':
             socket_path = optarg;
@@ -184,6 +264,7 @@ int main(int argc, char *argv[]) {
                 fprintf(stderr, "wctl: invalid timeout '%s'\n", optarg);
                 return 2;
             }
+            timeout_explicit = true;
             break;
         default:
             usage(argv[0]);
@@ -192,6 +273,31 @@ int main(int argc, char *argv[]) {
     }
 
     const char *cmd = normalize(optind < argc ? argv[optind] : NULL);
+
+    bool is_wait = strcmp(cmd, "wait") == 0;
+    bool has_wait_timeout = false;
+    int wait_timeout_ms = timeout_explicit ? timeout_ms : 5000;
+    if (is_wait) {
+        for (int i = optind + 1; i < argc; i++) {
+            if (strncmp(argv[i], "timeout=", 8) == 0) {
+                has_wait_timeout = true;
+                char *end = NULL;
+                long v = strtol(argv[i] + 8, &end, 10);
+                if (argv[i][8] != '\0' && end && *end == '\0' && v > 0 && v <= 60000) {
+                    wait_timeout_ms = (int)v;
+                }
+            }
+        }
+    }
+
+    int connect_timeout_ms = timeout_ms;
+    int read_timeout_ms = timeout_ms;
+    if (is_wait) {
+        connect_timeout_ms = timeout_explicit
+                                 ? timeout_ms
+                                 : (wait_timeout_ms > timeout_ms ? wait_timeout_ms : timeout_ms);
+        read_timeout_ms = wait_timeout_ms + 1000;
+    }
 
     char path[256] = {0};
     if (socket_path) {
@@ -204,7 +310,7 @@ int main(int argc, char *argv[]) {
         return 2;
     }
 
-    int fd = connect_with_retry(path, timeout_ms);
+    int fd = connect_with_retry(path, connect_timeout_ms);
     if (fd < 0) {
         return 2;
     }
@@ -212,8 +318,8 @@ int main(int argc, char *argv[]) {
     /* -t 对 connect 之外也要生效：对端连上但不说话时，阻塞 read 会一直等下去，
      * 这个工具就不能用在超时/就绪探测里了 */
     struct timeval tv;
-    tv.tv_sec = timeout_ms / 1000;
-    tv.tv_usec = (timeout_ms % 1000) * 1000;
+    tv.tv_sec = read_timeout_ms / 1000;
+    tv.tv_usec = (read_timeout_ms % 1000) * 1000;
     if (tv.tv_sec == 0 && tv.tv_usec == 0) {
         tv.tv_usec = 1000;   /* -t 小于 1ms 时给个下限，0 表示"永不超时" */
     }
@@ -223,14 +329,18 @@ int main(int argc, char *argv[]) {
      * 容量按"够用且有上限"定：超出就拒发，不发被截断的半条命令 */
     char request[256];
     int request_len = snprintf(request, sizeof(request), "%s", cmd);
-    for (int i = optind + 1; request_len >= 0 && (size_t)request_len < sizeof(request) && i < argc;
-         i++) {
-        int more = snprintf(request + request_len, sizeof(request) - (size_t)request_len, " %s",
-                            argv[i]);
-        request_len = more < 0 ? more : request_len + more;
+    bool arg_ok = request_len >= 0 && (size_t)request_len < sizeof(request);
+    for (int i = optind + 1; arg_ok && i < argc; i++) {
+        arg_ok = append_arg(request, sizeof(request), &request_len, argv[i]);
     }
-    if (request_len >= 0 && (size_t)request_len + 2 <= sizeof(request)) {
+    if (arg_ok && is_wait && !has_wait_timeout) {
+        char tbuf[32];
+        snprintf(tbuf, sizeof(tbuf), "timeout=%d", wait_timeout_ms);
+        arg_ok = append_arg(request, sizeof(request), &request_len, tbuf);
+    }
+    if (arg_ok && request_len >= 0 && (size_t)request_len + 2 <= sizeof(request)) {
         request[request_len++] = '\n';
+        request[request_len] = '\0';
     } else {
         request_len = (int)sizeof(request);   /* 触发下面的"过长"分支 */
     }

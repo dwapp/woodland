@@ -19,12 +19,15 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <wlr/util/log.h>
 
 #include "ipc.h"
+#include "ipc_internal.h"
 #include "util/json.h"
+#include "util/listener.h"
 #include "woodland.h"
 
 /* 单行命令上限：正常命令几十字节，留足余量给"手抖粘贴一堆东西" */
@@ -45,6 +48,8 @@ struct woodland_ipc_client {
     size_t out_len;
     size_t out_cap;
     size_t out_off;
+    struct woodland_ipc_wait *wait;
+    struct wl_event_source *wait_timer;
 };
 
 /* 尽量把队列里的字节写出去。
@@ -113,10 +118,28 @@ static bool client_send(struct woodland_ipc_client *client,
     return client_flush(client);
 }
 
+static uint64_t ipc_monotonic_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)ts.tv_nsec / 1000000ULL;
+}
+
+static void client_clear_wait(struct woodland_ipc_client *client) {
+    if (client->wait_timer) {
+        wl_event_source_remove(client->wait_timer);
+        client->wait_timer = NULL;
+    }
+    if (client->wait) {
+        woodland_ipc_wait_free(client->wait);
+        client->wait = NULL;
+    }
+}
+
 static void client_destroy(struct woodland_ipc_client *client) {
     if (!client) {
         return;
     }
+    client_clear_wait(client);
     if (client->source) {
         wl_event_source_remove(client->source);
         client->source = NULL;
@@ -128,6 +151,123 @@ static void client_destroy(struct woodland_ipc_client *client) {
     wl_list_remove(&client->link);
     free(client->out);
     free(client);
+}
+
+static bool client_process_lines(struct woodland_ipc_client *client);
+
+static void ipc_wait_check_client(struct woodland_ipc_client *client) {
+    if (!client || !client->wait) {
+        return;
+    }
+
+    uint64_t now = ipc_monotonic_ms();
+    uint64_t start = woodland_ipc_wait_start_ms(client->wait);
+    uint64_t elapsed = (now >= start) ? (now - start) : 0;
+    int timeout_ms = woodland_ipc_wait_timeout_ms(client->wait);
+
+    struct woodland_json out;
+    woodland_json_init(&out);
+    bool matched = false;
+    woodland_ipc_wait_eval(client->server, client->wait, elapsed, &out, &matched);
+
+    if (!matched) {
+        if (elapsed < (uint64_t)timeout_ms) {
+            woodland_json_finish(&out);
+            int remaining = timeout_ms - (int)elapsed;
+            int next_ms = remaining < 20 ? remaining : 20;
+            if (next_ms < 1) {
+                next_ms = 1;
+            }
+            if (client->wait_timer) {
+                wl_event_source_timer_update(client->wait_timer, next_ms);
+            }
+            return;
+        }
+        woodland_json_finish(&out);
+        woodland_json_init(&out);
+        woodland_ipc_wait_write_timeout(client->wait, elapsed, &out);
+    }
+
+    if (!woodland_json_ok(&out)) {
+        woodland_json_finish(&out);
+        woodland_json_init(&out);
+        woodland_json_raw(&out, "{\"ok\":false,\"cmd\":\"wait\",\"error\":\"out of memory\"}");
+    }
+    woodland_json_raw(&out, "\n");
+    client_clear_wait(client);
+    bool ok = client_send(client, woodland_json_data(&out), woodland_json_len(&out));
+    woodland_json_finish(&out);
+    if (!ok) {
+        client_destroy(client);
+        return;
+    }
+    if (client->out_off == client->out_len) {
+        if (!client_process_lines(client)) {
+            client_destroy(client);
+            return;
+        }
+    }
+    client_update_events(client);
+}
+
+static int ipc_wait_timer_cb(void *data) {
+    struct woodland_ipc_client *client = data;
+    ipc_wait_check_client(client);
+    return 0;
+}
+
+static void ipc_wait_idle_cb(void *data) {
+    struct woodland_server *server = data;
+    server->ipc_wait_idle = NULL;
+    struct woodland_ipc_client *client;
+    struct woodland_ipc_client *tmp;
+    wl_list_for_each_safe(client, tmp, &server->ipc_clients, link) {
+        if (client->wait) {
+            ipc_wait_check_client(client);
+        }
+    }
+}
+
+static void ipc_schedule_wait_check(struct woodland_server *server) {
+    if (!server || !server->event_loop || server->ipc_wait_idle) {
+        return;
+    }
+    bool any_waiting = false;
+    struct woodland_ipc_client *client;
+    wl_list_for_each(client, &server->ipc_clients, link) {
+        if (client->wait) {
+            any_waiting = true;
+            break;
+        }
+    }
+    if (any_waiting) {
+        server->ipc_wait_idle =
+            wl_event_loop_add_idle(server->event_loop, ipc_wait_idle_cb, server);
+    }
+}
+
+static void ipc_on_view_mapped(struct wl_listener *listener, void *data) {
+    (void)data;
+    struct woodland_server *server = wl_container_of(listener, server, ipc_view_mapped);
+    ipc_schedule_wait_check(server);
+}
+
+static void ipc_on_view_unmapped(struct wl_listener *listener, void *data) {
+    (void)data;
+    struct woodland_server *server = wl_container_of(listener, server, ipc_view_unmapped);
+    ipc_schedule_wait_check(server);
+}
+
+static void ipc_on_view_changed(struct wl_listener *listener, void *data) {
+    (void)data;
+    struct woodland_server *server = wl_container_of(listener, server, ipc_view_changed);
+    ipc_schedule_wait_check(server);
+}
+
+static void ipc_on_workspace_changed(struct wl_listener *listener, void *data) {
+    (void)data;
+    struct woodland_server *server = wl_container_of(listener, server, ipc_workspace_changed);
+    ipc_schedule_wait_check(server);
 }
 
 /* 处理一行命令，返回 false 表示连接不可用需要断开 */
@@ -146,6 +286,76 @@ static bool client_handle_line(struct woodland_ipc_client *client, char *line) {
         return true;   /* 空行当心跳，不回应 */
     }
 
+    char first_word[32];
+    size_t fn = 0;
+    while (start[fn] && start[fn] != ' ' && start[fn] != '\t' &&
+           fn + 1 < sizeof(first_word)) {
+        first_word[fn] = start[fn];
+        fn++;
+    }
+    first_word[fn] = '\0';
+
+    if (strcmp(first_word, "wait") == 0 &&
+        (start[fn] == '\0' || start[fn] == ' ' || start[fn] == '\t')) {
+        struct woodland_ipc_wait *wait = NULL;
+        char err[128];
+        if (!woodland_ipc_wait_parse(start + fn, &wait, err, sizeof(err))) {
+            struct woodland_json out;
+            woodland_json_init(&out);
+            struct woodland_json_obj obj;
+            woodland_json_obj_open(&obj, &out);
+            woodland_json_obj_bool(&obj, "ok", false);
+            woodland_json_obj_str(&obj, "cmd", "wait");
+            woodland_json_obj_str(&obj, "error", err);
+            woodland_json_obj_close(&obj);
+            if (!woodland_json_ok(&out)) {
+                woodland_json_finish(&out);
+                woodland_json_init(&out);
+                woodland_json_raw(&out, "{\"ok\":false,\"cmd\":\"wait\",\"error\":\"out of memory\"}");
+            }
+            woodland_json_raw(&out, "\n");
+            bool ok = client_send(client, woodland_json_data(&out),
+                                  woodland_json_len(&out));
+            woodland_json_finish(&out);
+            return ok;
+        }
+
+        struct woodland_json out;
+        woodland_json_init(&out);
+        bool matched = false;
+        woodland_ipc_wait_eval(client->server, wait, 0, &out, &matched);
+        if (matched) {
+            if (!woodland_json_ok(&out)) {
+                woodland_json_finish(&out);
+                woodland_json_init(&out);
+                woodland_json_raw(&out, "{\"ok\":false,\"cmd\":\"wait\",\"error\":\"out of memory\"}");
+            }
+            woodland_json_raw(&out, "\n");
+            bool ok = client_send(client, woodland_json_data(&out),
+                                  woodland_json_len(&out));
+            woodland_json_finish(&out);
+            woodland_ipc_wait_free(wait);
+            return ok;
+        }
+        woodland_json_finish(&out);
+
+        client->wait = wait;
+        client->wait_timer = wl_event_loop_add_timer(
+            client->server->event_loop, ipc_wait_timer_cb, client);
+        if (!client->wait_timer) {
+            client_clear_wait(client);
+            static const char oom_msg[] =
+                "{\"ok\":false,\"cmd\":\"wait\",\"error\":\"out of memory\"}\n";
+            return client_send(client, oom_msg, sizeof(oom_msg) - 1);
+        }
+        int ms = woodland_ipc_wait_timeout_ms(wait);
+        if (ms > 20) {
+            ms = 20;
+        }
+        wl_event_source_timer_update(client->wait_timer, ms);
+        return true;
+    }
+
     struct woodland_json out;
     woodland_json_init(&out);
     woodland_ipc_dispatch(client->server, start, &out);
@@ -157,10 +367,13 @@ static bool client_handle_line(struct woodland_ipc_client *client, char *line) {
 }
 
 /* 消费缓冲区里所有完整的行。返回 false 表示连接不可用。
- * 发出积压时会提前收手，剩下的半截留在 buf 里等下一次。 */
+ * 发出积压或正在 wait 时提前收手，剩下的留在 buf 里等下一次。 */
 static bool client_process_lines(struct woodland_ipc_client *client) {
     size_t consumed = 0;
     while (consumed < client->len) {
+        if (client->wait) {
+            break;
+        }
         char *nl = memchr(client->buf + consumed, '\n',
                           client->len - consumed);
         if (!nl) {
@@ -172,9 +385,8 @@ static bool client_process_lines(struct woodland_ipc_client *client) {
         if (!client_handle_line(client, client->buf + line_off)) {
             return false;
         }
-        if (client->out_off < client->out_len) {
-            /* 上一条回应还没发完，先别解析下一条：一次只压一条响应，
-             * 内存才有上界 */
+        if (client->wait || client->out_off < client->out_len) {
+            /* 正在等待条件，或上一条回应还没发完，先别解析下一条 */
             break;
         }
     }
@@ -217,6 +429,10 @@ static int client_event(int fd, uint32_t mask, void *data) {
         return 0;
     }
 
+    if (client->wait && client->len >= sizeof(client->buf) - 1) {
+        return 0;
+    }
+
     ssize_t n = read(client->fd, client->buf + client->len,
                      sizeof(client->buf) - client->len - 1);
     if (n <= 0) {
@@ -229,12 +445,12 @@ static int client_event(int fd, uint32_t mask, void *data) {
     client->len += (size_t)n;
     client->buf[client->len] = '\0';
 
-    if (!client_process_lines(client)) {
+    if (!client->wait && !client_process_lines(client)) {
         client_destroy(client);
         return 0;
     }
 
-    if (client->len >= sizeof(client->buf) - 1) {
+    if (!client->wait && client->len >= sizeof(client->buf) - 1) {
         /* 一直没等到换行：丢掉这一行，别让半条命令无限攒着 */
         static const char too_long[] =
             "{\"ok\":false,\"error\":\"line too long\"}\n";
@@ -369,6 +585,23 @@ bool woodland_ipc_init(struct woodland_server *server,
         return false;
     }
 
+    if (server->view_mapped.listener_list.next) {
+        woodland_listener_connect(&server->ipc_view_mapped, &server->view_mapped,
+                                  ipc_on_view_mapped, "ipc.view_mapped");
+    }
+    if (server->view_unmapped.listener_list.next) {
+        woodland_listener_connect(&server->ipc_view_unmapped, &server->view_unmapped,
+                                  ipc_on_view_unmapped, "ipc.view_unmapped");
+    }
+    if (server->view_changed.listener_list.next) {
+        woodland_listener_connect(&server->ipc_view_changed, &server->view_changed,
+                                  ipc_on_view_changed, "ipc.view_changed");
+    }
+    if (server->workspace_changed.listener_list.next) {
+        woodland_listener_connect(&server->ipc_workspace_changed, &server->workspace_changed,
+                                  ipc_on_workspace_changed, "ipc.workspace_changed");
+    }
+
     setenv("WOODLAND_IPC", path, true);
     /* 命令清单不再硬编码在这条日志里：socket 上问一句 help 就是全量文档 */
     wlr_log(WLR_INFO, "debug IPC listening on %s (send 'help' for the "
@@ -376,10 +609,26 @@ bool woodland_ipc_init(struct woodland_server *server,
     return true;
 }
 
+static void remove_listener_safe(struct wl_listener *l) {
+    if (l->link.prev) {
+        wl_list_remove(&l->link);
+        l->link.prev = NULL;
+        l->link.next = NULL;
+    }
+}
+
 void woodland_ipc_finish(struct woodland_server *server) {
     if (!server) {
         return;
     }
+    if (server->ipc_wait_idle) {
+        wl_event_source_remove(server->ipc_wait_idle);
+        server->ipc_wait_idle = NULL;
+    }
+    remove_listener_safe(&server->ipc_view_mapped);
+    remove_listener_safe(&server->ipc_view_unmapped);
+    remove_listener_safe(&server->ipc_view_changed);
+    remove_listener_safe(&server->ipc_workspace_changed);
     struct woodland_ipc_client *client;
     struct woodland_ipc_client *tmp;
     wl_list_for_each_safe(client, tmp, &server->ipc_clients, link) {

@@ -62,14 +62,8 @@ while [ "$i" -lt 100 ]; do
 done
 [ -n "$SOCK" ] || smoke_fail "debug socket never appeared"
 
-# 等窗口 map 上来（get_tree 里出现 1 个视图）
-i=0
-while [ "$i" -lt 100 ]; do
-    if "$WCTL" -s "$SOCK" get_tree 2>/dev/null | jq -e '.count >= 1' >/dev/null 2>&1; then
-        break
-    fi
-    sleep 0.05; i=$((i+1))
-done
+# 等窗口 map 上来
+"$WCTL" -s "$SOCK" -t 5000 wait view_mapped >/dev/null || smoke_fail "client never mapped"
 
 echo "== ping =="
 "$WCTL" -s "$SOCK" ping | jq -e '.ok == true and .pid > 0' >/dev/null \

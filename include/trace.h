@@ -65,6 +65,10 @@ uint32_t woodland_trace_count(void);
 /** 累计写入过多少条；比 count 大就说明有记录被覆盖了。 */
 uint32_t woodland_trace_total(void);
 
+/** 环形缓冲里是否存在匹配 what（及可选 obj / detail 子串）的轨迹。 */
+bool woodland_trace_has_match(const char *what, uint32_t obj, bool filter_obj,
+                              const char *detail_substr);
+
 /** 把整个环按 seq 升序导出成一份完整的 JSON 响应。 */
 void woodland_trace_dump(struct woodland_json *out);
 

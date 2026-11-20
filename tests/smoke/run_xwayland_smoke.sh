@@ -126,21 +126,11 @@ palette_of() {
             'first(.views[] | select(.ssd.present and .activated) | .ssd.palette[$k]) // empty'
 }
 
-# 刚 map 的窗口可能还没被标成 activated（Xwayland 一路都是异步的），轮询一下。
-palette_wait() {
-    _i=0
-    while [ "$_i" -lt 20 ]; do
-        _v="$(palette_of "$1")"
-        [ -n "$_v" ] && { printf '%s' "$_v"; return 0; }
-        sleep 0.1
-        _i=$((_i + 1))
-    done
-    return 1
-}
-
-sleep 0.5
-TITLEBAR="$(palette_wait titlebar_active || true)"
-TITLEBAR_DIM="$(palette_wait titlebar_inactive || true)"
+# 刚 map 的窗口可能还没被标成 activated（Xwayland 一路都是异步的），用 wctl wait 等齐。
+"$WCTL" -s "$SOCK" -t 5000 wait view_mapped kind=x11 activated=1 ssd=1 >/dev/null \
+    || smoke_fail "x11 view did not map as activated with SSD"
+TITLEBAR="$(palette_of titlebar_active || true)"
+TITLEBAR_DIM="$(palette_of titlebar_inactive || true)"
 [ -n "${TITLEBAR:-}" ] && [ -n "${TITLEBAR_DIM:-}" ] || {
     echo "wctl did not report the SSD palette ($WCTL -s $SOCK get_tree)" >&2
     exit 1
@@ -188,16 +178,11 @@ n="$(color_count_near "$WORK/managed.png" "400x32+0+0" "$TITLEBAR" 1%)"
 "$XOVERRIDE" 500 400 160 120 >"$WORK/xoverride.log" 2>&1 &
 client_pids="$client_pids $!"
 
-# 轮询：Xwayland 用软件渲染，窗口上屏有几帧延迟
-n=0
-i=0
-while [ "$i" -lt 30 ]; do
-    sleep 0.2
-    grim "$WORK/popup.png" 2>/dev/null || true
-    n="$(color_count "$WORK/popup.png" "160x120+500+400" "#FF0000")"
-    [ -n "${n:-}" ] && [ "$n" -gt 5000 ] && break
-    i=$((i+1))
-done
+# 等待 override-redirect 窗口上屏后再用 grim 截图校验
+"$WCTL" -s "$SOCK" -t 6000 wait pixel x=580 y=460 hex=#ff0000 >/dev/null \
+    || smoke_fail "override-redirect window red pixel never appeared"
+grim "$WORK/popup.png" 2>/dev/null || true
+n="$(color_count "$WORK/popup.png" "160x120+500+400" "#FF0000")"
 [ -n "${n:-}" ] && [ "$n" -gt 5000 ] || {
     echo "override-redirect window not visible (red pixels: '${n:-0}')" >&2
     convert "$WORK/popup.png" -crop 200x160+480+380 +repage \
@@ -232,6 +217,8 @@ grep -q "TOGGLE_OK" "$WORK/xtoggle.log" || {
     exit 1
 }
 kill -TERM "$toggle_pid" 2>/dev/null || true
+"$WCTL" -s "$SOCK" -t 3000 wait view_count count=1 >/dev/null \
+    || smoke_fail "toggle window did not unmap"
 
 # ---- 4) 焦点唯一 + 关闭后焦点回退 ----
 # 同一个工作区里只能有一个窗口是"激活态"：第二个窗口拿到焦点后，
@@ -239,7 +226,8 @@ kill -TERM "$toggle_pid" 2>/dev/null || true
 "$XAPP" $XAPP_ARGS >"$WORK/xapp2.log" 2>&1 &
 second_pid=$!
 client_pids="$client_pids $second_pid"
-sleep 1.2
+"$WCTL" -s "$SOCK" -t 5000 wait view_count count=2 >/dev/null \
+    || smoke_fail "second x11 window did not appear"
 grim "$WORK/focus-two.png"
 dim="$(identify -format '%wx%h' "$WORK/focus-two.png")"
 inactive_px="$(color_count_near "$WORK/focus-two.png" "$dim+0+0" "$TITLEBAR_DIM" 1%)"
@@ -250,7 +238,10 @@ inactive_px="$(color_count_near "$WORK/focus-two.png" "$dim+0+0" "$TITLEBAR_DIM"
 }
 
 kill -TERM "$second_pid" 2>/dev/null || true
-sleep 1.2
+"$WCTL" -s "$SOCK" -t 5000 wait view_count count=1 >/dev/null \
+    || smoke_fail "second x11 window did not close"
+"$WCTL" -s "$SOCK" -t 3000 wait view_mapped kind=x11 activated=1 >/dev/null \
+    || smoke_fail "remaining x11 window did not regain activation"
 grim "$WORK/focus-after.png"
 active_px="$(color_count_near "$WORK/focus-after.png" "$dim+0+0" "$TITLEBAR" 1%)"
 [ -n "${active_px:-}" ] && [ "$active_px" -gt 500 ] || {

@@ -61,14 +61,8 @@ start_comp() {
         sleep 0.05; i=$((i+1))
     done
     [ -n "$SOCK" ] || smoke_fail "debug socket never appeared"
-    i=0
-    while [ "$i" -lt 100 ]; do
-        if "$WCTL" -s "$SOCK" get_tree 2>/dev/null | jq -e '.count >= 1 and .views[0].mapped' >/dev/null 2>&1; then
-            return 0
-        fi
-        sleep 0.05; i=$((i+1))
-    done
-    smoke_fail "client never mapped"
+    "$WCTL" -s "$SOCK" -t 5000 wait view_mapped >/dev/null || smoke_fail "client never mapped"
+    return 0
 }
 
 # wctl 在 ok=false 时退出码为 1：这里要读响应，不能被 set -e 吃掉

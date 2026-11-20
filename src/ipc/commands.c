@@ -26,6 +26,7 @@
 #include "effect.h"
 #include "focus.h"
 #include "ipc.h"
+#include "ipc_internal.h"
 #include "output.h"
 #include "placement.h"
 #include "protocol.h"
@@ -215,6 +216,40 @@ static const struct ipc_field_doc reload_config_fields[] = {
     {"path", "str|null", "path of loaded configuration file"},
 };
 
+static const struct ipc_field_doc pixel_fields[] = {
+    {"x", "int", "layout x coordinate"},
+    {"y", "int", "layout y coordinate"},
+    {"output", "str", "output name covering (x,y)"},
+    {"buffer_coords", "int[2]", "buffer-space [bx, by] coordinates"},
+    {"rgba", "int[4]", "sampled RGBA bytes [0..255]"},
+    {"hex", "str", "sampled color as #rrggbb"},
+    {"source", "obj",
+     "kind, node_type, view/title/app_id/activated/namespace, "
+     "expected_hex, expected_source, matches_expected, channel_delta"},
+};
+
+static const struct ipc_field_doc screenshot_fields[] = {
+    {"output", "str", "output name"},
+    {"region", "int[4]", "sampled logical layout box [x,y,w,h]"},
+    {"buffer_box", "int[4]", "sampled buffer box [bx,by,bw,bh]"},
+    {"total_pixels", "int", "pixels sampled"},
+    {"unique_colors", "int", "distinct RGBA colors in region"},
+    {"dominant", "obj[]", "top 8 colors: hex, rgba[4], count"},
+    {"center", "obj", "region center {x, y, hex, rgba[4], source}"},
+    {"match", "obj",
+     "optional expected-color stats: expected_hex, expected_source, "
+     "tolerance, count, ratio_milli"},
+};
+
+static const struct ipc_field_doc wait_fields[] = {
+    {"condition", "str",
+     "view_mapped|view_unmapped|view_count|focus|workspace|multitask|"
+     "window_menu|window_switcher|output_count|pixel|trace"},
+    {"matched", "bool", "true when condition held before timeout"},
+    {"elapsed_ms", "int", "time waited in ms"},
+    {"timeout_ms", "int", "timeout limit in ms (present on timeout)"},
+};
+
 static const struct ipc_field_doc help_fields[] = {
     {"commands", "obj[]", "this list: name, desc, fields[{name,type,desc}]"},
 };
@@ -237,6 +272,12 @@ static const struct ipc_cmd_doc ipc_cmd_docs[] = {
      IPC_FIELDS_LEN(get_config_fields)},
     {"reload_config", "hot-reload configuration from file", reload_config_fields,
      IPC_FIELDS_LEN(reload_config_fields)},
+    {"pixel", "sample one rendered pixel at layout coords with scene attribution",
+     pixel_fields, IPC_FIELDS_LEN(pixel_fields)},
+    {"screenshot", "sample a region (or output) with dominant colors and expected match",
+     screenshot_fields, IPC_FIELDS_LEN(screenshot_fields)},
+    {"wait", "block until condition holds or timeout=<ms> expires",
+     wait_fields, IPC_FIELDS_LEN(wait_fields)},
     {"help", "this response", help_fields, IPC_FIELDS_LEN(help_fields)},
 };
 
@@ -248,7 +289,7 @@ static const struct ipc_cmd_doc ipc_cmd_docs[] = {
  * 把 dispatch、docs、计数三处一起过一遍。dispatch 单边新增依然没有
  * 编译期防护——那条靠评审兜底。
  */
-#define IPC_CMD_COUNT 10
+#define IPC_CMD_COUNT 13
 _Static_assert(sizeof(ipc_cmd_docs) / sizeof(ipc_cmd_docs[0]) == IPC_CMD_COUNT,
                "ipc_cmd_docs changed: update dispatch() and IPC_CMD_COUNT "
                "together (add one, bump the other)");
@@ -1087,6 +1128,15 @@ static bool dispatch(struct woodland_server *server, const char *line, struct wo
     if (strcmp(cmd, "reload_config") == 0 || strcmp(cmd, "reload-config") == 0 ||
         strcmp(cmd, "reload") == 0) {
         return ipc_reload_config(server, out);
+    }
+    if (strcmp(cmd, "pixel") == 0) {
+        return woodland_ipc_cmd_pixel(server, p + n, out);
+    }
+    if (strcmp(cmd, "screenshot") == 0) {
+        return woodland_ipc_cmd_screenshot(server, p + n, out);
+    }
+    if (strcmp(cmd, "wait") == 0) {
+        return woodland_ipc_cmd_wait_sync(server, p + n, out);
     }
 
     respond_error(out, cmd, "unknown command, try 'help'");

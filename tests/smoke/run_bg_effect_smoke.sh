@@ -90,13 +90,7 @@ view_count() {
 }
 
 wait_view_count() {
-    _want="$1"
-    _i=0
-    while [ "$_i" -lt 100 ]; do
-        [ "$(view_count)" = "$_want" ] && return 0
-        sleep 0.05; _i=$((_i+1))
-    done
-    return 1
+    "$WCTL" -s "$SOCK" -t 5000 wait view_count count="$1" >/dev/null 2>&1
 }
 
 scenario() {

@@ -333,6 +333,11 @@ struct woodland_server {
     int ipc_fd;
     struct wl_event_source *ipc_source;
     struct wl_list ipc_clients; // struct woodland_ipc_client.link
+    struct wl_event_source *ipc_wait_idle;
+    struct wl_listener ipc_view_mapped;
+    struct wl_listener ipc_view_unmapped;
+    struct wl_listener ipc_view_changed;
+    struct wl_listener ipc_workspace_changed;
 
     /*
      * 不变量自检（src/selfcheck）。

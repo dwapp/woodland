@@ -23,11 +23,13 @@ if get_option('test').enabled()
        find_program('sh'),
        args: [meson.current_source_dir() / 'smoke' / 'run_headless.sh',
               woodland_bin.full_path()],
+       suite: ['smoke', 'quick'],
        is_parallel: false)
   test('smoke-protocol',
        find_program('sh'),
        args: [meson.current_source_dir() / 'smoke' / 'run_protocol_smoke.sh',
               woodland_bin.full_path()],
+       suite: ['smoke'],
        is_parallel: false)
 
   # 拖拽：start_drag 必须被回应。拒绝路径可以 headless 驱动（serial 无效），
@@ -41,6 +43,7 @@ if get_option('test').enabled()
                 woodland_bin.full_path(),
                 dnd_probe.full_path(),
                 wctl_bin.full_path()],
+         suite: ['smoke'],
          is_parallel: false,
          timeout: 60)
   endif
@@ -51,6 +54,7 @@ if get_option('test').enabled()
        find_program('sh'),
        args: [meson.current_source_dir() / 'smoke' / 'run_capture_smoke.sh',
               woodland_bin.full_path()],
+       suite: ['smoke'],
        is_parallel: false,
        timeout: 60)
 
@@ -60,6 +64,7 @@ if get_option('test').enabled()
        find_program('sh'),
        args: [meson.current_source_dir() / 'smoke' / 'run_output_mgmt_smoke.sh',
               woodland_bin.full_path()],
+       suite: ['smoke'],
        is_parallel: false,
        timeout: 60)
 
@@ -88,6 +93,7 @@ if get_option('test').enabled()
          args: [meson.current_source_dir() / 'smoke' / 'run_idle_smoke.sh',
                 woodland_bin.full_path(),
                 idle_probe.full_path()],
+         suite: ['smoke'],
          is_parallel: false,
          timeout: 60)
   endif
@@ -121,6 +127,7 @@ if get_option('test').enabled()
                 woodland_bin.full_path(),
                 wallpaper_probe.full_path(),
                 wctl_bin.full_path()],
+         suite: ['smoke'],
          is_parallel: false,
          timeout: 60)
   endif
@@ -150,6 +157,7 @@ if get_option('test').enabled()
                 woodland_bin.full_path(),
                 action_probe.full_path(),
                 wctl_bin.full_path()],
+         suite: ['smoke'],
          is_parallel: false,
          timeout: 90)
   endif
@@ -191,6 +199,7 @@ if get_option('test').enabled()
                 woodland_bin.full_path(),
                 shortcut_probe.full_path(),
                 wctl_bin.full_path()],
+         suite: ['smoke'],
          is_parallel: false,
          timeout: 120)
   endif
@@ -204,6 +213,7 @@ if get_option('test').enabled()
               woodland_bin.full_path(),
               shortcutd_bin.full_path(),
               wctl_bin.full_path()],
+       suite: ['smoke'],
        is_parallel: false,
        timeout: 120)
 
@@ -244,6 +254,7 @@ if get_option('test').enabled()
                 woodland_bin.full_path(),
                 ftl_probe.full_path(),
                 wctl_bin.full_path()],
+         suite: ['smoke'],
          is_parallel: false,
          timeout: 150)
   endif
@@ -279,6 +290,7 @@ if get_option('test').enabled()
                 woodland_bin.full_path(),
                 sec_ctx_probe.full_path(),
                 wctl_bin.full_path()],
+         suite: ['smoke'],
          is_parallel: false,
          timeout: 60)
   endif
@@ -324,6 +336,7 @@ if get_option('test').enabled()
                 xwindow_probe.full_path(),
                 wctl_bin.full_path(),
                 xwindow_xoverride],
+         suite: ['smoke', 'xwayland'],
          is_parallel: false,
          timeout: 120)
   endif
@@ -351,6 +364,7 @@ if get_option('test').enabled()
          args: [meson.current_source_dir() / 'smoke' / 'run_output_mgmt_order_smoke.sh',
                 woodland_bin.full_path(),
                 om_probe.full_path()],
+         suite: ['smoke'],
          is_parallel: false,
          timeout: 60)
   endif
@@ -363,6 +377,7 @@ if get_option('test').enabled()
                 xoverride_bin.full_path(),
                 # 标题栏底色的期望值由合成器自报（ssd.palette），脚本不再抄常量
                 wctl_bin.full_path()],
+         suite: ['smoke', 'xwayland'],
          is_parallel: false,
          timeout: 90)
   endif
@@ -431,6 +446,7 @@ if get_option('test').enabled()
                   woodland_bin.full_path(),
                   deco_probe.full_path(),
                   wctl_bin.full_path()],
+           suite: ['smoke', 'needs-gpu'],
            is_parallel: false,
            timeout: 90)
       # ext-background-effect：blur region 的双缓冲/裁剪/撤除。同一个探针，
@@ -442,6 +458,7 @@ if get_option('test').enabled()
                   woodland_bin.full_path(),
                   wctl_bin.full_path(),
                   simple_ssd_bin.full_path()],
+           suite: ['smoke', 'quick'],
            is_parallel: false,
            timeout: 60)
 
@@ -452,8 +469,20 @@ if get_option('test').enabled()
                   woodland_bin.full_path(),
                   wctl_bin.full_path(),
                   simple_ssd_bin.full_path()],
+           suite: ['smoke', 'quick'],
            is_parallel: false,
            timeout: 90)
+
+      # 无头屏幕结构化断言：wctl pixel / screenshot --region / wait
+      test('smoke-assert',
+           find_program('sh'),
+           args: [meson.current_source_dir() / 'smoke' / 'run_assert_smoke.sh',
+                  woodland_bin.full_path(),
+                  wctl_bin.full_path(),
+                  simple_ssd_bin.full_path()],
+           suite: ['smoke', 'quick'],
+           is_parallel: false,
+           timeout: 60)
 
       if fs.exists(action_xml)
         test('smoke-multitask',
@@ -463,6 +492,7 @@ if get_option('test').enabled()
                     simple_ssd_bin.full_path(),
                     action_probe.full_path(),
                     wctl_bin.full_path()],
+             suite: ['smoke', 'needs-gpu'],
              is_parallel: false,
              timeout: 60)
       endif
@@ -503,6 +533,7 @@ if get_option('test').enabled()
                   woodland_bin.full_path(),
                   switcher_probe.full_path(),
                   wctl_bin.full_path()],
+           suite: ['smoke'],
            is_parallel: false,
            timeout: 60)
 
@@ -513,6 +544,7 @@ if get_option('test').enabled()
                   woodland_bin.full_path(),
                   deco_probe.full_path(),
                   wctl_bin.full_path()],
+           suite: ['smoke', 'needs-gpu'],
            is_parallel: false,
            timeout: 90)
 
@@ -541,6 +573,7 @@ if get_option('test').enabled()
                   appearance_probe.full_path(),
                   wctl_bin.full_path(),
                   deco_probe.full_path()],
+           suite: ['smoke'],
            is_parallel: false,
            timeout: 90)
     endif
