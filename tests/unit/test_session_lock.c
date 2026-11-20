@@ -187,10 +187,19 @@ int main(void)
     assert(server.renderer != NULL);
 
     server.allocator = wlr_allocator_autocreate(server.backend, server.renderer);
+#if WOODLAND_HAVE_EFFECTS
+    if (server.allocator == NULL) {
+        fprintf(stderr, "no dmabuf allocator for fx_renderer, skip\n");
+        wlr_renderer_destroy(server.renderer);
+        wlr_backend_destroy(server.backend);
+        wl_display_destroy(server.display);
+        return 77;
+    }
+#endif
+    assert(server.allocator != NULL);
     server.compositor = wlr_compositor_create(server.display, 5, server.renderer);
     assert(server.compositor != NULL);
     wlr_renderer_init_wl_shm(server.renderer, server.display);
-    assert(server.allocator != NULL);
 
     server.scene = wlr_scene_create();
     assert(server.scene != NULL);
