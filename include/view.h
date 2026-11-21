@@ -239,6 +239,12 @@ bool woodland_view_on_output(struct woodland_view *view, struct wlr_output *outp
 bool woodland_shell_init(struct woodland_server *server);
 void woodland_shell_finish(struct woodland_server *server);
 
+/**
+ * 约束 / 解约束 xdg-popup，使其在屏幕可用区域（工作区）内合理摆位（避让屏幕边缘）。
+ * 兼容嵌套 popup（子菜单）、layer-shell 派生 popup 及全屏状态。
+ */
+void woodland_popup_unconstrain(struct wlr_xdg_popup *popup);
+
 /** 命中测试：返回 (lx,ly) 处的视图及其 surface 局部坐标。 */
 struct woodland_view *woodland_view_at(struct woodland_server *server, double lx, double ly,
                                        struct wlr_surface **surface, double *sx, double *sy);

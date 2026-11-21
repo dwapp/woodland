@@ -297,6 +297,25 @@ if wayland_client_dep.found() and wayland_scanner.found() and wp_datadir != ''
 endif
 endif
 
+if wayland_client_dep.found() and wayland_scanner.found() and wp_datadir != ''
+  xdg_shell_xml = wp_datadir / 'stable' / 'xdg-shell' / 'xdg-shell.xml'
+  if fs.exists(xdg_shell_xml)
+    test_popup_srcs = ['test_popup.c']
+    test_popup_srcs += custom_target('test-popup-xdg-shell-client-header',
+      output: 'test-popup-xdg-shell-client-protocol.h',
+      command: [wayland_scanner, 'client-header', xdg_shell_xml, '@OUTPUT@'])
+    test_popup_srcs += custom_target('test-popup-xdg-shell-client-code',
+      output: 'test-popup-xdg-shell-protocol.c',
+      command: [wayland_scanner, 'private-code', xdg_shell_xml, '@OUTPUT@'])
+
+    test_popup = executable('test_popup', test_popup_srcs,
+      dependencies: [scene_deps, wayland_server, wayland_client_dep, xkbcommon],
+      include_directories: woodland_inc,
+      link_with: [protocol_lib, shell_lib, layer_lib, output_lib, cursor_lib, seat_lib, ime_lib, ssd_lib, effect_lib, workspace_lib, session_lock_lib, capture_lib, util_lib, config_lib, trace_lib, dnd_lib] + xwayland_libs)
+    test('popup', test_popup, suite: ['unit', 'quick'])
+  endif
+endif
+
 # dnd 同样是叶子模块（scene + trace）。真拖拽没法 headless 驱动，这里只
 # 驱动状态机：图标树的开关/置顶、空图标、重复 destroy。
 test_dnd = executable('test_dnd', 'test_dnd.c',
