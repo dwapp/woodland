@@ -24,6 +24,7 @@
 SMOKE_DUMPED=0
 SMOKE_EXITING=0
 SMOKE_COMP_PID=""
+SMOKE_CFG_DIR=""
 
 # 脚本可以覆盖它；默认什么也不做
 smoke_cleanup() {
@@ -45,6 +46,10 @@ smoke_init() {
     fi
     # 上一轮的产物必须清掉，否则会把旧现场当成这次的
     rm -rf "$SMOKE_DIR"
+    if [ -z "${XDG_CONFIG_HOME:-}" ]; then
+        SMOKE_CFG_DIR="$(mktemp -d /tmp/woodland-smoke-cfg-XXXXXX 2>/dev/null || mktemp -d)"
+        export XDG_CONFIG_HOME="$SMOKE_CFG_DIR"
+    fi
     trap '_smoke_exit $?' EXIT
     trap '_smoke_exit 130' INT
     trap '_smoke_exit 143' TERM
@@ -59,6 +64,9 @@ _smoke_exit() {
         smoke_dump "$_rc"
     fi
     smoke_cleanup
+    if [ -n "${SMOKE_CFG_DIR:-}" ] && [ -d "$SMOKE_CFG_DIR" ]; then
+        rm -rf "$SMOKE_CFG_DIR"
+    fi
     exit "$_rc"
 }
 
