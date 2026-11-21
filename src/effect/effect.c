@@ -86,7 +86,7 @@ void woodland_effect_frame_corners(const struct woodland_view *view,
         return;
     }
     int radius = woodland_effect_corner_radius(view);
-    if (!view || view->maximized || view->fullscreen) {
+    if (!view || view->maximized || view->fullscreen || view->snapped_edges != 0) {
         radius = 0;
     }
 
@@ -94,28 +94,6 @@ void woodland_effect_frame_corners(const struct woodland_view *view,
     out->top_right = radius;
     out->bottom_right = radius;
     out->bottom_left = radius;
-
-    if (!view || view->snapped_edges == 0) {
-        return;
-    }
-
-    uint32_t edges = view->snapped_edges;
-    if (edges & WLR_EDGE_LEFT) {
-        out->top_left = 0;
-        out->bottom_left = 0;
-    }
-    if (edges & WLR_EDGE_RIGHT) {
-        out->top_right = 0;
-        out->bottom_right = 0;
-    }
-    if (edges & WLR_EDGE_TOP) {
-        out->top_left = 0;
-        out->top_right = 0;
-    }
-    if (edges & WLR_EDGE_BOTTOM) {
-        out->bottom_left = 0;
-        out->bottom_right = 0;
-    }
 }
 
 void woodland_effect_corners(const struct woodland_view *view, struct woodland_effect_corners *out)

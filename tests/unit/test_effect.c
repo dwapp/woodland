@@ -102,25 +102,25 @@ int main(void)
     assert(c.top_left == 0 && c.bottom_left == 0);
     view.fullscreen = false;
 
-    /* ---- 5.1) 贴边半屏/四分之一屏：贴住屏幕边缘的角清零 ---- */
-    view.snapped_edges = WLR_EDGE_LEFT;
-    clear_corners(&c);
-    woodland_effect_frame_corners(&view, &c);
-    assert(c.top_left == 0 && c.bottom_left == 0);
-    assert(c.top_right == 10 && c.bottom_right == 10);
+    /* ---- 5.1) 贴边半屏/四分之一屏：与最大化一样全部归零 ---- */
+    static const uint32_t snap_edge_cases[] = {
+        WLR_EDGE_LEFT,
+        WLR_EDGE_RIGHT,
+        WLR_EDGE_TOP,
+        WLR_EDGE_BOTTOM,
+        WLR_EDGE_LEFT | WLR_EDGE_TOP,
+        WLR_EDGE_RIGHT | WLR_EDGE_BOTTOM,
+    };
+    for (size_t i = 0; i < sizeof(snap_edge_cases) / sizeof(snap_edge_cases[0]); i++) {
+        view.snapped_edges = snap_edge_cases[i];
+        clear_corners(&c);
+        woodland_effect_frame_corners(&view, &c);
+        assert(c.top_left == 0 && c.top_right == 0 && c.bottom_left == 0 && c.bottom_right == 0);
 
-    /* 左上四分之一屏：左和上都贴边，只有右下保留圆角 */
-    view.snapped_edges = WLR_EDGE_LEFT | WLR_EDGE_TOP;
-    clear_corners(&c);
-    woodland_effect_frame_corners(&view, &c);
-    assert(c.top_left == 0 && c.top_right == 0 && c.bottom_left == 0);
-    assert(c.bottom_right == 10);
-
-    /* 带标题栏时：上角由标题栏归零，内容下角左贴边只留右下 */
-    clear_corners(&c);
-    woodland_effect_corners(&view, &c);
-    assert(c.top_left == 0 && c.top_right == 0 && c.bottom_left == 0);
-    assert(c.bottom_right == 10);
+        clear_corners(&c);
+        woodland_effect_corners(&view, &c);
+        assert(c.top_left == 0 && c.top_right == 0 && c.bottom_left == 0 && c.bottom_right == 0);
+    }
     view.snapped_edges = 0;
     /* ---- 6) blur region：空区域 / 非法尺寸不成立 ---- */
     struct wlr_box box = {0};
@@ -285,6 +285,10 @@ int main(void)
     view.fullscreen = false;
     view.snapped_edges = WLR_EDGE_LEFT;
     assert(!woodland_effect_shadow_params(&view, &sp));
+    view.snapped_edges = WLR_EDGE_RIGHT;
+    assert(!woodland_effect_shadow_params(&view, &sp));
+    view.snapped_edges = WLR_EDGE_LEFT | WLR_EDGE_TOP;
+    assert(!woodland_effect_shadow_params(&view, &sp));
     view.snapped_edges = 0;
 
     /* 配置启用全局阴影：激活态正常透明度，非激活态淡化 */
@@ -297,6 +301,13 @@ int main(void)
     view.activated = true;
     assert(woodland_effect_shadow_params(&view, &sp));
     assert(sp.radius == 15 && sp.offset_x == 2 && sp.offset_y == 5);
+
+    /* 全局配置阴影下，贴边各方向同样不应有阴影 */
+    view.snapped_edges = WLR_EDGE_LEFT;
+    assert(!woodland_effect_shadow_params(&view, &sp));
+    view.snapped_edges = WLR_EDGE_BOTTOM;
+    assert(!woodland_effect_shadow_params(&view, &sp));
+    view.snapped_edges = 0;
     float active_alpha = sp.color[3];
     view.activated = false;
     assert(woodland_effect_shadow_params(&view, &sp));

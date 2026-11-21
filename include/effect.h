@@ -102,8 +102,7 @@ void woodland_effect_layer_blur(struct woodland_layer_surface *layer, const stru
 /**
  * 窗口外框四角の内圆角半径（纯函数）。
  *
- * 最大化/全屏全部归 0；半屏/四分之一屏贴边（snapped_edges）时，贴住屏幕边那一侧
- * 的角归 0，避免在屏幕边缘露出壁纸缺口。
+ * 最大化/全屏/贴边（snapped_edges）全部归 0。
  */
 void woodland_effect_frame_corners(const struct woodland_view *view,
                                    struct woodland_effect_corners *out);

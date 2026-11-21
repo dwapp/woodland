@@ -937,6 +937,10 @@ bool woodland_view_snap_to_output(struct woodland_view *view, uint32_t edges,
     view->snapped_edges = edges;
     woodland_view_set_tiled(view, edges);
     woodland_view_apply_outer_geometry(view, &tile);
+    woodland_ssd_update(view);
+    if (!view->ssd) {
+        woodland_effect_update(view);
+    }
     woodland_trace_add("snap", view->id, "apply output=%s edges=%u tile=%dx%d at %d,%d",
                        output->wlr_output ? output->wlr_output->name : "-",
                        edges, tile.width, tile.height, tile.x, tile.y);

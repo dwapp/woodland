@@ -165,6 +165,10 @@ static void view_unsnap_for_drag(struct woodland_view *view, double cur_x, doubl
     };
     shell_view_apply_geometry(view, &target);
     shell_view_schedule_configure(view);
+    woodland_ssd_update(view);
+    if (!view->ssd) {
+        woodland_effect_update(view);
+    }
 }
 
 /* 释放鼠标时把"拖到边上的窗口"铺满（左/右半屏、上边最大化、四角 1/4） */
@@ -242,6 +246,11 @@ void woodland_view_begin_interactive(struct woodland_view *view, enum woodland_c
         /* 手动缩放即放弃贴边状态（尺寸由用户接管） */
         view->snapped_edges = 0;
         view->pending_snap_edges = 0;
+        woodland_view_set_tiled(view, 0);
+        woodland_ssd_update(view);
+        if (!view->ssd) {
+            woodland_effect_update(view);
+        }
         struct wlr_box geo_box;
         woodland_view_content_box(view, &geo_box);
         double border_x =
