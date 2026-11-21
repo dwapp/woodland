@@ -53,6 +53,8 @@ static const struct ctl_cmd_doc ctl_docs[] = {
     {"maximize", "maximize <view_id> <0|1>", "set maximized state"},
     {"fullscreen", "fullscreen <view_id> <0|1>", "set fullscreen state"},
     {"minimize", "minimize <view_id> <0|1>", "set minimized state"},
+    {"always_on_top", "always_on_top <view_id> <0|1>", "set always-on-top state"},
+    {"pin", "pin <view_id> <0|1>", "alias for always_on_top"},
     {"workspace", "workspace <name>", "switch to workspace by name (\"1\"..\"10\")"},
     {"pointer_move", "pointer_move <x> <y>",
      "warp the cursor to layout coords and run the normal motion path"},
@@ -172,7 +174,8 @@ static bool ctl_view_cmd(struct woodland_server *server, const char *cmd, const 
     if (strcmp(cmd, "move") == 0 || strcmp(cmd, "resize") == 0) {
         nvals = 3;
     } else if (strcmp(cmd, "maximize") == 0 || strcmp(cmd, "fullscreen") == 0 ||
-               strcmp(cmd, "minimize") == 0) {
+               strcmp(cmd, "minimize") == 0 || strcmp(cmd, "always_on_top") == 0 ||
+               strcmp(cmd, "pin") == 0) {
         nvals = 2;
     }
     long v[3] = {0};
@@ -226,6 +229,8 @@ static bool ctl_view_cmd(struct woodland_server *server, const char *cmd, const 
         woodland_view_set_maximized(view, v[1] == 1);
     } else if (strcmp(cmd, "fullscreen") == 0) {
         woodland_view_set_fullscreen(view, v[1] == 1, NULL);
+    } else if (strcmp(cmd, "always_on_top") == 0 || strcmp(cmd, "pin") == 0) {
+        woodland_view_set_always_on_top(view, v[1] == 1);
     } else {
         woodland_view_set_minimized(view, v[1] == 1);
     }

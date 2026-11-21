@@ -79,6 +79,9 @@ static bool view_focusable_ex(const struct woodland_view *view, bool ignore_mini
     if (!view || !view->server) {
         return false;
     }
+    if (view->dde_shell.active && !view->dde_shell.accept_keyboard_focus) {
+        return false;
+    }
     if (!view->mapped || (!ignore_minimized && view->minimized) || view->override_redirect ||
         view->workspace != view->server->active_workspace) {
         return false;
@@ -261,16 +264,68 @@ static bool view_is_descendant_of(const struct woodland_view *view,
     return false;
 }
 
+enum woodland_view_layer woodland_view_get_layer(const struct woodland_view *view)
+{
+    if (!view) {
+        return WOODLAND_VIEW_LAYER_NORMAL;
+    }
+    if (view->dde_shell.active) {
+        if (view->dde_shell.role == WOODLAND_DDE_SHELL_ROLE_OVERLAY) {
+            return WOODLAND_VIEW_LAYER_OVERLAY;
+        }
+        if (view->dde_shell.role == WOODLAND_DDE_SHELL_ROLE_ALWAYS_ON_TOP) {
+            return WOODLAND_VIEW_LAYER_ALWAYS_ON_TOP;
+        }
+        return WOODLAND_VIEW_LAYER_NORMAL;
+    }
+    if (view->always_on_top) {
+        return WOODLAND_VIEW_LAYER_ALWAYS_ON_TOP;
+    }
+    return WOODLAND_VIEW_LAYER_NORMAL;
+}
+
 static void view_raise_node(struct woodland_view *view)
 {
     if (!view || !view->mapped) {
         return;
     }
+    enum woodland_view_layer target_layer = woodland_view_get_layer(view);
+
+    /* 1. 场景节点提升：保持在同一工作区同层级顶层，但低于任何更高层级的窗口 */
     if (view->scene_tree) {
-        wlr_scene_node_raise_to_top(&view->scene_tree->node);
+        struct woodland_view *lowest_higher = NULL;
+        struct woodland_view *v;
+        wl_list_for_each_reverse(v, &view->server->views, link) {
+            if (v != view && v->workspace == view->workspace && v->mapped && v->scene_tree) {
+                if (woodland_view_get_layer(v) > target_layer) {
+                    lowest_higher = v;
+                    break;
+                }
+            }
+        }
+        if (lowest_higher) {
+            wlr_scene_node_place_below(&view->scene_tree->node, &lowest_higher->scene_tree->node);
+        } else {
+            wlr_scene_node_raise_to_top(&view->scene_tree->node);
+        }
     }
+
+    /* 2. views 链表提升：按从高层到低层、同层内先到先得的顺序，插入到首个 layer <= target_layer 之前 */
     wl_list_remove(&view->link);
-    wl_list_insert(&view->server->views, &view->link);
+    struct woodland_view *pos = NULL;
+    struct woodland_view *v;
+    wl_list_for_each(v, &view->server->views, link) {
+        if (woodland_view_get_layer(v) <= target_layer) {
+            pos = v;
+            break;
+        }
+    }
+    if (pos) {
+        wl_list_insert(pos->link.prev, &view->link);
+    } else {
+        wl_list_insert(view->server->views.prev, &view->link);
+    }
+
     if (view->server && view->server->xwayland_restack_hook) {
         view->server->xwayland_restack_hook(view);
     }
@@ -321,6 +376,33 @@ static void view_raise(struct woodland_view *view)
     if (view->server && view->server->xwayland_flush_hook) {
         view->server->xwayland_flush_hook(view->server);
     }
+}
+
+void woodland_view_restack(struct woodland_view *view)
+{
+    if (!view || !view->server) {
+        return;
+    }
+    view_raise(view);
+}
+
+void woodland_view_set_always_on_top(struct woodland_view *view, bool always_on_top)
+{
+    if (!view || view->always_on_top == always_on_top) {
+        return;
+    }
+    view->always_on_top = always_on_top;
+    if (view->dde_shell.active) {
+        uint32_t new_role = always_on_top ?
+            (uint32_t)WOODLAND_DDE_SHELL_ROLE_ALWAYS_ON_TOP : (uint32_t)WOODLAND_DDE_SHELL_ROLE_NORMAL;
+        if (view->dde_shell.role != new_role) {
+            view->dde_shell.role = new_role;
+            if (view->dde_shell.role_notify) {
+                view->dde_shell.role_notify(view, view->dde_shell.user_data);
+            }
+        }
+    }
+    woodland_view_restack(view);
 }
 
 void woodland_focus_view(struct woodland_view *view, bool raise)

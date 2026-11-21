@@ -464,6 +464,8 @@ static void append_view_details(struct woodland_server *server, struct woodland_
     woodland_json_obj_bool(&obj, "minimized", view->minimized);
     woodland_json_obj_bool(&obj, "maximized", view->maximized);
     woodland_json_obj_bool(&obj, "fullscreen", view->fullscreen);
+    woodland_json_obj_bool(&obj, "always_on_top", view->always_on_top);
+    woodland_json_obj_int(&obj, "layer", (int)woodland_view_get_layer(view));
     woodland_json_obj_bool(&obj, "override_redirect", view->override_redirect);
     woodland_json_obj_bool(&obj, "csd", view->deco_csd);
     woodland_json_obj_bool(&obj, "focused", server->focused_view == view);
@@ -508,6 +510,8 @@ static void append_view_details(struct woodland_server *server, struct woodland_
     }
     woodland_json_obj_close(&sec_obj);
 
+    woodland_json_obj_key(&obj, "dde_shell");
+    woodland_protocol_dde_shell_view_status(view, out);
 
     struct wlr_box outer = {0};
     woodland_view_outer_box(view, &outer);
@@ -743,6 +747,8 @@ static void ipc_get_tree(struct woodland_server *server, struct woodland_json *o
     woodland_protocol_xwindow_control_status(server, out);
     woodland_json_obj_key(&obj, "remote_subsurface");
     woodland_protocol_remote_subsurface_status(server, out);
+    woodland_json_obj_key(&obj, "dde_shell");
+    woodland_protocol_dde_shell_status(server, out);
 
 
     woodland_json_obj_key(&obj, "focus");

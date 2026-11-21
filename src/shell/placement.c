@@ -824,7 +824,32 @@ void woodland_view_place_initial(struct woodland_view *view)
     }
 
     struct wlr_box geometry;
-    if (view->parent && view->parent->mapped) {
+    if (view->dde_shell.active && (view->dde_shell.has_position_hint || view->dde_shell.has_cursor_placement_hint)) {
+        if (view->dde_shell.has_position_hint) {
+            geometry.x = view->dde_shell.position_x;
+            geometry.y = view->dde_shell.position_y;
+        } else {
+            int cursor_x = server->cursor ? (int)server->cursor->x : area.x;
+            int cursor_y = server->cursor ? (int)server->cursor->y : area.y;
+            int cursor_size = 24;
+            if (server->xcursor_manager && server->xcursor_manager->size > 0) {
+                cursor_size = (int)server->xcursor_manager->size;
+            }
+            geometry.x = cursor_x + cursor_size / 2 + view->dde_shell.cursor_x_offset - content_w / 2;
+            geometry.y = cursor_y + cursor_size + view->dde_shell.cursor_y_offset;
+        }
+        struct wlr_box outer = {
+            .x = geometry.x - margins.left,
+            .y = geometry.y - margins.top,
+            .width = content_w + margins.left + margins.right,
+            .height = content_h + margins.top + margins.bottom,
+        };
+        woodland_box_constrain(&outer, &area);
+        geometry.x = outer.x + margins.left;
+        geometry.y = outer.y + margins.top;
+        geometry.width = content_w;
+        geometry.height = content_h;
+    } else if (view->parent && view->parent->mapped) {
         /* 对话框/工具窗：以父窗口外框为中心（越界时贴回工作区） */
         struct wlr_box parent_outer;
         woodland_view_outer_box(view->parent, &parent_outer);
@@ -855,7 +880,11 @@ void woodland_view_place_initial(struct woodland_view *view)
     }
     wlr_scene_node_set_position(&view->scene_tree->node, geometry.x, geometry.y);
     /* 只记"凭什么放这里"：几何本身 get_tree 里有，写进来是噪音 */
-    if (view->parent && view->parent->mapped) {
+    if (view->dde_shell.active && (view->dde_shell.has_position_hint || view->dde_shell.has_cursor_placement_hint)) {
+        woodland_trace_add("place", view->id, "dde_shell hint=%s %dx%d at %d,%d",
+                           view->dde_shell.has_position_hint ? "pos" : "cursor",
+                           content_w, content_h, geometry.x, geometry.y);
+    } else if (view->parent && view->parent->mapped) {
         woodland_trace_add("place", view->id, "on parent=%u %dx%d at %d,%d", view->parent->id,
                            content_w, content_h, geometry.x, geometry.y);
     } else {

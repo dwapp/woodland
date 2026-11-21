@@ -395,6 +395,9 @@ bool woodland_view_wants_foreign_toplevel(const struct woodland_view *view)
     if (!view) {
         return false;
     }
+    if (view->dde_shell.active && (view->dde_shell.skip_flags & 0x2)) {
+        return false;
+    }
     if (view->type == WOODLAND_VIEW_XDG) {
         return true;
     }

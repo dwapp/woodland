@@ -237,6 +237,10 @@ void woodland_view_map(struct woodland_view *view)
     }
     wlr_scene_node_reparent(&view->scene_tree->node, view->workspace->tree);
     wl_list_insert(&server->views, &view->link);
+    if (server->dde_shell_init_view_hook) {
+        server->dde_shell_init_view_hook(view);
+    }
+    woodland_view_restack(view);
     woodland_trace_add("map", view->id, "ws=%s parent=%u",
                        view->workspace ? view->workspace->name : "-",
                        view->parent ? view->parent->id : 0);
@@ -376,6 +380,11 @@ void woodland_view_destroy(struct woodland_view *view)
     if (view->type == WOODLAND_VIEW_XWAYLAND && view->scene_tree) {
         wlr_scene_node_destroy(&view->scene_tree->node);
         view->scene_tree = NULL;
+    }
+    if (view->dde_shell.active) {
+        view->dde_shell.active = false;
+        view->dde_shell.role_notify = NULL;
+        view->dde_shell.user_data = NULL;
     }
     woodland_selfcheck_schedule(view->server, "destroy");
     free(view->title);

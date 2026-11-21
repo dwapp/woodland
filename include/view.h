@@ -46,6 +46,41 @@ enum woodland_tearing_hint {
     WOODLAND_TEARING_ASYNC = 1,
 };
 
+/** 视图堆叠层级（NORMAL < ALWAYS_ON_TOP < OVERLAY）。 */
+enum woodland_view_layer {
+    WOODLAND_VIEW_LAYER_NORMAL = 0,
+    WOODLAND_VIEW_LAYER_ALWAYS_ON_TOP = 1,
+    WOODLAND_VIEW_LAYER_OVERLAY = 2,
+};
+
+enum woodland_dde_shell_role {
+    WOODLAND_DDE_SHELL_ROLE_NORMAL = 0,
+    WOODLAND_DDE_SHELL_ROLE_OVERLAY = 1,
+    WOODLAND_DDE_SHELL_ROLE_ALWAYS_ON_TOP = 2,
+};
+
+enum woodland_dde_shell_skip_flag {
+    WOODLAND_DDE_SHELL_SKIP_FLAG_SWITCHER = 0x1,
+    WOODLAND_DDE_SHELL_SKIP_FLAG_DOCK_PREVIEW = 0x2,
+    WOODLAND_DDE_SHELL_SKIP_FLAG_MULTITASK_VIEW = 0x4,
+};
+
+/** treeland-dde-shell-unstable-v2 状态（由 dde_shell.c 维护，shell.c 与 placement.c 读取）。 */
+struct woodland_dde_shell_state {
+    bool active;
+    enum woodland_dde_shell_role role;
+    bool has_position_hint;
+    int32_t position_x;
+    int32_t position_y;
+    bool has_cursor_placement_hint;
+    int32_t cursor_x_offset;
+    int32_t cursor_y_offset;
+    uint32_t skip_flags;
+    bool accept_keyboard_focus;
+    void (*role_notify)(struct woodland_view *view, void *user_data);
+    void *user_data;
+};
+
 struct woodland_view {
     struct wl_list link; // woodland_server.views
     struct woodland_server *server;
@@ -69,6 +104,7 @@ struct woodland_view {
     bool minimized;
     bool maximized;
     bool fullscreen;
+    bool always_on_top;
     /*
      * 我们下发给客户端/装饰的激活态。
      *
@@ -99,6 +135,7 @@ struct woodland_view {
      * 之前就会设区域，而 scenefx 节点到 map 之后才有。
      */
     struct woodland_effect_state effect;
+    struct woodland_dde_shell_state dde_shell;
     bool deco_csd;                               // 客户端请求 CSD（map 后不建 SSD）
     bool deco_registered;                        // 是否已注册 zxdg_decoration listener
     struct wlr_xdg_toplevel_decoration_v1 *deco; // zxdg decoration 对象
@@ -215,6 +252,9 @@ void woodland_view_set_maximized(struct woodland_view *view, bool maximized);
 void woodland_view_set_fullscreen(struct woodland_view *view, bool fullscreen,
                                   struct wlr_output *output);
 void woodland_view_set_minimized(struct woodland_view *view, bool minimized);
+void woodland_view_set_always_on_top(struct woodland_view *view, bool always_on_top);
+enum woodland_view_layer woodland_view_get_layer(const struct woodland_view *view);
+void woodland_view_restack(struct woodland_view *view);
 
 /** 更新标题/应用标识（内部拷一份，不接管入参所有权）。 */
 void woodland_view_set_title(struct woodland_view *view, const char *title);

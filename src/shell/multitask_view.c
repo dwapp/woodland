@@ -505,6 +505,9 @@ static int mv_count_workspace_views(const struct woodland_server *server,
     struct woodland_view *v;
     wl_list_for_each(v, &server->views, link) {
         if (v->mapped && !v->override_redirect && v->workspace == ws) {
+            if (v->dde_shell.active && (v->dde_shell.skip_flags & 0x4)) {
+                continue;
+            }
             count++;
         }
     }
@@ -913,6 +916,9 @@ static void mv_build_cards(struct woodland_multitask_view *mv, struct woodland_v
     struct woodland_view *v;
     wl_list_for_each(v, &mv->server->views, link) {
         if (!v->mapped || v->override_redirect) {
+            continue;
+        }
+        if (v->dde_shell.active && (v->dde_shell.skip_flags & 0x4)) {
             continue;
         }
         if (mv->selected_workspace && v->workspace != mv->selected_workspace) {

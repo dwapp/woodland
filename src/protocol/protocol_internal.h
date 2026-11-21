@@ -22,6 +22,7 @@ struct woodland_proto_tearing;
 struct woodland_proto_security_context;
 struct woodland_proto_xwindow_control;
 struct woodland_proto_remote_subsurface;
+struct woodland_proto_dde_shell;
 struct wl_client;
 struct woodland_tearing_controller;
 
@@ -85,6 +86,7 @@ struct woodland_proto {
     struct woodland_proto_security_context *security_context; /* security_context.c */
     struct woodland_proto_xwindow_control *xwindow_control;   /* xwindow_control.c */
     struct woodland_proto_remote_subsurface *remote_subsurface; /* remote_subsurface.c */
+    struct woodland_proto_dde_shell *dde_shell;               /* dde_shell.c */
 };
 
 /* 空闲与抑制族（idle.c）：idle-notify / idle-inhibit / keyboard-shortcuts-inhibit */
@@ -185,5 +187,9 @@ void woodland_proto_xwindow_control_finish(struct woodland_proto *proto);
 /* 跨客户端子表面族（remote_subsurface.c）：treeland-remote-subsurface-unstable-v1 */
 bool woodland_proto_remote_subsurface_init(struct woodland_proto *proto);
 void woodland_proto_remote_subsurface_finish(struct woodland_proto *proto);
+
+/* DDE Shell 角色协议（dde_shell.c）：treeland-dde-shell-unstable-v2 */
+bool woodland_proto_dde_shell_init(struct woodland_proto *proto);
+void woodland_proto_dde_shell_finish(struct woodland_proto *proto);
 
 #endif

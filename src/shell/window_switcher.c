@@ -224,6 +224,9 @@ static int switcher_collect(struct woodland_server *server,
         if (n >= max) {
             break;
         }
+        if (view->dde_shell.active && (view->dde_shell.skip_flags & 0x1)) {
+            continue;
+        }
         /*
          * 判定用 woodland_view_restorable()（focusable 忽略最小化）：
          * 最小化的窗口自己拿不到焦点，但仍然是个合法的切换目标——提交时

@@ -365,6 +365,44 @@ if get_option('test').enabled()
          timeout: 120)
   endif
 
+  # treeland-dde-shell-unstable-v2
+  dde_shell_xml = meson.project_source_root() / 'protocols' / 'treeland' / 'treeland-dde-shell-unstable-v2.xml'
+  if wayland_client_dep.found() and wayland_scanner.found() and fs.exists(dde_shell_xml) and wp_datadir != ''
+    dde_shell_xdg_xml = wp_datadir / 'stable' / 'xdg-shell' / 'xdg-shell.xml'
+    if fs.exists(dde_shell_xdg_xml)
+      dde_shell_probe_srcs = [
+        'smoke/dde_shell_probe.c',
+        custom_target('dde-shell-client-header',
+          input: dde_shell_xml,
+          output: 'treeland-dde-shell-unstable-v2-client-protocol.h',
+          command: [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@']),
+        custom_target('dde-shell-client-code',
+          input: dde_shell_xml,
+          output: 'treeland-dde-shell-unstable-v2-protocol.c',
+          command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@']),
+        custom_target('dde-shell-xdg-shell-client-header',
+          input: dde_shell_xdg_xml,
+          output: 'dde-shell-xdg-shell-client-protocol.h',
+          command: [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@']),
+        custom_target('dde-shell-xdg-shell-client-code',
+          input: dde_shell_xdg_xml,
+          output: 'dde-shell-xdg-shell-protocol.c',
+          command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@']),
+      ]
+      dde_shell_probe = executable('dde_shell_probe', dde_shell_probe_srcs,
+                                   dependencies: [wayland_client_dep])
+      test('smoke-dde-shell',
+           find_program('sh'),
+           args: [meson.current_source_dir() / 'smoke' / 'run_dde_shell_smoke.sh',
+                  woodland_bin.full_path(),
+                  dde_shell_probe.full_path(),
+                  wctl_bin.full_path()],
+           suite: ['smoke'],
+           is_parallel: false,
+           timeout: 90)
+    endif
+  endif
+
 
   # output-management 的事件顺序回归（apply 的 succeeded 必须先于新一轮
   # configuration + done）。协议 xml 属于 wlr-protocols（不在

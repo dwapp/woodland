@@ -47,7 +47,7 @@ bool woodland_trace_enabled(void);
  *   workspace / output_add / output_remove / cfg_apply / deco / bg_effect /
  *   action / appearance / shortcut / ftl / tearing / vt / snap / dnd /
  *   sec_ctx / xwindow / menu / multitask / switcher / spawn /
- *   remote_subsurface
+ *   remote_subsurface / dde_shell
  *
  * spawn 专指"合成器要不要 / 有没有拉起外部进程"（startup_cmd、
  * woodland-shortcutd）。别混进 action：那个标签是
