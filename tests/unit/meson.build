@@ -313,6 +313,29 @@ if wayland_client_dep.found() and wayland_scanner.found() and wp_datadir != ''
       include_directories: woodland_inc,
       link_with: [protocol_lib, shell_lib, layer_lib, output_lib, cursor_lib, seat_lib, ime_lib, ssd_lib, effect_lib, workspace_lib, session_lock_lib, capture_lib, util_lib, config_lib, trace_lib, dnd_lib] + xwayland_libs)
     test('popup', test_popup, suite: ['unit', 'quick'])
+
+    remote_subsurface_xml = meson.project_source_root() / 'protocols' / 'treeland' / 'treeland-remote-subsurface-unstable-v1.xml'
+    if fs.exists(remote_subsurface_xml)
+      test_remote_subsurface_srcs = ['test_remote_subsurface.c']
+      test_remote_subsurface_srcs += custom_target('test-remote-subsurface-client-header',
+        output: 'test-remote-subsurface-client-protocol.h',
+        command: [wayland_scanner, 'client-header', remote_subsurface_xml, '@OUTPUT@'])
+      test_remote_subsurface_srcs += custom_target('test-remote-subsurface-client-code',
+        output: 'test-remote-subsurface-protocol.c',
+        command: [wayland_scanner, 'private-code', remote_subsurface_xml, '@OUTPUT@'])
+      test_remote_subsurface_srcs += custom_target('test-remote-subsurface-xdg-shell-client-header',
+        output: 'test-remote-subsurface-xdg-shell-client-protocol.h',
+        command: [wayland_scanner, 'client-header', xdg_shell_xml, '@OUTPUT@'])
+      test_remote_subsurface_srcs += custom_target('test-remote-subsurface-xdg-shell-client-code',
+        output: 'test-remote-subsurface-xdg-shell-protocol.c',
+        command: [wayland_scanner, 'private-code', xdg_shell_xml, '@OUTPUT@'])
+
+      test_remote_subsurface = executable('test_remote_subsurface', test_remote_subsurface_srcs,
+        dependencies: [scene_deps, wayland_server, wayland_client_dep, xkbcommon],
+        include_directories: woodland_inc,
+        link_with: [protocol_lib, shell_lib, layer_lib, output_lib, cursor_lib, seat_lib, ime_lib, ssd_lib, effect_lib, workspace_lib, session_lock_lib, capture_lib, util_lib, config_lib, trace_lib, dnd_lib] + xwayland_libs)
+      test('remote_subsurface', test_remote_subsurface, suite: ['unit', 'quick'])
+    endif
   endif
 endif
 

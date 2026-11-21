@@ -136,6 +136,7 @@ static const char *const privileged_protocols[] = {
     "treeland_foreign_toplevel_manager_v3",
     "treeland_appearance_manager_v1",
     "treeland_xwindow_control_v1",
+    "treeland_remote_subsurface_manager_v1",
 };
 
 bool woodland_security_context_is_allowed(const char *interface_name)

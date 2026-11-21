@@ -21,6 +21,7 @@ struct woodland_proto_toplevel;
 struct woodland_proto_tearing;
 struct woodland_proto_security_context;
 struct woodland_proto_xwindow_control;
+struct woodland_proto_remote_subsurface;
 struct wl_client;
 struct woodland_tearing_controller;
 
@@ -83,6 +84,7 @@ struct woodland_proto {
     struct woodland_proto_tearing *tearing;   /* tearing.c */
     struct woodland_proto_security_context *security_context; /* security_context.c */
     struct woodland_proto_xwindow_control *xwindow_control;   /* xwindow_control.c */
+    struct woodland_proto_remote_subsurface *remote_subsurface; /* remote_subsurface.c */
 };
 
 /* 空闲与抑制族（idle.c）：idle-notify / idle-inhibit / keyboard-shortcuts-inhibit */
@@ -179,5 +181,9 @@ bool woodland_proto_security_context_is_sandboxed(struct woodland_proto *proto,
  * finish 的逆序对称，且沙箱过滤已经就位后才广播新 global。 */
 bool woodland_proto_xwindow_control_init(struct woodland_proto *proto);
 void woodland_proto_xwindow_control_finish(struct woodland_proto *proto);
+
+/* 跨客户端子表面族（remote_subsurface.c）：treeland-remote-subsurface-unstable-v1 */
+bool woodland_proto_remote_subsurface_init(struct woodland_proto *proto);
+void woodland_proto_remote_subsurface_finish(struct woodland_proto *proto);
 
 #endif

@@ -22,6 +22,7 @@
 #include "ipc_internal.h"
 #include "multitask_view.h"
 #include "output.h"
+#include "protocol.h"
 #include "ssd.h"
 #include "util/json.h"
 #include "view.h"
@@ -583,8 +584,9 @@ void woodland_ipc_write_pixel_source(struct woodland_server *server, int lx, int
                     struct wlr_scene_buffer *sb = wlr_scene_buffer_from_node(hit);
                     struct wlr_scene_surface *ss = wlr_scene_surface_try_from_buffer(sb);
                     if (ss && ss->surface) {
+                        struct wlr_surface *root = woodland_surface_get_root_surface(ss->surface);
                         struct wlr_layer_surface_v1 *ls =
-                            wlr_layer_surface_v1_try_from_wlr_surface(ss->surface);
+                            wlr_layer_surface_v1_try_from_wlr_surface(root);
                         if (ls) {
                             layer_ns = ls->namespace;
                         }

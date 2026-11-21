@@ -10,6 +10,7 @@
 #include "effect.h"
 #include "layer.h"
 #include "output.h"
+#include "protocol.h"
 #include "session_lock.h"
 #include "view.h"
 #include "woodland.h"
@@ -259,7 +260,8 @@ struct wlr_layer_surface_v1 *woodland_layer_surface_at(struct woodland_server *s
         return NULL;
     }
     *surface = scene_surface->surface;
-    return wlr_layer_surface_v1_try_from_wlr_surface(scene_surface->surface);
+    struct wlr_surface *root = woodland_surface_get_root_surface(scene_surface->surface);
+    return wlr_layer_surface_v1_try_from_wlr_surface(root);
 }
 
 /*

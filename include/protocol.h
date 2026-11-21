@@ -14,6 +14,7 @@ struct wlr_input_device;
 struct wl_client;
 struct wlr_security_context_v1_state;
 struct wlr_output;
+struct wlr_surface;
 
 /*
  * 上游协议接线（src/protocol）。
@@ -454,4 +455,29 @@ bool woodland_xwindow_target_in_x11_range(int x, int y);
 /** 全局诊断（bind 数、累计/成败计数、最近一次请求怎么处置）写进 get_tree。 */
 void woodland_protocol_xwindow_control_status(struct woodland_server *server,
                                               struct woodland_json *out);
+
+/* ==================== treeland-remote-subsurface-v1 ==================== */
+
+/**
+ * 在 child surface 上登记或清除（parent == NULL）其 remote subsurface 父表面。
+ * 随 child wlr_surface 销毁自动清理 addon。
+ */
+void woodland_remote_subsurface_set_parent(struct wlr_surface *child, struct wlr_surface *parent);
+
+/**
+ * 若 surface 持有 treeland_remote_subsurface_v1 角色，返回其父 wlr_surface；
+ * 否则返回 NULL。供视图/图层命中回溯使用，也可在单元测试中对任意 surface 安全调用。
+ */
+struct wlr_surface *woodland_remote_subsurface_parent(struct wlr_surface *surface);
+
+/**
+ * 沿着原生 wl_subsurface 与 treeland_remote_subsurface_v1 父链一路回溯到最顶层
+ * 根 wlr_surface（带环保护）。surface 为 NULL 时返回 NULL。
+ */
+struct wlr_surface *woodland_surface_get_root_surface(struct wlr_surface *surface);
+
+/** 全局诊断（bind 数、导出数、关联数、拒绝与重排计数）写进 get_tree。 */
+void woodland_protocol_remote_subsurface_status(struct woodland_server *server,
+                                                struct woodland_json *out);
+
 #endif
