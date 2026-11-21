@@ -10,6 +10,12 @@ test_output = executable('test_output', 'test_output.c',
   link_with: [output_lib, session_lock_lib, cursor_lib, shell_lib, layer_lib, ssd_lib, effect_lib, workspace_lib, capture_lib, util_lib])
 test('output', test_output, suite: ['unit', 'quick'])
 
+test_output_config = executable('test_output_config', 'test_output_config.c',
+  dependencies: [scene_deps, wayland_server],
+  include_directories: woodland_inc,
+  link_with: [output_lib, session_lock_lib, cursor_lib, shell_lib, layer_lib, ssd_lib, effect_lib, workspace_lib, capture_lib, util_lib])
+test('output_config', test_output_config, suite: ['unit', 'quick'])
+
 test_cursor = executable('test_cursor', 'test_cursor.c',
   dependencies: [scene_deps, wayland_server],
   include_directories: woodland_inc,
