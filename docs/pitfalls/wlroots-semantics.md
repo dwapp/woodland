@@ -62,3 +62,38 @@
   上述三条路径在物理渲染上最终均汇聚于 `wlr_output.events.commit`。因此，在 `src/output/output.c` 中通过 `handle_commit()` 监听器比对 `output->last_scale`，仅在 scale 确实变更时统一调用 `woodland_output_refresh_all()`。
   - **关键约束**：commit 事件每帧都会触发，`output->last_scale` 的变更检测闸门**绝对不能省略**，否则会导致每一帧都重建全屏所有窗口的 SSD 缓存。
   - **X11 覆盖式窗口（unmanaged）**：不受 `server->views` 链表管理，在 `woodland_output_refresh_all()` 中必须显式调用 `server->xwayland_refresh_hook` 触发联动重刷。
+
+---
+
+## 4. Xwayland 双管道 IPC 竞态与 Map 信号
+
+### Xwayland 的 X11 / Wayland 双 Socket 竞态导致 `wlr_surface_map()` 遗漏
+- **现象**：在 CI 或高负载/检测工具下（尤其开启 ASan / UBSan 时），X11 窗口偶发（或稳定）无法上屏，`wctl get_tree` 查不到已 mapped 的 X11 视图，`smoke-xwindow-control` 冒烟超时失败。
+- **原因**：
+  Xwayland 同时与合成器建立 X11 协议连接与 Wayland 协议连接，两者运行于不同的 UNIX socket 管道：
+  1. X11 客户端调用 `XMapWindow` 后，wlroots XWM 收到 `MapRequest` 并向 Xwayland 发送 `xcb_map_window`。
+  2. Xwayland 在 Wayland socket 上创建 `wl_surface`，并由客户端提交首帧 buffer（`wl_surface.attach` + `wl_surface.commit`）。
+  3. Xwayland 在 X11 socket 上发送 `WL_SURFACE_SERIAL` / `WL_SURFACE_ID` client message。
+  
+  在 wlroots 内部（`xwayland/xwm.c`）：
+  - wlroots 仅在 `xwayland_surface_associate()` 时才将 `xsurface->surface_commit` 挂接到 `surface->events.commit`，并在回调 `xwayland_surface_handle_commit()` 中调用 `wlr_surface_map(surface)`。
+  - 若 Wayland socket 上的首帧 commit 早于 X11 socket 上的 associate 处理到达，该 commit 发生时 wlroots 尚未挂接 `surface_commit` 监听器，从而错过了调用 `wlr_surface_map()` 的时机。
+  - wlroots 的 `xwayland_surface_associate()` 本身遗漏了对已有 buffer 的检查（未检查 `wlr_surface_has_buffer(surface)`）。
+  - X11 客户端在窗口 map/expose 前通常不会渲染新一帧，导致不会产生后续 commit。`surface->mapped` 永久为 false，wlroots 永远不会发射 `surface->events.map`。
+- **解决规则**：
+  通过 Meson wrap 的 `diff_files` 机制（补丁位于 `subprojects/packagefiles/wlroots-xwayland-associate-map.patch`，在 `subprojects/wlroots.wrap` 中声明）直接修复 wlroots `xwayland/xwm.c`：
+  ```diff
+  --- a/xwayland/xwm.c
+  +++ b/xwayland/xwm.c
+  @@ -1237,6 +1237,10 @@ static void xwayland_surface_associate(struct wlr_xwm *xwm,
+   	}
+   
+   	wl_signal_emit_mutable(&xsurface->events.associate, NULL);
+  +
+  +	if (wlr_surface_has_buffer(surface)) {
+  +		wlr_surface_map(surface);
+  +	}
+   }
+  ```
+  由于 `events.associate` 发射时合成器已挂接 `surface->events.map` 监听器，wlroots 调用 `wlr_surface_map(surface)` 时发射的 map 信号将正常驱动合成器的 `xwl_map` 流程，使整个生命周期在 wlroots 协议层自愈，合成器端无需手动越权调用 `wlr_surface_map()`。
+
