@@ -10,6 +10,11 @@
 
 #include <wayland-server-core.h>
 
+#include "config.h"
+#if WOODLAND_HAVE_XWAYLAND
+#include <wlr/xwayland/xwayland.h>
+#endif
+
 #include "focus.h"
 #include "view.h"
 #include "woodland.h"
@@ -103,6 +108,21 @@ int main(void) {
     assert(woodland_view_wants_focus(&a) == WOODLAND_VIEW_WANTS_FOCUS_ALWAYS);
     assert(woodland_view_wants_focus(NULL) == WOODLAND_VIEW_WANTS_FOCUS_NEVER);
     woodland_seat_focus_surface(&server, NULL);
+
+#if WOODLAND_HAVE_XWAYLAND
+    struct wlr_xwayland_surface xsurf_empty_type = {
+        .window_type_len = 0,
+    };
+    struct woodland_view xview = {
+        .server = &server,
+        .type = WOODLAND_VIEW_XWAYLAND,
+        .xwayland_surface = &xsurf_empty_type,
+        .mapped = true,
+        .workspace = &ws1,
+    };
+    assert(woodland_view_wants_focus(&xview) == WOODLAND_VIEW_WANTS_FOCUS_ALWAYS);
+    assert(woodland_view_focusable(&xview) == true);
+#endif
 
 
     return 0;
