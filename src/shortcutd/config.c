@@ -359,6 +359,36 @@ static const char *const default_filemanager_cmds[] = {
     NULL,
 };
 
+static const char *const default_launcher_cmds[] = {
+    "rofi -show drun", "wofi --show drun", "fuzzel",
+    "tofi-drun", "lxqt-runner", "krunner", "dde-launcher",
+    NULL,
+};
+
+static const char *const default_browser_cmds[] = {
+    "x-www-browser", "firefox", "chromium",
+    "google-chrome-stable", "google-chrome",
+    NULL,
+};
+
+static const char *const default_lock_cmds[] = {
+    "swaylock", "waylock", "hyprlock", "loginctl lock-session",
+    "dde-lock", "lxqt-leave --lock",
+    NULL,
+};
+
+static const char *const default_system_monitor_cmds[] = {
+    "deepin-system-monitor", "gnome-system-monitor",
+    "plasma-systemmonitor", "lxqt-admin-task", "mate-system-monitor",
+    NULL,
+};
+
+static const char *const default_screenshot_cmds[] = {
+    "deepin-screen-recorder", "grimshot gui", "flameshot gui",
+    "spectacle", "screengrab",
+    NULL,
+};
+
 static const char *const default_volume_up_cmds[] = {
     "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+",
     "pactl set-sink-volume @DEFAULT_SINK@ +5%",
@@ -412,14 +442,36 @@ struct wsd_default {
 static const struct wsd_default wsd_defaults[] = {
     /* 窗口/工作区：woodland 内置键位里没有的部分，交给合成器动作 */
     {"Meta+Q", WSD_FLAG_PRESS, WSD_ACTION_CLOSE_WINDOW, NULL},
+    {"Alt+F4", WSD_FLAG_PRESS, WSD_ACTION_CLOSE_WINDOW, NULL},
+    {"Alt+Space", WSD_FLAG_PRESS, WSD_ACTION_SHOW_WINDOW_MENU, NULL},
     {"Meta+Up", WSD_FLAG_PRESS, WSD_ACTION_MAXIMIZE, NULL},
     {"Meta+Down", WSD_FLAG_PRESS, WSD_ACTION_CANCEL_MAXIMIZE, NULL},
+    {"Meta+M", WSD_FLAG_PRESS, WSD_ACTION_MINIMIZE, NULL},
     {"Meta+Left", WSD_FLAG_PRESS, WSD_ACTION_TILE_LEFT, NULL},
     {"Meta+Right", WSD_FLAG_PRESS, WSD_ACTION_TILE_RIGHT, NULL},
     {"Meta+S", WSD_FLAG_PRESS, WSD_ACTION_TOGGLE_MULTITASK_VIEW, NULL},
-    /* 启动器：非 DDE 环境的基本可用性就靠这两条 */
+    {"Ctrl+Alt+Left", WSD_FLAG_PRESS, WSD_ACTION_PREV_WORKSPACE, NULL},
+    {"Ctrl+Alt+Right", WSD_FLAG_PRESS, WSD_ACTION_NEXT_WORKSPACE, NULL},
+    {"Ctrl+Alt+Shift+Left", WSD_FLAG_PRESS, WSD_ACTION_MOVE_WINDOW_TO_PREV_WORKSPACE, NULL},
+    {"Ctrl+Alt+Shift+Right", WSD_FLAG_PRESS, WSD_ACTION_MOVE_WINDOW_TO_NEXT_WORKSPACE, NULL},
+    {"Meta+1", WSD_FLAG_PRESS, WSD_ACTION_WORKSPACE_1, NULL},
+    {"Meta+2", WSD_FLAG_PRESS, WSD_ACTION_WORKSPACE_2, NULL},
+    {"Meta+3", WSD_FLAG_PRESS, WSD_ACTION_WORKSPACE_3, NULL},
+    {"Meta+4", WSD_FLAG_PRESS, WSD_ACTION_WORKSPACE_4, NULL},
+    {"Meta+5", WSD_FLAG_PRESS, WSD_ACTION_WORKSPACE_5, NULL},
+    {"Meta+6", WSD_FLAG_PRESS, WSD_ACTION_WORKSPACE_6, NULL},
+    {"Meta+7", WSD_FLAG_PRESS, WSD_ACTION_WORKSPACE_7, NULL},
+    {"Meta+8", WSD_FLAG_PRESS, WSD_ACTION_WORKSPACE_8, NULL},
+    {"Meta+9", WSD_FLAG_PRESS, WSD_ACTION_WORKSPACE_9, NULL},
+    /* 启动器 / 常用工具：非 DDE 环境的基本可用性靠这些补齐 */
     {"Meta+Return", WSD_FLAG_PRESS, WSD_ACTION_NOTIFY, default_terminal_cmds},
+    {"Ctrl+Alt+T", WSD_FLAG_PRESS, WSD_ACTION_NOTIFY, default_terminal_cmds},
     {"Meta+E", WSD_FLAG_PRESS, WSD_ACTION_NOTIFY, default_filemanager_cmds},
+    {"Meta+D", WSD_FLAG_PRESS, WSD_ACTION_NOTIFY, default_launcher_cmds},
+    {"Meta+B", WSD_FLAG_PRESS, WSD_ACTION_NOTIFY, default_browser_cmds},
+    {"Meta+L", WSD_FLAG_PRESS, WSD_ACTION_NOTIFY, default_lock_cmds},
+    {"Ctrl+Shift+Escape", WSD_FLAG_PRESS, WSD_ACTION_NOTIFY, default_system_monitor_cmds},
+    {"Print", WSD_FLAG_PRESS, WSD_ACTION_NOTIFY, default_screenshot_cmds},
     /* 音量/亮度按住要连续变化，所以要 repeat */
     {"XF86AudioRaiseVolume", WSD_FLAG_PRESS | WSD_FLAG_REPEAT, WSD_ACTION_NOTIFY,
      default_volume_up_cmds},

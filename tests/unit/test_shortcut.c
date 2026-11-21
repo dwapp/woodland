@@ -174,11 +174,9 @@ static void test_classify(void)
            WOODLAND_SC_ACTION_WORKSPACE_PREV);
     assert(woodland_shortcut_action_classify(14) ==
            WOODLAND_SC_ACTION_WORKSPACE_NEXT);
-    for (uint32_t value = 15; value <= 20; value++) {
+    for (uint32_t value = 15; value <= 21; value++) {
         assert(woodland_shortcut_action_classify(value) == WOODLAND_SC_ACTION_VIEW);
     }
-    assert(woodland_shortcut_action_classify(21) ==
-           WOODLAND_SC_ACTION_UNSUPPORTED);
     assert(woodland_shortcut_action_classify(22) ==
            WOODLAND_SC_ACTION_MOVE_WORKSPACE);
     assert(woodland_shortcut_action_classify(23) ==

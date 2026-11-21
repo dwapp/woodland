@@ -16,8 +16,8 @@
  *                 upsert-on-trigger、capture_next_shortcut 的
  *                 invalid_surface / busy / not_active、capture 对象的
  *                 destroy 取消、activated 事件。
- *   真接线：      action 0（notify）、1..14（工作区切换）、15..20（窗口
- *                 最大化/还原/最小化/移动/缩放/关闭）、22..23（窗口移到
+ *   真接线：      action 0（notify）、1..14（工作区切换）、15..21（窗口
+ *                 最大化/还原/最小化/移动/缩放/关闭/窗口菜单）、22..23（窗口移到
  *                 相邻工作区）、32..39（贴边平铺）。键盘事件由 seat 转发
  *                 到 woodland_protocol_shortcuts_key() 后匹配 QKeySequence
  *                 PortableText。
@@ -26,7 +26,7 @@
  *                 对应 action。协议允许「不支持的手势」存在吗？不允许——
  *                 所以每次注册都会在 trace 里明写 gesture_unwired，不假装
  *                 绑定生效。
- *   置空但可观测：21、24..31、40..45（窗口菜单、show-desktop、多任务、
+ *   置空但可观测：24..31、40..45（show-desktop、多任务、
  *                 任务切换、缩放、FPS、锁屏、关机菜单）。没有对应 shell
  *                 状态机，不改状态、不发事件，但记 trace / 日志 / wctl。
  *
@@ -71,10 +71,12 @@
 #include "protocol.h"
 #include "protocol_internal.h"
 #include "scene.h"
+#include "ssd.h"
 #include "trace.h"
 #include "util/json.h"
 #include "util/listener.h"
 #include "view.h"
+#include "window_menu.h"
 #include "woodland.h"
 #include "workspace.h"
 
@@ -441,7 +443,7 @@ woodland_shortcut_action_classify(uint32_t action)
         return WOODLAND_SC_ACTION_WORKSPACE_NEXT;
     }
     if (action >= TREELAND_SHORTCUT_MANAGER_V3_ACTION_MAXIMIZE &&
-        action <= TREELAND_SHORTCUT_MANAGER_V3_ACTION_CLOSE_WINDOW) {
+        action <= TREELAND_SHORTCUT_MANAGER_V3_ACTION_SHOW_WINDOW_MENU) {
         return WOODLAND_SC_ACTION_VIEW;
     }
     if (action == TREELAND_SHORTCUT_MANAGER_V3_ACTION_MOVE_WINDOW_TO_PREV_WORKSPACE ||
@@ -719,6 +721,22 @@ static enum shortcut_outcome shortcut_run_action(struct woodland_proto_shortcut 
         case TREELAND_SHORTCUT_MANAGER_V3_ACTION_CLOSE_WINDOW:
             woodland_view_close(view);
             break;
+        case TREELAND_SHORTCUT_MANAGER_V3_ACTION_SHOW_WINDOW_MENU: {
+            if (woodland_window_menu_is_active(server)) {
+                woodland_window_menu_hide(server);
+                break;
+            }
+            struct wlr_box content = {0};
+            woodland_view_content_box(view, &content);
+            struct woodland_ssd_margins margins = {0};
+            woodland_ssd_get_margins(view, &margins);
+            int node_x = view->scene_tree ? view->scene_tree->node.x : 0;
+            int node_y = view->scene_tree ? view->scene_tree->node.y : 0;
+            double lx = node_x + content.x - margins.left;
+            double ly = node_y + content.y;
+            woodland_window_menu_show(view, lx, ly);
+            break;
+        }
         default:
             break;
         }

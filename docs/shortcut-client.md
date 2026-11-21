@@ -137,11 +137,22 @@ PortableText 解析对这两者都不敏感。
 
 | 键位 | 行为 | 候选命令 |
 | --- | --- | --- |
-| `Meta+Return` | 终端 | `x-terminal-emulator` / `foot` / `alacritty` / `kitty` / `wezterm` / `qterminal` / `xfce4-terminal` / `konsole` / `gnome-terminal` / `xterm` |
+| `Meta+Return` / `Ctrl+Alt+T` | 终端 | `x-terminal-emulator` / `foot` / `alacritty` / `kitty` / `wezterm` / `qterminal` / `xfce4-terminal` / `konsole` / `gnome-terminal` / `xterm` |
 | `Meta+E` | 文件管理器 | `dde-file-manager` / `nautilus` / `dolphin` / `pcmanfm-qt` / `thunar` / `pcmanfm` / `nemo` |
-| `Meta+Q` | `close_window` | 合成器动作 |
+| `Meta+D` | 启动器 | `rofi -show drun` / `wofi --show drun` / `fuzzel` / `tofi-drun` / `lxqt-runner` / `krunner` / `dde-launcher` |
+| `Meta+B` | 浏览器 | `x-www-browser` / `firefox` / `chromium` / `google-chrome-stable` / `google-chrome` |
+| `Meta+L` | 锁屏 | `swaylock` / `waylock` / `hyprlock` / `loginctl lock-session` / `dde-lock` / `lxqt-leave --lock` |
+| `Ctrl+Shift+Escape` | 任务管理器 | `deepin-system-monitor` / `gnome-system-monitor` / `plasma-systemmonitor` / `lxqt-admin-task` / `mate-system-monitor` |
+| `Print` | 屏幕截图 | `deepin-screen-recorder` / `grimshot gui` / `flameshot gui` / `spectacle` / `screengrab` |
+| `Meta+Q` / `Alt+F4` | `close_window` | 合成器动作 |
+| `Alt+Space` | `show_window_menu` | 合成器动作 |
 | `Meta+Up` / `Meta+Down` | `maximize` / `cancel_maximize` | 合成器动作 |
+| `Meta+M` | `minimize` | 合成器动作 |
 | `Meta+Left` / `Meta+Right` | `tile_left` / `tile_right` | 合成器动作 |
+| `Meta+S` | `toggle_multitask_view` | 合成器动作 |
+| `Ctrl+Alt+Left` / `Ctrl+Alt+Right` | `prev_workspace` / `next_workspace` | 合成器动作 |
+| `Ctrl+Alt+Shift+Left` / `Right` | `move_window_to_prev_workspace` / `next_workspace` | 合成器动作 |
+| `Meta+1` .. `Meta+9` | `workspace_1` .. `workspace_9` | 合成器动作 |
 | `XF86AudioRaiseVolume` / `LowerVolume` / `Mute` | 音量（前两个带 `repeat`） | `wpctl` → `pactl` |
 | `XF86MonBrightnessUp` / `Down` | 亮度（带 `repeat`） | `brightnessctl` |
 | `XF86AudioPlay` / `Next` / `Prev` | 播放控制 | `playerctl` |
