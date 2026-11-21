@@ -62,6 +62,17 @@ static bool mkdir_parents(const char *path)
     return true;
 }
 
+/* ==================== 设备标识工具 ==================== */
+
+static bool get_output_identifier(const struct wlr_output *wlr, char *buf, size_t size)
+{
+    if (wlr && wlr->model && wlr->model[0] && wlr->serial && wlr->serial[0]) {
+        snprintf(buf, size, "%s:%s", wlr->model, wlr->serial);
+        return true;
+    }
+    return false;
+}
+
 /* ==================== JSON 极简流式解析器 ==================== */
 
 struct json_cursor {
@@ -247,7 +258,6 @@ static bool json_skip_value(struct json_cursor *cur)
         }
     }
     default: {
-        /* 数字、布尔、null：扫描到分隔符 */
         while (*cur->p && *cur->p != ',' && *cur->p != '}' && *cur->p != ']' &&
                *cur->p != ' ' && *cur->p != '\t' && *cur->p != '\n' && *cur->p != '\r') {
             cur->p++;
@@ -266,6 +276,7 @@ void woodland_saved_outputs_finish(struct woodland_saved_outputs *list)
     }
     for (size_t i = 0; i < list->count; i++) {
         free(list->items[i].name);
+        free(list->items[i].output_id);
     }
     free(list->items);
     list->items = NULL;
@@ -273,7 +284,7 @@ void woodland_saved_outputs_finish(struct woodland_saved_outputs *list)
 }
 
 const struct woodland_saved_output *
-woodland_saved_outputs_find(const struct woodland_saved_outputs *list, const char *name)
+woodland_saved_outputs_find_by_name(const struct woodland_saved_outputs *list, const char *name)
 {
     if (!list || !name) {
         return NULL;
@@ -284,6 +295,24 @@ woodland_saved_outputs_find(const struct woodland_saved_outputs *list, const cha
         }
     }
     return NULL;
+}
+
+const struct woodland_saved_output *
+woodland_saved_outputs_find(const struct woodland_saved_outputs *list,
+                            const struct wlr_output *wlr)
+{
+    if (!list || !wlr) {
+        return NULL;
+    }
+    char id_buf[128];
+    if (get_output_identifier(wlr, id_buf, sizeof(id_buf))) {
+        for (size_t i = 0; i < list->count; i++) {
+            if (list->items[i].output_id && strcmp(list->items[i].output_id, id_buf) == 0) {
+                return &list->items[i];
+            }
+        }
+    }
+    return woodland_saved_outputs_find_by_name(list, wlr->name);
 }
 
 static bool parse_output_object(struct json_cursor *cur, struct woodland_saved_output *item)
@@ -312,6 +341,9 @@ static bool parse_output_object(struct json_cursor *cur, struct woodland_saved_o
         if (strcmp(key, "name") == 0) {
             free(item->name);
             ok = json_parse_string(cur, &item->name);
+        } else if (strcmp(key, "id") == 0) {
+            free(item->output_id);
+            ok = json_parse_string(cur, &item->output_id);
         } else if (strcmp(key, "enabled") == 0) {
             ok = json_parse_bool(cur, &item->enabled);
         } else if (strcmp(key, "x") == 0) {
@@ -410,6 +442,7 @@ bool woodland_saved_outputs_load(struct woodland_saved_outputs *list)
             struct woodland_saved_output item = {0};
             if (!parse_output_object(&cur, &item)) {
                 free(item.name);
+                free(item.output_id);
                 break;
             }
 
@@ -419,6 +452,7 @@ bool woodland_saved_outputs_load(struct woodland_saved_outputs *list)
                     realloc(list->items, cap * sizeof(struct woodland_saved_output));
                 if (!grown) {
                     free(item.name);
+                    free(item.output_id);
                     break;
                 }
                 list->items = grown;
@@ -444,13 +478,31 @@ bool woodland_saved_outputs_load(struct woodland_saved_outputs *list)
 /* ==================== 持久化写出与合并 ==================== */
 
 static void upsert_saved_output(struct woodland_saved_outputs *list,
-                                const struct woodland_saved_output *entry)
+                                const struct woodland_saved_output *entry,
+                                bool preserve_position)
 {
     for (size_t i = 0; i < list->count; i++) {
-        if (list->items[i].name && strcmp(list->items[i].name, entry->name) == 0) {
+        bool match = false;
+        if (entry->output_id && list->items[i].output_id &&
+            strcmp(list->items[i].output_id, entry->output_id) == 0) {
+            match = true;
+        } else if (entry->name && list->items[i].name &&
+                   strcmp(list->items[i].name, entry->name) == 0) {
+            match = true;
+        }
+
+        if (match) {
+            int32_t old_x = list->items[i].x;
+            int32_t old_y = list->items[i].y;
             free(list->items[i].name);
+            free(list->items[i].output_id);
             list->items[i] = *entry;
-            list->items[i].name = strdup(entry->name);
+            list->items[i].name = strdup(entry->name ? entry->name : "");
+            list->items[i].output_id = entry->output_id ? strdup(entry->output_id) : NULL;
+            if (preserve_position) {
+                list->items[i].x = old_x;
+                list->items[i].y = old_y;
+            }
             return;
         }
     }
@@ -462,7 +514,8 @@ static void upsert_saved_output(struct woodland_saved_outputs *list,
     }
     list->items = grown;
     list->items[list->count] = *entry;
-    list->items[list->count].name = strdup(entry->name);
+    list->items[list->count].name = strdup(entry->name ? entry->name : "");
+    list->items[list->count].output_id = entry->output_id ? strdup(entry->output_id) : NULL;
     list->count++;
 }
 
@@ -471,6 +524,16 @@ void woodland_output_config_save(struct woodland_server *server)
     if (!server || !server->output_layout || !server->outputs.next) {
         return;
     }
+
+    /* 统计当前启用的输出数量，若仅有 1 块屏幕在线，保护原有多屏相对坐标不被覆盖 */
+    size_t enabled_count = 0;
+    struct woodland_output *it;
+    wl_list_for_each(it, &server->outputs, link) {
+        if (it->wlr_output && it->wlr_output->enabled) {
+            enabled_count++;
+        }
+    }
+    bool preserve_position = (enabled_count == 1);
 
     /* 1. 先读现有 outputs.json，以支持多屏配置合并更新（不丢离线屏） */
     struct woodland_saved_outputs list = {0};
@@ -486,6 +549,10 @@ void woodland_output_config_save(struct woodland_server *server)
 
         struct woodland_saved_output entry = {0};
         entry.name = wlr->name;
+        char id_buf[128];
+        if (get_output_identifier(wlr, id_buf, sizeof(id_buf))) {
+            entry.output_id = id_buf;
+        }
         entry.enabled = wlr->enabled;
 
         struct wlr_box box = {0};
@@ -507,7 +574,7 @@ void woodland_output_config_save(struct woodland_server *server)
         entry.transform = wlr->transform;
         entry.adaptive_sync = (wlr->adaptive_sync_status == WLR_OUTPUT_ADAPTIVE_SYNC_ENABLED);
 
-        upsert_saved_output(&list, &entry);
+        upsert_saved_output(&list, &entry, preserve_position);
     }
 
     /* 3. 使用 util/json.h 序列化 */
@@ -521,6 +588,9 @@ void woodland_output_config_save(struct woodland_server *server)
         struct woodland_json_obj obj;
         woodland_json_obj_open(&obj, &json);
         woodland_json_obj_str(&obj, "name", list.items[i].name);
+        if (list.items[i].output_id) {
+            woodland_json_obj_str(&obj, "id", list.items[i].output_id);
+        }
         woodland_json_obj_bool(&obj, "enabled", list.items[i].enabled);
         woodland_json_obj_int(&obj, "x", list.items[i].x);
         woodland_json_obj_int(&obj, "y", list.items[i].y);
@@ -575,7 +645,7 @@ bool woodland_output_config_restore(struct woodland_output *output,
                                     struct wlr_output_state *state,
                                     int32_t *out_x, int32_t *out_y)
 {
-    if (!output || !output->wlr_output || !output->wlr_output->name || !state) {
+    if (!output || !output->wlr_output || !state) {
         return false;
     }
 
@@ -585,7 +655,7 @@ bool woodland_output_config_restore(struct woodland_output *output,
     }
 
     const struct woodland_saved_output *saved =
-        woodland_saved_outputs_find(&list, output->wlr_output->name);
+        woodland_saved_outputs_find(&list, output->wlr_output);
     if (!saved) {
         woodland_saved_outputs_finish(&list);
         return false;
@@ -635,8 +705,9 @@ bool woodland_output_config_restore(struct woodland_output *output,
         *out_y = saved->y;
     }
 
-    wlr_log(WLR_INFO, "output %s: restored configuration %dx%d@%dmHz, scale %.2f at (%d,%d)",
-            output->wlr_output->name, saved->width, saved->height, saved->refresh,
+    wlr_log(WLR_INFO, "output %s (id: %s): restored configuration %dx%d@%dmHz, scale %.2f at (%d,%d)",
+            output->wlr_output->name, saved->output_id ? saved->output_id : "none",
+            saved->width, saved->height, saved->refresh,
             saved->scale, saved->x, saved->y);
 
     woodland_saved_outputs_finish(&list);
