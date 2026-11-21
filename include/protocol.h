@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "view.h"
 
 struct woodland_server;
 struct woodland_workspace;
@@ -479,5 +480,40 @@ struct wlr_surface *woodland_surface_get_root_surface(struct wlr_surface *surfac
 /** 全局诊断（bind 数、导出数、关联数、拒绝与重排计数）写进 get_tree。 */
 void woodland_protocol_remote_subsurface_status(struct woodland_server *server,
                                                 struct woodland_json *out);
+
+/* =========================================================================
+ * treeland-dde-shell-unstable-v2
+ * ========================================================================= */
+
+struct woodland_dde_shell_surface_state {
+    bool bound;
+    uint32_t role;
+    bool role_normal;
+    bool role_overlay;
+    bool role_always_on_top;
+    bool position_set;
+    int32_t position_x;
+    int32_t position_y;
+    bool cursor_set;
+    int32_t cursor_x;
+    int32_t cursor_y;
+    uint32_t skip_flags;
+    bool accept_keyboard_focus;
+    int duplicate_errors;
+    bool wrapper_found;
+    int wrapper_z;
+    bool wrapper_always_on_top;
+};
+
+bool woodland_dde_shell_role_is_valid(uint32_t role, uint32_t version);
+
+void woodland_protocol_dde_shell_status(struct woodland_server *server,
+                                        struct woodland_json *out);
+
+void woodland_protocol_dde_shell_view_status(const struct woodland_view *view,
+                                             struct woodland_json *out);
+
+bool woodland_protocol_dde_shell_query_surface_state(struct woodland_server *server,
+                                                     struct woodland_dde_shell_surface_state *out);
 
 #endif

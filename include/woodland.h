@@ -308,6 +308,11 @@ struct woodland_server {
      * 在 init / finish 挂上、摘掉；NULL 表示 shell 没建起来（单测里就是）。
      */
     void (*selfcheck_schedule_hook)(struct woodland_server *server, const char *reason);
+    /*
+     * treeland-dde-shell-unstable-v2 初始化视图状态。
+     * 由 protocol/dde_shell.c 挂上，在 view map 时调用。
+     */
+    void (*dde_shell_init_view_hook)(struct woodland_view *view);
 
     /* 截图/录屏（src/capture） */
     struct wlr_screencopy_manager_v1 *screencopy_manager;

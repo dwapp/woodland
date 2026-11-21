@@ -25,6 +25,7 @@ wlroots 与 scenefx 走 meson wrap 下载；协议定义不属于"依赖"，但�
 | `treeland-foreign-toplevel-manager-unstable-v3.xml` | `treeland-protocols/dde/` |
 | `treeland-xwindow-control-unstable-v1.xml` | `treeland-protocols/dde/` |
 | `treeland-remote-subsurface-unstable-v1.xml` | `treeland-protocols/dde/` |
+| `treeland-dde-shell-unstable-v2.xml` | `treeland-protocols/dde/` |
 
 安装后的路径是 `/usr/share/treeland-protocols/`。许可证是 **MIT**
 （见每个文件头部的 `<copyright>` 块），与 GPL-2.0-only 兼容。
@@ -42,6 +43,7 @@ cp /usr/share/treeland-protocols/treeland-decoration-unstable-v1.xml \
    /usr/share/treeland-protocols/treeland-foreign-toplevel-manager-unstable-v3.xml \
    /usr/share/treeland-protocols/treeland-xwindow-control-unstable-v1.xml \
    /usr/share/treeland-protocols/treeland-remote-subsurface-unstable-v1.xml \
+   /usr/share/treeland-protocols/treeland-dde-shell-unstable-v2.xml \
    protocols/treeland/
 ```
 

@@ -330,6 +330,7 @@ static void test_pure_functions(void)
         "treeland_appearance_manager_v1",
         "treeland_xwindow_control_v1",
         "treeland_remote_subsurface_manager_v1",
+        "treeland_dde_shell_manager_v2",
     };
 
     for (size_t i = 0; i < sizeof(expected_privileged) / sizeof(expected_privileged[0]); i++) {
@@ -502,6 +503,7 @@ static void test_server_integration(void)
         "treeland_wallpaper_shell_v1",
         "treeland_wallpaper_notifier_v1",
         "treeland_remote_subsurface_manager_v1",
+        "treeland_dde_shell_manager_v2",
         "zwp_keyboard_shortcuts_inhibit_manager_v1",
         "wl_compositor",
         "wl_shm",

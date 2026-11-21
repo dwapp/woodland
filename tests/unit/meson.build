@@ -393,3 +393,10 @@ test_ipc = executable('test_ipc', 'test_ipc.c',
               ssd_lib, effect_lib, cursor_lib, layer_lib, seat_lib, session_lock_lib,
               ime_lib, capture_lib, config_lib, protocol_lib, dnd_lib] + xwayland_libs)
 test('ipc', test_ipc, suite: ['unit', 'quick'])
+
+test_dde_shell = executable('test_dde_shell', 'test_dde_shell.c',
+  dependencies: [scene_deps, wayland_server],
+  include_directories: woodland_inc,
+  link_with: [protocol_lib, util_lib, trace_lib, effect_lib, shell_lib, output_lib, cursor_lib,
+              workspace_lib, ssd_lib, layer_lib, session_lock_lib, capture_lib, dnd_lib] + xwayland_libs)
+test('dde_shell', test_dde_shell, suite: ['unit', 'quick'])
