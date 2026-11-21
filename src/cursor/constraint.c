@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "util/listener.h"
 
+#include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_pointer_constraints_v1.h>
 #include <wlr/types/wlr_seat.h>
@@ -18,8 +19,12 @@ static void warp_cursor_to_constraint_hint(struct woodland_server *server,
     }
     struct wlr_surface *surface = constraint->surface;
     if (!surface || !server->seat ||
-        server->seat->pointer_state.focused_surface != surface ||
         !woodland_pointer_constraint_is_focused(server, constraint)) {
+        return;
+    }
+    struct wlr_surface *focused = server->seat->pointer_state.focused_surface;
+    if (focused != surface &&
+        (!focused || wlr_surface_get_root_surface(focused) != wlr_surface_get_root_surface(surface))) {
         return;
     }
 
@@ -47,6 +52,7 @@ static void handle_constraint_destroy(struct wl_listener *listener, void *data)
     struct wlr_pointer_constraint_v1 *constraint = data;
 
     if (server->current_constraint == constraint) {
+        bool was_locked = (constraint->type == WLR_POINTER_CONSTRAINT_V1_LOCKED);
         warp_cursor_to_constraint_hint(server, constraint);
         if (server->constraint_commit.link.prev) {
             wl_list_remove(&server->constraint_commit.link);
@@ -57,6 +63,9 @@ static void handle_constraint_destroy(struct wl_listener *listener, void *data)
             server->constraint_destroy.link.prev = NULL;
         }
         server->current_constraint = NULL;
+        if (was_locked) {
+            woodland_cursor_set(server, "default");
+        }
     }
 }
 
@@ -123,8 +132,10 @@ void woodland_pointer_constraint_set(struct woodland_server *server,
         return;
     }
 
+    bool was_locked = false;
     if (server->current_constraint) {
         struct wlr_pointer_constraint_v1 *old = server->current_constraint;
+        was_locked = (old->type == WLR_POINTER_CONSTRAINT_V1_LOCKED);
         server->current_constraint = NULL;
         if (!constraint) {
             warp_cursor_to_constraint_hint(server, old);
@@ -145,7 +156,18 @@ void woodland_pointer_constraint_set(struct woodland_server *server,
     server->current_constraint = constraint;
 
     if (!constraint) {
+        if (was_locked) {
+            woodland_cursor_set(server, "default");
+        }
         return;
+    }
+
+    if (constraint->type == WLR_POINTER_CONSTRAINT_V1_LOCKED) {
+        if (server->cursor) {
+            wlr_cursor_unset_image(server->cursor);
+        }
+    } else if (was_locked) {
+        woodland_cursor_set(server, "default");
     }
 
     if (constraint->resource) {
@@ -169,11 +191,36 @@ static void handle_new_pointer_constraint(struct wl_listener *listener, void *da
         wl_container_of(listener, server, new_pointer_constraint);
     struct wlr_pointer_constraint_v1 *constraint = data;
 
-    if (server->seat &&
-        server->seat->pointer_state.focused_surface == constraint->surface &&
-        woodland_pointer_constraint_is_focused(server, constraint)) {
-        woodland_pointer_constraint_set(server, constraint);
+    if (!server->seat || !woodland_pointer_constraint_is_focused(server, constraint)) {
+        return;
     }
+
+    struct wlr_surface *focused_surface = server->seat->pointer_state.focused_surface;
+    if (focused_surface) {
+        struct wlr_surface *root_focused = wlr_surface_get_root_surface(focused_surface);
+        struct wlr_surface *root_constraint = wlr_surface_get_root_surface(constraint->surface);
+        if (focused_surface == constraint->surface || root_focused == root_constraint) {
+            woodland_pointer_constraint_set(server, constraint);
+            return;
+        }
+    }
+
+    /* 如果当前活跃窗口/键盘焦点属于该约束，但指针焦点尚未进入（例如游戏启动全屏，
+     * 尚未触发物理指针 motion），主动把指针 enter 到约束表面，确保相对位移能够送达 */
+    struct wlr_surface *kb_surface = server->seat->keyboard_state.focused_surface;
+    if (kb_surface) {
+        struct wlr_surface *root_kb = wlr_surface_get_root_surface(kb_surface);
+        struct wlr_surface *root_constraint = wlr_surface_get_root_surface(constraint->surface);
+        if (kb_surface == constraint->surface || root_kb == root_constraint) {
+            double sx = server->seat->pointer_state.sx;
+            double sy = server->seat->pointer_state.sy;
+            wlr_seat_pointer_notify_enter(server->seat, constraint->surface, sx, sy);
+            woodland_pointer_constraint_set(server, constraint);
+            return;
+        }
+    }
+
+    woodland_pointer_constraint_set(server, constraint);
 }
 
 void woodland_pointer_constraint_recheck(struct woodland_server *server,
@@ -186,6 +233,13 @@ void woodland_pointer_constraint_recheck(struct woodland_server *server,
     if (surface && server->seat) {
         constraint = wlr_pointer_constraints_v1_constraint_for_surface(
             server->pointer_constraints, surface, server->seat);
+        if (!constraint) {
+            struct wlr_surface *root = wlr_surface_get_root_surface(surface);
+            if (root && root != surface) {
+                constraint = wlr_pointer_constraints_v1_constraint_for_surface(
+                    server->pointer_constraints, root, server->seat);
+            }
+        }
     }
     woodland_pointer_constraint_set(server, constraint);
 }
@@ -195,10 +249,11 @@ void woodland_pointer_constraint_update(struct woodland_server *server)
     if (!server || !server->seat) {
         return;
     }
-    /* 约束挂在"指针焦点表面"上；键盘焦点只决定它有效与否，不改变它挂在哪。
-     * 所以这里就是 recheck 的一次转发——别在这儿写第二份 surface 查询。 */
-    woodland_pointer_constraint_recheck(server,
-                                        server->seat->pointer_state.focused_surface);
+    struct wlr_surface *surface = server->seat->pointer_state.focused_surface;
+    if (!surface) {
+        surface = server->seat->keyboard_state.focused_surface;
+    }
+    woodland_pointer_constraint_recheck(server, surface);
 }
 
 void woodland_pointer_constraint_apply(struct woodland_server *server,
@@ -210,8 +265,12 @@ void woodland_pointer_constraint_apply(struct woodland_server *server,
     }
     struct wlr_surface *surface = constraint->surface;
     if (!surface || !server->seat ||
-        server->seat->pointer_state.focused_surface != surface ||
         !woodland_pointer_constraint_is_focused(server, constraint)) {
+        return;
+    }
+    struct wlr_surface *focused = server->seat->pointer_state.focused_surface;
+    if (focused != surface &&
+        (!focused || wlr_surface_get_root_surface(focused) != wlr_surface_get_root_surface(surface))) {
         return;
     }
 

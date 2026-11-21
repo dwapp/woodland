@@ -2,6 +2,7 @@
 #include <stdlib.h>
 
 #include <wlr/types/wlr_cursor.h>
+#include <wlr/types/wlr_pointer_constraints_v1.h>
 #include <wlr/types/wlr_xcursor_manager.h>
 #include <wlr/util/edges.h>
 #include <wlr/util/log.h>
@@ -75,6 +76,10 @@ void woodland_cursor_set(struct woodland_server *server, const char *name)
         return;
     }
     wlr_cursor_unset_image(server->cursor);
+    if (server->current_constraint &&
+        server->current_constraint->type == WLR_POINTER_CONSTRAINT_V1_LOCKED) {
+        return;
+    }
     if (server->xcursor_manager) {
         wlr_cursor_set_xcursor(server->cursor, server->xcursor_manager, name);
     }
@@ -212,6 +217,11 @@ const char *woodland_cursor_resize_fallback_name(uint32_t edges)
 void woodland_cursor_set_resize(struct woodland_server *server, uint32_t edges)
 {
     if (!server || !server->cursor || !server->xcursor_manager) {
+        return;
+    }
+    if (server->current_constraint &&
+        server->current_constraint->type == WLR_POINTER_CONSTRAINT_V1_LOCKED) {
+        wlr_cursor_unset_image(server->cursor);
         return;
     }
     const char *primary = woodland_cursor_resize_name(edges);

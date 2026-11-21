@@ -17,6 +17,7 @@
 #include <wlr/types/wlr_ext_data_control_v1.h>
 #include <wlr/types/wlr_fixes.h>
 #include <wlr/types/wlr_fractional_scale_v1.h>
+#include <wlr/types/wlr_pointer_constraints_v1.h>
 #include <wlr/types/wlr_single_pixel_buffer_v1.h>
 #include <wlr/types/wlr_subcompositor.h>
 #include <wlr/util/log.h>
@@ -76,6 +77,10 @@ static int handle_sighup(int signal, void *data)
 static void handle_request_set_shape(struct wl_listener *listener, void *data)
 {
     struct woodland_server *server = wl_container_of(listener, server, request_set_shape);
+    if (server->current_constraint &&
+        server->current_constraint->type == WLR_POINTER_CONSTRAINT_V1_LOCKED) {
+        return;
+    }
     struct wlr_cursor_shape_manager_v1_request_set_shape_event *event = data;
     const char *name = wlr_cursor_shape_v1_name(event->shape);
     woodland_cursor_set(server, name);

@@ -7,6 +7,7 @@
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_cursor.h>
+#include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_pointer_constraints_v1.h>
 #include "scene.h"
@@ -102,25 +103,57 @@ int main(void)
     assert(10 + dx <= 50);
     assert(10 + dy <= 50);
 
-    /* 测试 3: LOCKED 约束与光标位置提示 (cursor hint warp) */
+    /* 测试 3: LOCKED 约束生效时光标隐藏，解除约束后光标恢复 */
+    woodland_pointer_constraint_set(&server, NULL);
+    assert(server.current_constraint == NULL);
+
+    struct wlr_output_cursor *out_cur;
+    woodland_cursor_set(&server, "default");
+    wl_list_for_each(out_cur, &out->cursors, link) {
+        assert(out_cur->enabled);
+    }
+
     constraint.type = WLR_POINTER_CONSTRAINT_V1_LOCKED;
     constraint.current.committed = WLR_POINTER_CONSTRAINT_V1_STATE_CURSOR_HINT;
     constraint.current.cursor_hint.x = 25;
     constraint.current.cursor_hint.y = 30;
 
+    woodland_pointer_constraint_set(&server, &constraint);
+    assert(server.current_constraint == &constraint);
+
+    /* 激活 LOCKED 约束后，系统光标应该被隐藏 */
+    wl_list_for_each(out_cur, &out->cursors, link) {
+        assert(!out_cur->enabled);
+    }
+
+    /* 在 LOCKED 期间调用 woodland_cursor_set，光标必须保持隐藏 */
+    woodland_cursor_set(&server, "default");
+    wl_list_for_each(out_cur, &out->cursors, link) {
+        assert(!out_cur->enabled);
+    }
+
     /* 解除约束，光标应自动 warp 到 cursor_hint 指定位置 (surface_lx + 25, surface_ly + 30)
      * surface_lx = 100 - 10 = 90, surface_ly = 100 - 10 = 90
-     * 预期坐标: 90 + 25 = 115, 90 + 30 = 120 */
+     * 预期坐标: 90 + 25 = 115, 90 + 30 = 120，且光标恢复显示 */
     woodland_pointer_constraint_set(&server, NULL);
     assert(server.current_constraint == NULL);
     assert(server.cursor->x == 115);
     assert(server.cursor->y == 120);
+    wl_list_for_each(out_cur, &out->cursors, link) {
+        assert(out_cur->enabled);
+    }
 
-    /* 测试 4: 约束被销毁事件 */
+    /* 测试 4: 约束被销毁事件（销毁 LOCKED 约束时光标恢复显示） */
     woodland_pointer_constraint_set(&server, &constraint);
     assert(server.current_constraint == &constraint);
+    wl_list_for_each(out_cur, &out->cursors, link) {
+        assert(!out_cur->enabled);
+    }
     wl_signal_emit_mutable(&constraint.events.destroy, &constraint);
     assert(server.current_constraint == NULL);
+    wl_list_for_each(out_cur, &out->cursors, link) {
+        assert(out_cur->enabled);
+    }
     /* 测试 5: 焦点不在申请限制的客户端上时，应该忽略限制 */
     struct wlr_surface other_surface = {0};
     wl_signal_init(&other_surface.events.destroy);
@@ -192,6 +225,34 @@ int main(void)
     assert(woodland_pointer_constraint_is_focused(&server, &constraint));
     woodland_pointer_constraint_set(&server, &constraint);
     assert(server.current_constraint == &constraint);
+
+    /* 测试 LOCKED 约束下即使客户端触发 request_set_cursor，光标也保持隐藏 */
+    constraint.type = WLR_POINTER_CONSTRAINT_V1_LOCKED;
+    woodland_pointer_constraint_set(&server, NULL);
+    woodland_pointer_constraint_set(&server, &constraint);
+    assert(server.current_constraint == &constraint);
+
+    struct wlr_seat_client seat_client_a = {0};
+    seat_client_a.client = mock_client_a;
+    server.seat->pointer_state.focused_client = &seat_client_a;
+
+    struct wlr_surface cursor_surf = {0};
+    wl_signal_init(&cursor_surf.events.destroy);
+    wl_signal_init(&cursor_surf.events.commit);
+
+    struct wlr_seat_pointer_request_set_cursor_event req = {
+        .seat_client = &seat_client_a,
+        .surface = &cursor_surf,
+        .hotspot_x = 0,
+        .hotspot_y = 0,
+    };
+    wl_signal_emit_mutable(&server.seat->events.request_set_cursor, &req);
+    wl_list_for_each(out_cur, &out->cursors, link) {
+        assert(!out_cur->enabled);
+    }
+    server.seat->pointer_state.focused_client = NULL;
+    constraint.type = WLR_POINTER_CONSTRAINT_V1_CONFINED;
+    woodland_pointer_constraint_set(&server, &constraint);
 
     /* 测试 6: shell 钩子路径。上面全是"没有钩子时的兜底"，产品上跑的是
      * shell_pointer_constraint_is_focused()（会话锁 / 焦点视图 / 焦点 layer 都在那一层） */

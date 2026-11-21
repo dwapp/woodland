@@ -13,6 +13,7 @@
 #include <wlr/xwayland.h>
 #endif
 #include "util/listener.h"
+#include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_cursor.h>
 #include "scene.h"
 #include <wlr/types/wlr_seat.h>
@@ -248,9 +249,17 @@ static void server_cursor_motion(struct wl_listener *listener, void *data)
     struct woodland_server *server = wl_container_of(listener, server, cursor_motion);
     struct wlr_pointer_motion_event *event = data;
     if (server->current_constraint &&
-        server->current_constraint->type == WLR_POINTER_CONSTRAINT_V1_LOCKED &&
-        server->seat->pointer_state.focused_surface == server->current_constraint->surface) {
-        if (woodland_pointer_constraint_is_focused(server, server->current_constraint)) {
+        server->current_constraint->type == WLR_POINTER_CONSTRAINT_V1_LOCKED) {
+        struct wlr_surface *focused = server->seat ? server->seat->pointer_state.focused_surface : NULL;
+        bool same_surface = false;
+        if (focused && server->current_constraint->surface) {
+            same_surface = (focused == server->current_constraint->surface ||
+                            wlr_surface_get_root_surface(focused) ==
+                            wlr_surface_get_root_surface(server->current_constraint->surface));
+        } else if (!focused) {
+            same_surface = true;
+        }
+        if (same_surface && woodland_pointer_constraint_is_focused(server, server->current_constraint)) {
             return;
         }
     }
@@ -271,9 +280,17 @@ static void server_cursor_motion_absolute(struct wl_listener *listener, void *da
     struct woodland_server *server = wl_container_of(listener, server, cursor_motion_absolute);
     struct wlr_pointer_motion_absolute_event *event = data;
     if (server->current_constraint &&
-        server->current_constraint->type == WLR_POINTER_CONSTRAINT_V1_LOCKED &&
-        server->seat->pointer_state.focused_surface == server->current_constraint->surface) {
-        if (woodland_pointer_constraint_is_focused(server, server->current_constraint)) {
+        server->current_constraint->type == WLR_POINTER_CONSTRAINT_V1_LOCKED) {
+        struct wlr_surface *focused = server->seat ? server->seat->pointer_state.focused_surface : NULL;
+        bool same_surface = false;
+        if (focused && server->current_constraint->surface) {
+            same_surface = (focused == server->current_constraint->surface ||
+                            wlr_surface_get_root_surface(focused) ==
+                            wlr_surface_get_root_surface(server->current_constraint->surface));
+        } else if (!focused) {
+            same_surface = true;
+        }
+        if (same_surface && woodland_pointer_constraint_is_focused(server, server->current_constraint)) {
             return;
         }
     }
