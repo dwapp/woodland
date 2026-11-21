@@ -19,6 +19,7 @@
 #include <stdlib.h>
 
 #include <wlr/types/wlr_ext_foreign_toplevel_list_v1.h>
+#include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_pointer_constraints_v1.h>
 #include <wlr/types/wlr_pointer.h>
 #include "scene.h"
@@ -35,6 +36,7 @@
 #include "effect.h"
 #include "layer.h"
 #include "output.h"
+#include "placement.h"
 #include "selfcheck.h"
 #include "session_lock.h"
 #include "shell_internal.h"
@@ -492,14 +494,120 @@ struct woodland_popup {
     struct wlr_xdg_popup *xdg_popup;
     struct wl_listener commit;
     struct wl_listener destroy;
+    struct wl_listener reposition;
 };
+
+void woodland_popup_unconstrain(struct wlr_xdg_popup *popup)
+{
+    if (!popup || !popup->base) {
+        return;
+    }
+
+    struct wlr_surface *root_surface = NULL;
+    struct wlr_xdg_popup *p = popup;
+    int depth = 0;
+    while (p && depth++ < 32) {
+        if (!p->parent) {
+            break;
+        }
+        struct wlr_xdg_surface *parent_xdg = wlr_xdg_surface_try_from_wlr_surface(p->parent);
+        if (parent_xdg && parent_xdg->role == WLR_XDG_SURFACE_ROLE_POPUP && parent_xdg->popup) {
+            p = parent_xdg->popup;
+        } else {
+            root_surface = p->parent;
+            break;
+        }
+    }
+
+    if (!root_surface) {
+        wlr_xdg_surface_schedule_configure(popup->base);
+        return;
+    }
+
+    struct woodland_server *server = NULL;
+    int surface_lx = 0, surface_ly = 0;
+    bool is_fullscreen = false;
+
+    struct woodland_view *view = woodland_view_from_surface(root_surface);
+    if (view) {
+        server = view->server;
+        is_fullscreen = view->fullscreen;
+        if (view->scene_tree) {
+            wlr_scene_node_coords(&view->scene_tree->node, &surface_lx, &surface_ly);
+        }
+        if (view->type == WOODLAND_VIEW_XDG && view->xdg_toplevel && view->xdg_toplevel->base) {
+            surface_lx -= view->xdg_toplevel->base->geometry.x;
+            surface_ly -= view->xdg_toplevel->base->geometry.y;
+        }
+    } else {
+        struct woodland_layer_surface *layer = woodland_layer_surface_from_wlr_surface(root_surface);
+        if (layer) {
+            server = layer->server;
+            if (layer->scene_layer_surface && layer->scene_layer_surface->tree) {
+                wlr_scene_node_coords(&layer->scene_layer_surface->tree->node, &surface_lx, &surface_ly);
+            }
+        }
+    }
+
+    if (!server) {
+        wlr_xdg_surface_schedule_configure(popup->base);
+        return;
+    }
+
+    int popup_sx = 0, popup_sy = 0;
+    wlr_xdg_popup_get_toplevel_coords(popup,
+                                      popup->scheduled.geometry.x,
+                                      popup->scheduled.geometry.y,
+                                      &popup_sx, &popup_sy);
+    int popup_lx = surface_lx + popup_sx;
+    int popup_ly = surface_ly + popup_sy;
+
+    struct woodland_output *output = woodland_output_nearest(server, popup_lx, popup_ly);
+    if (!output && !wl_list_empty(&server->outputs)) {
+        output = wl_container_of(server->outputs.next, output, link);
+    }
+    if (!output || !output->wlr_output) {
+        wlr_xdg_surface_schedule_configure(popup->base);
+        return;
+    }
+
+    struct wlr_box box_layout = {0};
+    if (view && !is_fullscreen) {
+        woodland_output_workarea(output, &box_layout);
+    }
+    if (box_layout.width <= 0 || box_layout.height <= 0) {
+        if (server->output_layout) {
+            wlr_output_layout_get_box(server->output_layout, output->wlr_output, &box_layout);
+        }
+    }
+    if (box_layout.width <= 0 || box_layout.height <= 0) {
+        wlr_xdg_surface_schedule_configure(popup->base);
+        return;
+    }
+
+    struct wlr_box toplevel_space_box = {
+        .x = box_layout.x - surface_lx,
+        .y = box_layout.y - surface_ly,
+        .width = box_layout.width,
+        .height = box_layout.height,
+    };
+
+    wlr_xdg_popup_unconstrain_from_box(popup, &toplevel_space_box);
+}
 
 static void xdg_popup_commit(struct wl_listener *listener, void *data)
 {
     struct woodland_popup *popup = wl_container_of(listener, popup, commit);
     if (popup->xdg_popup->base->initial_commit) {
-        wlr_xdg_surface_schedule_configure(popup->xdg_popup->base);
+        woodland_popup_unconstrain(popup->xdg_popup);
     }
+    (void)data;
+}
+
+static void xdg_popup_reposition(struct wl_listener *listener, void *data)
+{
+    struct woodland_popup *popup = wl_container_of(listener, popup, reposition);
+    woodland_popup_unconstrain(popup->xdg_popup);
     (void)data;
 }
 
@@ -507,6 +615,7 @@ static void xdg_popup_destroy(struct wl_listener *listener, void *data)
 {
     struct woodland_popup *popup = wl_container_of(listener, popup, destroy);
     wl_list_remove(&popup->commit.link);
+    wl_list_remove(&popup->reposition.link);
     wl_list_remove(&popup->destroy.link);
     free(popup);
     (void)data;
@@ -542,6 +651,8 @@ static void server_new_xdg_popup(struct wl_listener *listener, void *data)
 
     woodland_listener_connect(&popup->commit, &xdg_popup->base->surface->events.commit,
                               xdg_popup_commit, "shell.commit");
+    woodland_listener_connect(&popup->reposition, &xdg_popup->events.reposition,
+                              xdg_popup_reposition, "shell.reposition");
     woodland_listener_connect(&popup->destroy, &xdg_popup->events.destroy, xdg_popup_destroy,
                               "shell.destroy");
 }

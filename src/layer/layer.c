@@ -414,7 +414,7 @@ static void handle_popup_commit(struct wl_listener *listener, void *data)
 {
     struct woodland_layer_popup *popup = wl_container_of(listener, popup, commit);
     if (popup->xdg_popup->base->initial_commit) {
-        wlr_xdg_surface_schedule_configure(popup->xdg_popup->base);
+        woodland_popup_unconstrain(popup->xdg_popup);
 
         /* 客户端请求 grab 时（如面板应用菜单）赋予键盘焦点 */
         struct woodland_server *server = popup->layer ? popup->layer->server : NULL;
@@ -427,6 +427,13 @@ static void handle_popup_commit(struct wl_listener *listener, void *data)
             woodland_seat_focus_surface(server, popup->xdg_popup->base->surface);
         }
     }
+    (void)data;
+}
+
+static void handle_popup_reposition(struct wl_listener *listener, void *data)
+{
+    struct woodland_layer_popup *popup = wl_container_of(listener, popup, reposition);
+    woodland_popup_unconstrain(popup->xdg_popup);
     (void)data;
 }
 
@@ -445,6 +452,7 @@ static void handle_popup_destroy(struct wl_listener *listener, void *data)
     }
 
     wl_list_remove(&popup->commit.link);
+    wl_list_remove(&popup->reposition.link);
     wl_list_remove(&popup->destroy.link);
     free(popup);
     (void)data;
@@ -475,6 +483,8 @@ static void handle_new_popup(struct wl_listener *listener, void *data)
 
     woodland_listener_connect(&popup->commit, &xdg_popup->base->surface->events.commit,
                               handle_popup_commit, "layer.commit");
+    woodland_listener_connect(&popup->reposition, &xdg_popup->events.reposition,
+                              handle_popup_reposition, "layer.reposition");
     woodland_listener_connect(&popup->destroy, &xdg_popup->events.destroy, handle_popup_destroy,
                               "layer.destroy");
 }
