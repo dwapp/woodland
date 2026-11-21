@@ -23,6 +23,8 @@ command -v wlr-randr >/dev/null 2>&1 || {
 
 unset WAYLAND_DISPLAY
 export XDG_RUNTIME_DIR="$(mktemp -d)"
+export XDG_CONFIG_HOME="$XDG_RUNTIME_DIR/config"
+mkdir -p "$XDG_CONFIG_HOME"
 export WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=2
 
 SMOKE_LOG="$XDG_RUNTIME_DIR/log"
