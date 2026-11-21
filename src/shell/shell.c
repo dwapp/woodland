@@ -34,6 +34,7 @@
 #include "capture.h"
 #include "cursor.h"
 #include "effect.h"
+#include "focus.h"
 #include "layer.h"
 #include "output.h"
 #include "placement.h"
@@ -662,6 +663,12 @@ static void server_new_xdg_popup(struct wl_listener *listener, void *data)
     }
     struct wlr_scene_tree *parent_tree = parent->data;
     xdg_popup->base->data = wlr_scene_xdg_surface_create(parent_tree, xdg_popup->base);
+
+    /* 弹出 popup 时提升所属普通窗口至最顶层，确保 popup 在所有普通窗口之上 */
+    struct woodland_view *view = woodland_view_from_surface(xdg_popup->parent);
+    if (view) {
+        woodland_view_raise(view);
+    }
 
     woodland_listener_connect(&popup->commit, &xdg_popup->base->surface->events.commit,
                               xdg_popup_commit, "shell.commit");

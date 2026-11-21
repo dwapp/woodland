@@ -36,14 +36,16 @@ int main(void) {
     assert(out != NULL);
     wl_signal_emit_mutable(&server.backend->events.new_output, out);
 
-    /* 找到该输出，断言 4 棵 layer_tree 非空 */
+    /* 找到该输出，断言 4 棵 layer_tree 与 layer_popup_tree 非空 */
     struct woodland_output *wo =
         wl_container_of(server.outputs.next, wo, link);
     for (int i = 0; i < 4; i++) {
         assert(wo->layer_tree[i] != NULL);
     }
+    assert(wo->layer_popup_tree != NULL);
 
-    /* z-order：background(layer_tree[0]) 是场景最底，overlay(layer_tree[3]) 最顶 */
+    /* z-order：background(layer_tree[0]) 是场景最底，overlay(layer_tree[3]) 最顶，
+     * layer_popup_tree 在 top 之上、overlay 之下。 */
     struct wl_list *children = &server.scene->tree.children;
     struct wlr_scene_node *first_node =
         wl_container_of(children->next, first_node, link);
@@ -51,6 +53,22 @@ int main(void) {
         wl_container_of(children->prev, last_node, link);
     assert(first_node == &wo->layer_tree[0]->node);
     assert(last_node == &wo->layer_tree[3]->node);
+
+    /* 验证 layer_popup_tree 的 Z 序高于 background(0)、bottom(1)、top(2)，低于 overlay(3) */
+    bool found_top = false, found_popup = false, found_overlay = false;
+    struct wlr_scene_node *node;
+    wl_list_for_each(node, children, link) {
+        if (node == &wo->layer_tree[ZWLR_LAYER_SHELL_V1_LAYER_TOP]->node) {
+            found_top = true;
+        } else if (node == &wo->layer_popup_tree->node) {
+            assert(found_top); // popup_tree 必须在 top 之后
+            found_popup = true;
+        } else if (node == &wo->layer_tree[ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY]->node) {
+            assert(found_popup); // overlay 必须在 popup_tree 之后
+            found_overlay = true;
+        }
+    }
+    assert(found_top && found_popup && found_overlay);
 
     /* 测试全屏时的 TOP layer 动态可见性（对齐 labwc） */
     uint32_t top = ZWLR_LAYER_SHELL_V1_LAYER_TOP;

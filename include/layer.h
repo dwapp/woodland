@@ -18,6 +18,7 @@ struct woodland_layer_surface {
     struct wlr_scene_layer_surface_v1 *scene_layer_surface;
     bool mapped;
     struct woodland_effect_state effect;
+    struct wl_list popups; // struct woodland_layer_popup.link 链表
     struct wl_listener map;
     struct wl_listener unmap;
     struct wl_listener surface_commit;
@@ -29,6 +30,8 @@ struct woodland_layer_surface {
 struct woodland_layer_popup {
     struct wlr_xdg_popup *xdg_popup;
     struct wlr_scene_tree *scene_tree;
+    struct wlr_scene_tree *container; // 挂在 layer_popup_tree 下的容器节点（若未提升为 NULL）
+    struct wl_list link;              // woodland_layer_surface.popups
     struct wl_listener commit;
     struct wl_listener destroy;
     struct wl_listener reposition;

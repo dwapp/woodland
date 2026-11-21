@@ -19,6 +19,21 @@
 
 /* ==================== arrange ==================== */
 
+static void sync_layer_surface_popups(struct woodland_layer_surface *surface)
+{
+    if (!surface || !surface->scene_layer_surface || !surface->scene_layer_surface->tree) {
+        return;
+    }
+    struct woodland_layer_popup *popup;
+    wl_list_for_each(popup, &surface->popups, link) {
+        if (popup->container) {
+            wlr_scene_node_set_position(&popup->container->node,
+                                        surface->scene_layer_surface->tree->node.x,
+                                        surface->scene_layer_surface->tree->node.y);
+        }
+    }
+}
+
 static void arrange_one_layer(const struct wlr_box *full_area, struct wlr_box *usable_area,
                               struct wlr_scene_tree *tree, bool exclusive)
 {
@@ -34,6 +49,7 @@ static void arrange_one_layer(const struct wlr_box *full_area, struct wlr_box *u
             continue;
         }
         wlr_scene_layer_surface_v1_configure(scene, full_area, usable_area);
+        sync_layer_surface_popups(surface);
     }
 }
 
@@ -58,6 +74,10 @@ void woodland_layer_arrange(struct woodland_server *server, struct woodland_outp
     /* 同步 layer tree 节点位置到输出在 layout 中的坐标 */
     for (int i = 0; i < 4; i++) {
         wlr_scene_node_set_position(&output->layer_tree[i]->node, output->scene_output->x,
+                                    output->scene_output->y);
+    }
+    if (output->layer_popup_tree) {
+        wlr_scene_node_set_position(&output->layer_popup_tree->node, output->scene_output->x,
                                     output->scene_output->y);
     }
 }
@@ -381,6 +401,14 @@ static void handle_node_destroy(struct wl_listener *listener, void *data)
     struct woodland_layer_surface *layer = wl_container_of(listener, layer, node_destroy);
     struct woodland_server *server = layer->server;
 
+    /* 断开所有关联 popup 对 layer 的引用 */
+    struct woodland_layer_popup *popup, *tmp_popup;
+    wl_list_for_each_safe(popup, tmp_popup, &layer->popups, link) {
+        popup->layer = NULL;
+        wl_list_remove(&popup->link);
+        wl_list_init(&popup->link);
+    }
+
     /* 若持有键盘焦点，先把指针清掉再回退给 toplevel：
      * layer 被销毁会带走键盘焦点，不回退的话输入会直接丢失 */
     if (server->focused_layer == layer->layer_surface) {
@@ -454,6 +482,12 @@ static void handle_popup_destroy(struct wl_listener *listener, void *data)
         }
     }
 
+    if (popup->container) {
+        wlr_scene_node_destroy(&popup->container->node);
+        popup->container = NULL;
+    }
+
+    wl_list_remove(&popup->link);
     wl_list_remove(&popup->commit.link);
     wl_list_remove(&popup->reposition.link);
     wl_list_remove(&popup->destroy.link);
@@ -471,11 +505,44 @@ static void handle_new_popup(struct wl_listener *listener, void *data)
         wlr_log(WLR_ERROR, "failed to allocate layer popup");
         return;
     }
+    wl_list_init(&popup->link);
     popup->layer = layer;
     popup->xdg_popup = xdg_popup;
-    popup->scene_tree =
-        wlr_scene_xdg_surface_create(layer->scene_layer_surface->tree, xdg_popup->base);
+
+    struct wlr_scene_tree *parent_tree = NULL;
+    struct woodland_output *output = NULL;
+    if (layer->layer_surface && layer->layer_surface->output) {
+        output = layer->layer_surface->output->data;
+    }
+
+    /*
+     * 关键修复：底层 layer surface（background 和 bottom）的 popup 必须提升到
+     * 普通窗口之上。我们在 output->layer_popup_tree 下创建容器节点，
+     * 并将其位置对齐到父 layer surface 在 output 中的坐标。
+     */
+    if (output && output->layer_popup_tree &&
+        layer->layer_surface->current.layer <= ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM) {
+        popup->container = wlr_scene_tree_create(output->layer_popup_tree);
+        if (popup->container) {
+            int lx = 0, ly = 0;
+            if (layer->scene_layer_surface && layer->scene_layer_surface->tree) {
+                lx = layer->scene_layer_surface->tree->node.x;
+                ly = layer->scene_layer_surface->tree->node.y;
+            }
+            wlr_scene_node_set_position(&popup->container->node, lx, ly);
+            parent_tree = popup->container;
+        }
+    }
+
+    if (!parent_tree) {
+        parent_tree = layer->scene_layer_surface->tree;
+    }
+
+    popup->scene_tree = wlr_scene_xdg_surface_create(parent_tree, xdg_popup->base);
     if (!popup->scene_tree) {
+        if (popup->container) {
+            wlr_scene_node_destroy(&popup->container->node);
+        }
         free(popup);
         return;
     }
@@ -483,6 +550,7 @@ static void handle_new_popup(struct wl_listener *listener, void *data)
      * 场景树。嵌套 popup（父是 popup）走 shell.c 的 server_new_xdg_popup，
      * 靠读父 popup 的 base->data 找到挂载点；这里不设会留下 NULL 导致断言崩溃 */
     xdg_popup->base->data = popup->scene_tree;
+    wl_list_insert(&layer->popups, &popup->link);
 
     woodland_listener_connect(&popup->commit, &xdg_popup->base->surface->events.commit,
                               handle_popup_commit, "layer.commit");
@@ -522,6 +590,7 @@ static void handle_new_layer_surface(struct wl_listener *listener, void *data)
     layer->layer_surface = layer_surface;
     layer->server = server;
     layer_surface->data = layer;
+    wl_list_init(&layer->popups);
 
     struct woodland_output *output = layer_surface->output->data;
     struct wlr_scene_tree *selected_layer = output->layer_tree[layer_surface->current.layer];

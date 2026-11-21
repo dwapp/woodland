@@ -18,6 +18,7 @@ struct woodland_output {
     struct wlr_output *wlr_output;
     struct wlr_scene_output *scene_output;
     struct wlr_scene_tree *layer_tree[4]; // 下标 = zwlr_layer_shell_v1_layer 枚举
+    struct wlr_scene_tree *layer_popup_tree; // 承载提升至普通窗口之上的底层 layer popup
     struct wlr_scene_optimized_blur *optimized_blur; // background 层之上的预模糊缓存节点
     struct wlr_box usable_area;        // 扣除 exclusive zone 后的可用区域
     bool usable_area_valid;            // usable_area 是否已被 arrange 初始化

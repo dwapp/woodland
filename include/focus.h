@@ -56,6 +56,7 @@ struct woodland_view *woodland_focus_current(struct woodland_server *server);
  * raise=false 用于"只给焦点不改层叠"（如从 layer 退回、焦点回退）。
  */
 void woodland_focus_view(struct woodland_view *view, bool raise);
+void woodland_view_raise(struct woodland_view *view);
 
 /**
  * 焦点回退：挑当前工作区 z 序最上的可聚焦视图；没有就清焦点。

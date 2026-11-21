@@ -572,6 +572,9 @@ void woodland_ipc_write_pixel_source(struct woodland_server *server, int lx, int
                             break;
                         }
                     }
+                    if (!in_layer && wo->layer_popup_tree && node_in_tree(hit, wo->layer_popup_tree)) {
+                        in_layer = true;
+                    }
                     if (in_layer) {
                         break;
                     }
