@@ -400,3 +400,10 @@ test_dde_shell = executable('test_dde_shell', 'test_dde_shell.c',
   link_with: [protocol_lib, util_lib, trace_lib, effect_lib, shell_lib, output_lib, cursor_lib,
               workspace_lib, ssd_lib, layer_lib, session_lock_lib, capture_lib, dnd_lib] + xwayland_libs)
 test('dde_shell', test_dde_shell, suite: ['unit', 'quick'])
+
+test_wine_protocols = executable('test_wine_protocols', 'test_wine_protocols.c',
+  dependencies: [scene_deps, wayland_server],
+  include_directories: [woodland_inc, include_directories('../../src/protocol')],
+  link_with: [protocol_lib, util_lib, trace_lib, effect_lib, shell_lib, output_lib, cursor_lib,
+              workspace_lib, ssd_lib, layer_lib, session_lock_lib, capture_lib, dnd_lib] + xwayland_libs)
+test('wine_protocols', test_wine_protocols, suite: ['unit', 'quick'])

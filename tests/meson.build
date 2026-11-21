@@ -403,6 +403,53 @@ if get_option('test').enabled()
     endif
   endif
 
+  # treeland-wine-window-management-unstable-v1 & treeland-wine-window-state-unstable-v1
+  wine_wm_xml = meson.project_source_root() / 'protocols' / 'treeland' / 'treeland-wine-window-management-unstable-v1.xml'
+  wine_ws_xml = meson.project_source_root() / 'protocols' / 'treeland' / 'treeland-wine-window-state-unstable-v1.xml'
+  if wayland_client_dep.found() and wayland_scanner.found() and fs.exists(wine_wm_xml) and fs.exists(wine_ws_xml) and wp_datadir != ''
+    wine_xdg_xml = wp_datadir / 'stable' / 'xdg-shell' / 'xdg-shell.xml'
+    if fs.exists(wine_xdg_xml)
+      wine_probe_srcs = [
+        'smoke/wine_probe.c',
+        custom_target('wine-wm-client-header',
+          input: wine_wm_xml,
+          output: 'treeland-wine-window-management-unstable-v1-client-protocol.h',
+          command: [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@']),
+        custom_target('wine-wm-client-code',
+          input: wine_wm_xml,
+          output: 'treeland-wine-window-management-unstable-v1-protocol.c',
+          command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@']),
+        custom_target('wine-ws-client-header',
+          input: wine_ws_xml,
+          output: 'treeland-wine-window-state-unstable-v1-client-protocol.h',
+          command: [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@']),
+        custom_target('wine-ws-client-code',
+          input: wine_ws_xml,
+          output: 'treeland-wine-window-state-unstable-v1-protocol.c',
+          command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@']),
+        custom_target('wine-xdg-shell-client-header',
+          input: wine_xdg_xml,
+          output: 'wine-xdg-shell-client-protocol.h',
+          command: [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@']),
+        custom_target('wine-xdg-shell-client-code',
+          input: wine_xdg_xml,
+          output: 'wine-xdg-shell-protocol.c',
+          command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@']),
+      ]
+      wine_probe = executable('wine_probe', wine_probe_srcs,
+                              dependencies: [wayland_client_dep])
+      test('smoke-wine',
+           find_program('sh'),
+           args: [meson.current_source_dir() / 'smoke' / 'run_wine_smoke.sh',
+                  woodland_bin.full_path(),
+                  wine_probe.full_path(),
+                  wctl_bin.full_path()],
+           suite: ['smoke'],
+           is_parallel: false,
+           timeout: 90)
+    endif
+  endif
+
 
   # output-management 的事件顺序回归（apply 的 succeeded 必须先于新一轮
   # configuration + done）。协议 xml 属于 wlr-protocols（不在

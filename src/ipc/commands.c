@@ -465,6 +465,7 @@ static void append_view_details(struct woodland_server *server, struct woodland_
     woodland_json_obj_bool(&obj, "maximized", view->maximized);
     woodland_json_obj_bool(&obj, "fullscreen", view->fullscreen);
     woodland_json_obj_bool(&obj, "always_on_top", view->always_on_top);
+    woodland_json_obj_bool(&obj, "attention", view->attention);
     woodland_json_obj_int(&obj, "layer", (int)woodland_view_get_layer(view));
     woodland_json_obj_bool(&obj, "override_redirect", view->override_redirect);
     woodland_json_obj_bool(&obj, "csd", view->deco_csd);
@@ -749,6 +750,10 @@ static void ipc_get_tree(struct woodland_server *server, struct woodland_json *o
     woodland_protocol_remote_subsurface_status(server, out);
     woodland_json_obj_key(&obj, "dde_shell");
     woodland_protocol_dde_shell_status(server, out);
+    woodland_json_obj_key(&obj, "wine_window_management");
+    woodland_protocol_wine_wm_status(server, out);
+    woodland_json_obj_key(&obj, "wine_window_state");
+    woodland_protocol_wine_state_status(server, out);
 
 
     woodland_json_obj_key(&obj, "focus");

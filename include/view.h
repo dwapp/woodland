@@ -105,6 +105,7 @@ struct woodland_view {
     bool maximized;
     bool fullscreen;
     bool always_on_top;
+    bool attention;
     /*
      * 我们下发给客户端/装饰的激活态。
      *
@@ -253,6 +254,7 @@ void woodland_view_set_fullscreen(struct woodland_view *view, bool fullscreen,
                                   struct wlr_output *output);
 void woodland_view_set_minimized(struct woodland_view *view, bool minimized);
 void woodland_view_set_always_on_top(struct woodland_view *view, bool always_on_top);
+void woodland_view_set_attention(struct woodland_view *view, bool attention);
 enum woodland_view_layer woodland_view_get_layer(const struct woodland_view *view);
 void woodland_view_restack(struct woodland_view *view);
 

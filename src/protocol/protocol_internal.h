@@ -23,6 +23,8 @@ struct woodland_proto_security_context;
 struct woodland_proto_xwindow_control;
 struct woodland_proto_remote_subsurface;
 struct woodland_proto_dde_shell;
+struct woodland_proto_wine_wm;
+struct woodland_proto_wine_state;
 struct wl_client;
 struct woodland_tearing_controller;
 
@@ -87,6 +89,8 @@ struct woodland_proto {
     struct woodland_proto_xwindow_control *xwindow_control;   /* xwindow_control.c */
     struct woodland_proto_remote_subsurface *remote_subsurface; /* remote_subsurface.c */
     struct woodland_proto_dde_shell *dde_shell;               /* dde_shell.c */
+    struct woodland_proto_wine_wm *wine_wm;                   /* wine_window_management.c */
+    struct woodland_proto_wine_state *wine_state;             /* wine_window_state.c */
 };
 
 /* 空闲与抑制族（idle.c）：idle-notify / idle-inhibit / keyboard-shortcuts-inhibit */
@@ -191,5 +195,13 @@ void woodland_proto_remote_subsurface_finish(struct woodland_proto *proto);
 /* DDE Shell 角色协议（dde_shell.c）：treeland-dde-shell-unstable-v2 */
 bool woodland_proto_dde_shell_init(struct woodland_proto *proto);
 void woodland_proto_dde_shell_finish(struct woodland_proto *proto);
+
+/* Wine 窗口管理族（wine_window_management.c）：treeland-wine-window-management-unstable-v1 */
+bool woodland_proto_wine_wm_init(struct woodland_proto *proto);
+void woodland_proto_wine_wm_finish(struct woodland_proto *proto);
+
+/* Wine 窗口状态族（wine_window_state.c）：treeland-wine-window-state-unstable-v1 */
+bool woodland_proto_wine_state_init(struct woodland_proto *proto);
+void woodland_proto_wine_state_finish(struct woodland_proto *proto);
 
 #endif

@@ -516,4 +516,48 @@ void woodland_protocol_dde_shell_view_status(const struct woodland_view *view,
 bool woodland_protocol_dde_shell_query_surface_state(struct woodland_server *server,
                                                      struct woodland_dde_shell_surface_state *out);
 
+/* =========================================================================
+ * treeland-wine-window-management-unstable-v1
+ * ========================================================================= */
+
+struct woodland_wine_wm_query_state {
+    bool available;
+    uint32_t session_count;
+    uint32_t control_count;
+    uint32_t position_requests;
+    uint32_t z_order_requests;
+    int32_t last_x;
+    int32_t last_y;
+    uint32_t last_serial;
+    uint32_t last_topmost;
+};
+
+void woodland_protocol_wine_wm_status(struct woodland_server *server,
+                                      struct woodland_json *out);
+
+bool woodland_protocol_wine_wm_query_state(struct woodland_server *server,
+                                           struct woodland_wine_wm_query_state *out);
+
+/* =========================================================================
+ * treeland-wine-window-state-unstable-v1
+ * ========================================================================= */
+
+struct woodland_wine_state_query_state {
+    bool available;
+    uint32_t binding_count;
+    uint32_t state_count;
+    uint32_t unminimize_count;
+    uint32_t activate_count;
+    uint32_t activate_denied_count;
+    uint32_t attention_set_count;
+    uint32_t attention_clear_count;
+    uint32_t last_state_flags;
+};
+
+void woodland_protocol_wine_state_status(struct woodland_server *server,
+                                         struct woodland_json *out);
+
+bool woodland_protocol_wine_state_query_state(struct woodland_server *server,
+                                              struct woodland_wine_state_query_state *out);
+
 #endif
