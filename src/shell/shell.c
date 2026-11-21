@@ -37,6 +37,7 @@
 #include "layer.h"
 #include "output.h"
 #include "placement.h"
+#include "protocol.h"
 #include "selfcheck.h"
 #include "session_lock.h"
 #include "shell_internal.h"
@@ -165,13 +166,13 @@ struct woodland_view *woodland_view_from_surface(struct wlr_surface *surface)
     if (!surface) {
         return NULL;
     }
-    struct wlr_surface *root = wlr_surface_get_root_surface(surface);
+    struct wlr_surface *root = woodland_surface_get_root_surface(surface);
     struct wlr_xdg_surface *xdg_surface = wlr_xdg_surface_try_from_wlr_surface(root);
     while (xdg_surface && xdg_surface->role == WLR_XDG_SURFACE_ROLE_POPUP && xdg_surface->popup) {
         if (!xdg_surface->popup->parent) {
             break;
         }
-        root = wlr_surface_get_root_surface(xdg_surface->popup->parent);
+        root = woodland_surface_get_root_surface(xdg_surface->popup->parent);
         xdg_surface = wlr_xdg_surface_try_from_wlr_surface(root);
     }
     if (xdg_surface && xdg_surface->role == WLR_XDG_SURFACE_ROLE_TOPLEVEL && xdg_surface->toplevel) {

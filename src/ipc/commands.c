@@ -127,6 +127,11 @@ static const struct ipc_field_doc get_tree_fields[] = {
      "out_of_range|callback_failed), last_anchor (int[2]|null), "
      "last_target (int[2]|null), "
      "last_target_kind (str|null: managed|unmanaged), last_view_id (int)"},
+    {"remote_subsurface", "obj",
+     "treeland-remote-subsurface-v1: available (bool), bindings, "
+     "active_exports, active_subsurfaces, export_count, create_count, "
+     "reject_count, invalid_sibling_count, restack_count, position_count, "
+     "subsurfaces (obj[]: place, x, y, mapped, scene_attached)"},
     {"focus", "obj", "same fields as get_focus"},
     {"snap_preview", "obj",
      "snap preview overlay: active, edges[], box[x,y,w,h], output"},
@@ -736,6 +741,8 @@ static void ipc_get_tree(struct woodland_server *server, struct woodland_json *o
     /* X11 摆位：bind 数、累计成败、最近一次请求的目标与处置 */
     woodland_json_obj_key(&obj, "xwindow_control");
     woodland_protocol_xwindow_control_status(server, out);
+    woodland_json_obj_key(&obj, "remote_subsurface");
+    woodland_protocol_remote_subsurface_status(server, out);
 
 
     woodland_json_obj_key(&obj, "focus");

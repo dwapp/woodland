@@ -1,0 +1,315 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="treeland_remote_subsurface_unstable_v1">
+    <copyright><![CDATA[
+    SPDX-FileCopyrightText: 2026 UnionTech Software Technology Co., Ltd.
+    SPDX-License-Identifier: MIT
+    ]]></copyright>
+
+    <description summary="sub-surface compositing via token-based references">
+        This protocol provides sub-surface relationships between
+        wl_surface objects using token-based identifiers exchanged
+        out-of-band, instead of the direct wl_surface references
+        required by wl_subcompositor.  In wl_subcompositor the
+        parent and sibling surfaces must be local wl_surface objects
+        from the same client; this protocol removes that
+        restriction, allowing parent-child relationships both across
+        different client connections and within the same client:
+
+        1. A client exports a wl_surface and receives a surface_token.
+
+        2. Another client (or the same client) exports their own
+           wl_surface and then calls create_remote_subsurface with
+           the parent's surface_token, attaching their surface as a
+           child.
+
+        All sub-surface semantics follow the wl_subcompositor
+        specification unless explicitly noted in this document.
+        Cross-process sub-surfaces are always in desynchronized mode;
+        synchronized mode is not supported.
+
+        This protocol is not interoperable with wl_subsurface: a
+        wl_subsurface cannot reference a surface that carries a
+        treeland_remote_subsurface_v1 role, and the two kinds of
+        sub-surface cannot be ordered relative to each other.  When
+        a parent surface has both, wl_subsurface is always kept
+        closest to the parent surface content on each side: a
+        wl_subsurface placed above the parent content sits below the
+        treeland_remote_subsurface_v1 children that are above the
+        parent, and one placed below sits above the
+        treeland_remote_subsurface_v1 children that are below the
+        parent.  The relative z-order between the two kinds cannot
+        be controlled precisely, since place_above and place_below
+        order treeland_remote_subsurface_v1 children among
+        themselves and relative to the parent surface content, but
+        cannot position them relative to wl_subsurface children,
+        and the wl_subcompositor requests cannot position a
+        wl_subsurface relative to treeland_remote_subsurface_v1
+        children.
+
+        Clients that need fine-grained z-order control across all
+        sub-surfaces of a parent should replace wl_subsurface with
+        treeland_remote_subsurface_v1, which is designed for
+        cross-process relationships but may equally be used within a
+        single client, avoiding two separate sub-surface trees that
+        cannot interact with each other.
+
+        The compositor must restrict binding to trusted clients.
+        A client that obtains a surface_token must only share it
+        with other trusted clients through a secure mechanism;
+        the compositor does not disclose tokens to other clients.
+
+        The key words "must", "must not", "required", "shall",
+        "shall not", "should", "should not", "recommended", "may",
+        and "optional" in this document are to be interpreted as
+        described in RFC 2119.
+
+        Warning! The protocol described in this file is not fully
+        stable. Backward-incompatible changes should be avoided but
+        are not guaranteed; any backward-incompatible change must bump
+        the version number in the protocol and interface names and
+        reset the interface version.
+    </description>
+
+    <interface name="treeland_remote_subsurface_manager_v1" version="1">
+        <description summary="factory for remote sub-surfaces">
+            Global factory for exporting wl_surface objects as
+            token-addressable sub-surface parents or children.
+
+            The typical workflow is:
+
+            1. The client calls export_surface on a wl_surface to
+               obtain a treeland_exported_surface_v1 and receive a
+               surface_token event.
+
+            2. The token is shared out-of-band with another client.
+
+            3. That client exports its own wl_surface, then calls
+               create_remote_subsurface with the parent's token to
+               establish a sub-surface relationship.
+
+            Destroying this manager does not affect already-exported
+            surfaces or existing sub-surface relationships; it only
+            prevents creation of new exported surfaces.
+        </description>
+
+        <enum name="error">
+            <entry name="bad_surface" value="0"
+                summary="the wl_surface has already been exported through this manager"/>
+        </enum>
+
+        <request name="destroy" type="destructor">
+            <description summary="destroy the remote sub-surface manager">
+                Destroys this manager object.  Already-exported
+                treeland_exported_surface_v1 objects and existing
+                sub-surface relationships are not affected.
+            </description>
+        </request>
+
+        <request name="export_surface">
+            <description summary="register a surface for token-addressable sub-surface use">
+                Registers a wl_surface as addressable by token,
+                creating a treeland_exported_surface_v1.  Upon
+                success the compositor emits the surface_token event
+                on the new object.
+
+                The surface must not have been previously exported
+                through this manager; doing so is a bad_surface
+                error.  A surface may carry both an xdg_toplevel (or
+                any other role) and an export; the export only marks
+                it as addressable by token.
+            </description>
+            <arg name="id" type="new_id"
+                 interface="treeland_exported_surface_v1"/>
+            <arg name="surface" type="object" interface="wl_surface"
+                 summary="the surface to export"/>
+        </request>
+    </interface>
+
+    <interface name="treeland_exported_surface_v1" version="1">
+        <description summary="an exported surface, addressable by token">
+            Represents a wl_surface registered for sub-surface use
+            via this protocol.  The surface may act as a parent or a
+            child; a surface can have at most one parent via this
+            protocol.
+
+            Destroying this object revokes the surface_token without
+            affecting existing parent-child relationships or
+            treeland_remote_subsurface_v1 objects.
+        </description>
+
+        <enum name="error">
+            <description summary="error values for treeland_exported_surface_v1">
+                These errors can be raised in response to
+                treeland_exported_surface_v1 requests.
+            </description>
+            <entry name="bad_surface" value="0"
+                summary="the child surface already has an incompatible role"/>
+        </enum>
+
+        <enum name="reject_reason">
+            <description summary="why create_remote_subsurface was rejected">
+                Indicates why a create_remote_subsurface request
+                could not establish the requested parent-child
+                relationship.
+            </description>
+            <entry name="invalid_token" value="0"
+                summary="parent_token does not identify a live exported surface"/>
+            <entry name="cyclic" value="1"
+                summary="parent_token would introduce a cycle in the sub-surface tree"/>
+        </enum>
+
+        <request name="destroy" type="destructor">
+            <description summary="revoke the surface token">
+                Revokes the surface_token; subsequent use of the
+                token in create_remote_subsurface results in an
+                invalid_token parent_rejected event on the
+                requesting treeland_exported_surface_v1.
+
+                The client must destroy this object before destroying
+                the associated wl_surface.
+            </description>
+        </request>
+
+        <request name="create_remote_subsurface">
+            <description summary="attach this surface as a child to a remote parent">
+                Attaches the exported surface to the parent identified
+                by parent_token, creating a treeland_remote_subsurface_v1.
+                The surface must not already have a wlroots role; it
+                will be assigned the exclusive
+                treeland_remote_subsurface_v1 role.  If the surface
+                already has an incompatible role, a bad_surface error
+                is raised and the new treeland_remote_subsurface_v1
+                object is inert.
+
+                If the parent_token is invalid or would introduce a
+                cycle, the request is ignored and a parent_rejected
+                event is emitted carrying the reject_reason.
+
+                The sub-surface addition is double-buffered on the
+                parent.
+            </description>
+            <arg name="id" type="new_id"
+                 interface="treeland_remote_subsurface_v1"/>
+            <arg name="parent_token" type="string"
+                 summary="surface_token of the parent, obtained via export"/>
+        </request>
+
+        <event name="surface_token">
+            <description summary="the assigned surface token">
+                Emitted immediately after export_surface.  The token
+                is a unique string of at most 128 characters,
+                generated by a cryptographically secure random number
+                generator, intended to be shared out-of-band so that
+                other clients can reference this surface as a parent
+                or sibling.
+            </description>
+            <arg name="token" type="string"
+                 summary="the surface token"/>
+        </event>
+
+        <event name="parent_rejected">
+            <description summary="create_remote_subsurface could not attach to the parent">
+                Emitted when create_remote_subsurface cannot
+                establish the requested parent-child relationship.
+            </description>
+            <arg name="reason" type="uint" enum="reject_reason"
+                 summary="why the parent_token was rejected"/>
+            <arg name="parent_token" type="string"
+                 summary="the rejected parent token"/>
+        </event>
+    </interface>
+
+    <interface name="treeland_remote_subsurface_v1" version="1">
+        <description summary="remote sub-surface interface to a wl_surface">
+            An additional interface to a wl_surface that has been
+            made a sub-surface via this protocol.  A sub-surface has
+            one parent and is not automatically clipped to its
+            parent's area.
+
+            Mapping and commit semantics follow wl_subcompositor
+            except that desynchronized mode is always used.  A
+            sub-surface never has the keyboard focus of any seat.
+
+            The parent is identified at creation time and cannot be
+            changed.  place_above and place_below accept a token
+            (string) instead of a wl_surface proxy; see the request
+            documentation for valid values.
+
+            The wl_surface.offset request is ignored; clients must
+            use set_position instead.
+        </description>
+
+        <request name="destroy" type="destructor">
+            <description summary="remove sub-surface interface">
+                Removes the sub-surface association, unmaps the
+                wl_surface immediately, and destroys this object.
+            </description>
+        </request>
+
+        <request name="set_position">
+            <description summary="reposition the sub-surface">
+                Schedules a position change relative to the parent
+                surface coordinate system.  Coordinates are not
+                restricted to the parent area; negative values are
+                allowed.  Double-buffered on the parent; replaces any
+                previous pending position.  Initial position is 0, 0.
+            </description>
+            <arg name="x" type="int"
+                 summary="x coordinate in the parent surface local coordinate system"/>
+            <arg name="y" type="int"
+                 summary="y coordinate in the parent surface local coordinate system"/>
+        </request>
+
+        <request name="place_above">
+            <description summary="restack the sub-surface">
+                Places this sub-surface just above the reference
+                identified by sibling_token, changing the z-order.
+                Z-order is double-buffered on the parent surface.
+                A new sub-surface is initially added at the top.
+
+                Valid sibling_token values:
+
+                - The surface_token of the parent exported surface.
+
+                - The surface_token of any sibling cross-process
+                  sub-surface under the same parent, shared via
+                  out-of-band communication.
+
+                - An empty string (""), a sentinel meaning
+                  "place at the very top of the sibling stack".
+
+                If the sibling_token does not identify a valid
+                target, the request is ignored and an
+                invalid_sibling event is emitted.
+            </description>
+            <arg name="sibling_token" type="string"
+                 summary="a surface_token or empty string for top"/>
+        </request>
+
+        <request name="place_below">
+            <description summary="restack the sub-surface">
+                Places this sub-surface just below the reference
+                identified by sibling_token.  The same sibling_token
+                values are accepted as in place_above, except that an
+                empty string is a sentinel meaning "place at the very
+                bottom of the sibling stack".
+
+                If the sibling_token does not identify a valid
+                target, the request is ignored and an
+                invalid_sibling event is emitted.
+            </description>
+            <arg name="sibling_token" type="string"
+                 summary="a surface_token or empty string for bottom"/>
+        </request>
+
+        <event name="invalid_sibling">
+            <description summary="a place_above or place_below request could not be fulfilled">
+                Emitted when a sibling_token does not identify a valid
+                target.  The corresponding restack request was ignored.
+            </description>
+            <arg name="sibling_token" type="string"
+                 summary="the unrecognized token"/>
+        </event>
+    </interface>
+
+</protocol>

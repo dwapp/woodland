@@ -6,10 +6,86 @@
  * 而它们决定的却是"要不要在别人家里接管全局快捷键"这种有后果的事。
  */
 #include "util/env.h"
+#include "protocol.h"
 
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <wlr/types/wlr_compositor.h>
+#include <wlr/util/addon.h>
+
+struct woodland_remote_parent_addon {
+    struct wlr_addon addon;
+    struct wlr_surface *parent;
+};
+
+static void remote_parent_addon_destroy(struct wlr_addon *addon)
+{
+    struct woodland_remote_parent_addon *entry = wl_container_of(addon, entry, addon);
+    wlr_addon_finish(&entry->addon);
+    free(entry);
+}
+
+static const struct wlr_addon_interface remote_parent_addon_impl = {
+    .name = "woodland_remote_subsurface_parent",
+    .destroy = remote_parent_addon_destroy,
+};
+
+void woodland_remote_subsurface_set_parent(struct wlr_surface *child, struct wlr_surface *parent)
+{
+    if (!child) {
+        return;
+    }
+    struct wlr_addon *found =
+        wlr_addon_find(&child->addons, child, &remote_parent_addon_impl);
+    if (!parent) {
+        if (found) {
+            remote_parent_addon_destroy(found);
+        }
+        return;
+    }
+    if (found) {
+        struct woodland_remote_parent_addon *entry = wl_container_of(found, entry, addon);
+        entry->parent = parent;
+        return;
+    }
+    struct woodland_remote_parent_addon *entry = calloc(1, sizeof(*entry));
+    if (!entry) {
+        return;
+    }
+    entry->parent = parent;
+    wlr_addon_init(&entry->addon, &child->addons, child, &remote_parent_addon_impl);
+}
+
+struct wlr_surface *woodland_remote_subsurface_parent(struct wlr_surface *surface)
+{
+    if (!surface || !surface->addons.WLR_PRIVATE.addons.next) {
+        return NULL;
+    }
+    struct wlr_addon *found =
+        wlr_addon_find(&surface->addons, surface, &remote_parent_addon_impl);
+    if (!found) {
+        return NULL;
+    }
+    struct woodland_remote_parent_addon *entry = wl_container_of(found, entry, addon);
+    return entry->parent;
+}
+
+struct wlr_surface *woodland_surface_get_root_surface(struct wlr_surface *surface)
+{
+    if (!surface) {
+        return NULL;
+    }
+    struct wlr_surface *curr = wlr_surface_get_root_surface(surface);
+    for (int depth = 0; curr && depth < 32; depth++) {
+        struct wlr_surface *remote_parent = woodland_remote_subsurface_parent(curr);
+        if (!remote_parent || remote_parent == curr) {
+            break;
+        }
+        curr = wlr_surface_get_root_surface(remote_parent);
+    }
+    return curr;
+}
 
 /* token 是 XDG_CURRENT_DESKTOP 里 ':' 之间的一段（已去空白） */
 static bool token_is_dde(const char *token, size_t len)

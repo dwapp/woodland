@@ -11,6 +11,7 @@
   - `wallpaper.c`、`wallpaper_config.c`：壁纸协议与持久化。
   - `foreign_toplevel.c`：任务栏窗口列表与状态同步。
   - `xwindow_control.c`：Xwayland 托盘图标摆位。
+  - `remote_subsurface.c`：跨进程/同进程基于 token 的子表面关联与 Z 序控制。
 - 通用扩展协议实现：
   - `decoration.c`：CSD/SSD 协商（zxdg 与 treeland 装饰）。
   - `idle.c`：空闲抑制器管理。

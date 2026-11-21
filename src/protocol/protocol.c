@@ -154,6 +154,10 @@ bool woodland_protocol_init(struct woodland_server *server) {
     if (!woodland_proto_xwindow_control_init(proto)) {
         return false;
     }
+    /* 跨进程子表面：treeland-remote-subsurface-unstable-v1 */
+    if (!woodland_proto_remote_subsurface_init(proto)) {
+        return false;
+    }
 
     /* 已有输出可能早于本模块建好，补一次广播让客户端看到初始状态 */
     woodland_proto_output_broadcast(proto);
@@ -182,6 +186,7 @@ void woodland_protocol_finish(struct woodland_server *server)
     }
 
     /* 逆序拆：与 init 对称，后建的先摘 */
+    woodland_proto_remote_subsurface_finish(proto);
     woodland_proto_xwindow_control_finish(proto);
     woodland_proto_security_context_finish(proto);
     woodland_proto_wallpaper_finish(proto);
