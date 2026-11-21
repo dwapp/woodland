@@ -21,7 +21,6 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_xcursor_manager.h>
 #include "cursor.h"
 #include "output.h"
@@ -122,9 +121,6 @@ static void unmanaged_attach_surface(struct woodland_unmanaged *unmanaged,
                           unmanaged_unmap, "xwayland.unmap");
     /* set_geometry 里已经会刷一次滤波（buffer 这时通常还没有，是空操作），
      * 真正的第一次生效在 map 之后 */
-    if (!surface->mapped && wlr_surface_has_buffer(surface)) {
-        wlr_surface_map(surface);
-    }
     if (surface->mapped) {
         unmanaged_map(&unmanaged->map, NULL);
     }
@@ -413,14 +409,7 @@ static void xwl_associate(struct wl_listener *listener, void *data) {
         woodland_view_set_parent(view, xsurface->parent->data);
     }
 
-    /*
-     * 竞态保护：
-     * 1. 若 surface 在 associate 之前已提交 buffer，wlroots 尚未触发 map，主动 map 它；
-     * 2. 若 surface 已处于 mapped 状态（map 信号在挂接监听前已发射），补调 xwl_map 上屏。
-     */
-    if (!xsurface->surface->mapped && wlr_surface_has_buffer(xsurface->surface)) {
-        wlr_surface_map(xsurface->surface);
-    }
+    /* 若 surface 挂接监听器前已由 wlroots 完成 map，补调 xwl_map 确保视图上屏 */
     if (xsurface->surface->mapped) {
         xwl_map(&view->map, NULL);
     }
