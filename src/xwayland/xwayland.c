@@ -21,6 +21,7 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_xcursor_manager.h>
 #include "cursor.h"
 #include "output.h"
@@ -121,6 +122,9 @@ static void unmanaged_attach_surface(struct woodland_unmanaged *unmanaged,
                           unmanaged_unmap, "xwayland.unmap");
     /* set_geometry 里已经会刷一次滤波（buffer 这时通常还没有，是空操作），
      * 真正的第一次生效在 map 之后 */
+    if (!surface->mapped && wlr_surface_has_buffer(surface)) {
+        wlr_surface_map(surface);
+    }
     if (surface->mapped) {
         unmanaged_map(&unmanaged->map, NULL);
     }
@@ -335,6 +339,9 @@ static void xwl_map_request(struct wl_listener *listener, void *data) {
 
 static void xwl_map(struct wl_listener *listener, void *data) {
     struct woodland_view *view = wl_container_of(listener, view, map);
+    if (view->mapped) {
+        return;
+    }
     bool take_focus = view->focused_before_map;
     view->focused_before_map = false;
     woodland_view_map(view);
@@ -370,13 +377,15 @@ static void xwl_update_deco(struct woodland_view *view);
 static void xwl_associate(struct wl_listener *listener, void *data) {
     struct woodland_view *view = wl_container_of(listener, view, associate);
     struct wlr_xwayland_surface *xsurface = view->xwayland_surface;
-    if (!xsurface->surface) {
+    if (!xsurface || !xsurface->surface) {
         return;
     }
 
-    view->scene_surface = wlr_scene_surface_create(view->scene_tree,
-                                                   xsurface->surface);
-    woodland_xwayland_view_update_scale_filter(view);
+    if (!view->scene_surface) {
+        view->scene_surface = wlr_scene_surface_create(view->scene_tree,
+                                                       xsurface->surface);
+        woodland_xwayland_view_update_scale_filter(view);
+    }
 
     woodland_listener_connect(&view->map, &xsurface->surface->events.map,
                           xwl_map, "xwayland.map");
@@ -403,6 +412,19 @@ static void xwl_associate(struct wl_listener *listener, void *data) {
     if (!view->parent && xsurface->parent && xsurface->parent->data) {
         woodland_view_set_parent(view, xsurface->parent->data);
     }
+
+    /*
+     * 竞态保护：
+     * 1. 若 surface 在 associate 之前已提交 buffer，wlroots 尚未触发 map，主动 map 它；
+     * 2. 若 surface 已处于 mapped 状态（map 信号在挂接监听前已发射），补调 xwl_map 上屏。
+     */
+    if (!xsurface->surface->mapped && wlr_surface_has_buffer(xsurface->surface)) {
+        wlr_surface_map(xsurface->surface);
+    }
+    if (xsurface->surface->mapped) {
+        xwl_map(&view->map, NULL);
+    }
+
     (void)data;
 }
 
@@ -414,6 +436,9 @@ static void xwl_dissociate(struct wl_listener *listener, void *data) {
         wl_list_remove(&view->unmap.link);
         wl_list_remove(&view->commit.link);
         view->scene_surface = NULL;
+    }
+    if (view->mapped) {
+        woodland_view_unmap(view);
     }
     (void)data;
 }
@@ -765,9 +790,6 @@ static void xwl_new_view(struct woodland_server *server,
 
     if (xsurface->surface) {
         xwl_associate(&view->associate, NULL);
-        if (xsurface->surface->mapped) {
-            xwl_map(&view->map, NULL);
-        }
     }
 }
 
