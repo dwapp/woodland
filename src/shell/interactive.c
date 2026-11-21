@@ -449,6 +449,8 @@ void woodland_cursor_reset_mode(struct woodland_server *server)
 {
     woodland_snap_preview_destroy(server);
     woodland_window_menu_hide(server);
+    struct woodland_view *moved_view =
+        (server->cursor_mode == WOODLAND_CURSOR_MOVE) ? server->grabbed_view : NULL;
     server->cursor_mode = WOODLAND_CURSOR_PASSTHROUGH;
     server->grabbed_view = NULL;
     server->resize_edges = 0;
@@ -456,6 +458,9 @@ void woodland_cursor_reset_mode(struct woodland_server *server)
     woodland_cursor_set(server, "default");
     server->grab_context.active = false;
     server->grab_context.view = NULL;
+    if (moved_view) {
+        woodland_signal_emit(&server->view_changed, moved_view);
+    }
 }
 
 void shell_interactive_attach(struct woodland_view *view)

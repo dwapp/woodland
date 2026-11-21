@@ -384,8 +384,7 @@ static void entry_collect_state(struct toplevel_entry *e, struct woodland_toplev
         .minimized = view->minimized,
         .activated = view->activated,
         .fullscreen = view->fullscreen,
-        /* woodland 没有 urgency / attention 状态机，不凭空捏造 */
-        .attention = false,
+        .attention = view->attention,
     };
 }
 

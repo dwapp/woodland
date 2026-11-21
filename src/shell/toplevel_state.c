@@ -202,6 +202,15 @@ void woodland_view_set_minimized(struct woodland_view *view, bool minimized)
     woodland_layer_update_top_layer_visibility(view->server);
 }
 
+void woodland_view_set_attention(struct woodland_view *view, bool attention)
+{
+    if (!view || view->attention == attention) {
+        return;
+    }
+    view->attention = attention;
+    woodland_signal_emit(&view->server->view_changed, view);
+}
+
 static void xdg_toplevel_request_maximize(struct wl_listener *listener, void *data)
 {
     struct woodland_view *view = wl_container_of(listener, view, request_maximize);

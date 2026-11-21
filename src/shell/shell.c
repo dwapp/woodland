@@ -130,6 +130,9 @@ void woodland_view_set_activated(struct woodland_view *view, bool activated)
     /* 记下我们要求的状态：X11 后端没有可回读的 activated 字段，
      * 而三态同步与不变量检查都需要这个真值 */
     view->activated = activated;
+    if (activated && view->attention) {
+        view->attention = false;
+    }
     /* 激活态是协议里 state 数组的一项，变化要广播（协议层按差量决定发不发） */
     woodland_signal_emit(&view->server->view_changed, view);
 #if WOODLAND_HAVE_XWAYLAND
