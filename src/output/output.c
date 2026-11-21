@@ -252,6 +252,10 @@ static void handle_destroy(struct wl_listener *listener, void *data)
             output->layer_tree[i] = NULL;
         }
     }
+    if (output->layer_popup_tree) {
+        wlr_scene_node_destroy(&output->layer_popup_tree->node);
+        output->layer_popup_tree = NULL;
+    }
     output->wlr_output->data = NULL;
     wl_list_remove(&output->destroy.link);
     wl_list_remove(&output->frame.link);
@@ -365,16 +369,19 @@ static void handle_new_output(struct wl_listener *listener, void *data)
     }
     output->scene_output = scene_output;
 
-    /* 创建 4 棵 layer tree，z-order 从下到上：
-     * background → bottom → [工作区] → top → overlay。
+    /* 创建 4 棵 layer tree 与 layer_popup_tree，z-order 从下到上：
+     * background → bottom → [工作区] → top → layer_popup_tree → overlay。
      * lower_to_bottom 先 [1] 后 [0]，保证 background 在 bottom 之下；
-     * raise_to_top 先 [2] 后 [3]，保证 overlay 在 top 之上。 */
+     * raise_to_top 先 [2] 再 layer_popup_tree 后 [3]，
+     * 保证底层 layer popup 提升到普通窗口与 top 之上，且 overlay 在最顶层。 */
     for (int i = 0; i < 4; i++) {
         output->layer_tree[i] = wlr_scene_tree_create(&server->scene->tree);
     }
+    output->layer_popup_tree = wlr_scene_tree_create(&server->scene->tree);
     wlr_scene_node_lower_to_bottom(&output->layer_tree[1]->node);
     wlr_scene_node_lower_to_bottom(&output->layer_tree[0]->node);
     wlr_scene_node_raise_to_top(&output->layer_tree[2]->node);
+    wlr_scene_node_raise_to_top(&output->layer_popup_tree->node);
     wlr_scene_node_raise_to_top(&output->layer_tree[3]->node);
 
     /* ---- 4. 入链 + 布局 + 提交 + 广播 ---- */
@@ -433,6 +440,9 @@ err_trees:
         if (output->layer_tree[i]) {
             wlr_scene_node_destroy(&output->layer_tree[i]->node);
         }
+    }
+    if (output->layer_popup_tree) {
+        wlr_scene_node_destroy(&output->layer_popup_tree->node);
     }
     wlr_scene_output_destroy(scene_output);
 err_listeners:

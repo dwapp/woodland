@@ -378,6 +378,11 @@ static void view_raise(struct woodland_view *view)
     }
 }
 
+void woodland_view_raise(struct woodland_view *view)
+{
+    view_raise(view);
+}
+
 void woodland_view_restack(struct woodland_view *view)
 {
     if (!view || !view->server) {

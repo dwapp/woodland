@@ -301,8 +301,25 @@ int main(void) {
         wlr_scene_node_set_position(&view->scene_tree->node, 600, 450);
     }
 
+    /* 创建第二个顶层窗口，初始时排在视图列表最前端 */
+    struct wl_surface *top_surf2 = wl_compositor_create_surface(state.compositor);
+    struct xdg_surface *top_xdg_surf2 = xdg_wm_base_get_xdg_surface(state.wm_base, top_surf2);
+    xdg_surface_add_listener(top_xdg_surf2, &surface_listener, NULL);
+    struct xdg_toplevel *top_toplevel2 = xdg_surface_get_toplevel(top_xdg_surf2);
+    xdg_toplevel_add_listener(top_toplevel2, &toplevel_listener, NULL);
+    wl_surface_commit(top_surf2);
+    pump_roundtrip(&server, client_display);
+    struct wl_buffer *top_buf2 = create_shm_buffer(state.shm, 200, 200);
+    wl_surface_attach(top_surf2, top_buf2, 0, 0);
+    wl_surface_commit(top_surf2);
+    pump_roundtrip(&server, client_display);
+
+    struct woodland_view *topmost = wl_container_of(server.views.next, topmost, link);
+    assert(topmost != view); // 确认新建窗口处于上层
+
     /* ============================================================
-     * 测试 1：直接 popup（xdg_toplevel 的子级）避让屏幕边缘
+     * 测试 1：直接 popup（xdg_toplevel 的子级）避让屏幕边缘，
+     * 且触发弹出时所属窗口自动提升至最顶层，确保 popup 在普通窗口之上。
      * Anchor 在窗口 (100, 100, 50, 50)，大小 250x200，向右下展开。
      * 若不避让：layout 终点为 (600+150+250=1000, 450+150+200=800)，越界。
      * ============================================================ */
@@ -327,6 +344,10 @@ int main(void) {
 
     wl_surface_commit(pop_surf);
     pump_roundtrip(&server, client_display);
+
+    /* 验证 view 已被提升至栈顶，确保其 popup 处于普通窗口之上 */
+    topmost = wl_container_of(server.views.next, topmost, link);
+    assert(topmost == view);
 
     assert(pop_rec.configured);
     int pop_layout_x = 600 + pop_rec.x;
@@ -474,6 +495,10 @@ int main(void) {
     xdg_surface_destroy(pop_xdg_surf);
     wl_surface_destroy(pop_surf);
     wl_buffer_destroy(pop_buf);
+    xdg_toplevel_destroy(top_toplevel2);
+    xdg_surface_destroy(top_xdg_surf2);
+    wl_surface_destroy(top_surf2);
+    wl_buffer_destroy(top_buf2);
     xdg_toplevel_destroy(top_toplevel);
     xdg_surface_destroy(top_xdg_surf);
     wl_surface_destroy(top_surf);
