@@ -89,6 +89,21 @@ int main(void)
     assert(c.top_left == 10 && c.bottom_right == 10);
     config->ssd.titlebar_height = WOODLAND_SSD_TITLEBAR_H;
 
+    /* CSD 视图或全局禁用 SSD：没有服务端标题栏，四角都圆 */
+    view.deco_csd = true;
+    clear_corners(&c);
+    woodland_effect_corners(&view, &c);
+    assert(c.top_left == 10 && c.top_right == 10);
+    assert(c.bottom_left == 10 && c.bottom_right == 10);
+    view.deco_csd = false;
+
+    config->ssd.enabled = false;
+    clear_corners(&c);
+    woodland_effect_corners(&view, &c);
+    assert(c.top_left == 10 && c.top_right == 10);
+    assert(c.bottom_left == 10 && c.bottom_right == 10);
+    config->ssd.enabled = true;
+
     /* ---- 5) 最大化 / 全屏：一律直角（圆角会在屏幕边缘漏出后面） ---- */
     view.maximized = true;
     clear_corners(&c);

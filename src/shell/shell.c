@@ -611,6 +611,7 @@ static void xdg_popup_commit(struct wl_listener *listener, void *data)
     if (popup->xdg_popup->base->initial_commit) {
         woodland_popup_unconstrain(popup->xdg_popup);
     }
+    woodland_effect_popup_update(popup->xdg_popup);
     (void)data;
 }
 

@@ -270,6 +270,77 @@ while [ "$i" -lt 100 ]; do
 done
 [ "$layer_blur" = "0" ] || smoke_fail "layer blur node must go away with its surface"
 
+echo "== 顶层窗口 popup 显式模糊：不污染父窗口，且强制 live blur =="
+scenario popup_explicit --no-context --popup popup-blur 0 0 200 150
+expect '.views[0].bg_effect.blur == false' "popup explicit blur must not mark parent view as blurred"
+if [ "$EFFECTS" = "true" ]; then
+    POP_SCENE="$("$WCTL" -s "$SOCK" dump_scene)" || smoke_fail "dump_scene failed (popup explicit)"
+    pop_blur="$(echo "$POP_SCENE" | jq '[.. | objects | select(.type == "blur")] | length')"
+    [ "$pop_blur" = "1" ] || smoke_fail "popup explicit blur must create 1 blur node (got $pop_blur)"
+    echo "$POP_SCENE" | jq -e '[.. | objects | select(.type == "blur")
+        | select(.w == 200 and .h == 150 and .optimized == false)] | length == 1' >/dev/null \
+        || smoke_fail "popup blur node must be 200x150 with optimized=false"
+else
+    pop_blur="$("$WCTL" -s "$SOCK" dump_scene | jq '[.. | objects | select(.type == "blur")] | length')"
+    [ "$pop_blur" = "0" ] || smoke_fail "non-effects build must not create popup blur nodes"
+fi
+stop_probe
+
+echo "== 顶层窗口 popup 继承父窗口模糊 =="
+scenario popup_inherit --no-context --alpha 180 blur 0 0 400 300 --popup
+expect '.views[0].bg_effect.blur == true' "parent view blur must be on"
+if [ "$EFFECTS" = "true" ]; then
+    INH_SCENE="$("$WCTL" -s "$SOCK" dump_scene)" || smoke_fail "dump_scene failed (popup inherit)"
+    inh_blur="$(echo "$INH_SCENE" | jq '[.. | objects | select(.type == "blur")] | length')"
+    [ "$inh_blur" = "2" ] || smoke_fail "parent + translucent popup must create 2 blur nodes (got $inh_blur)"
+    echo "$INH_SCENE" | jq -e '[.. | objects | select(.type == "blur")
+        | select(.w == 400 and .h == 300)] | length == 1' >/dev/null \
+        || smoke_fail "parent 400x300 blur node missing"
+    echo "$INH_SCENE" | jq -e '[.. | objects | select(.type == "blur")
+        | select(.w == 200 and .h == 150 and .optimized == false)] | length == 1' >/dev/null \
+        || smoke_fail "inherited popup 200x150 live blur node missing"
+fi
+stop_probe
+
+echo "== layer surface popup 模糊 =="
+LAYER_POP_OUT="$XDG_RUNTIME_DIR/probe.layer_popup.log"
+"$PROBE" --layer --popup popup-blur 0 0 200 150 --hold 3000 >"$LAYER_POP_OUT" 2>&1 &
+probe_pid=$!
+i=0
+while [ "$i" -lt 120 ]; do
+    grep -q '^READY' "$LAYER_POP_OUT" 2>/dev/null && break
+    if ! kill -0 "$probe_pid" 2>/dev/null; then
+        echo "--- layer popup probe output:" >&2
+        cat "$LAYER_POP_OUT" >&2 || true
+        smoke_fail "layer popup probe exited before READY"
+    fi
+    sleep 0.05; i=$((i+1))
+done
+grep -q '^READY' "$LAYER_POP_OUT" 2>/dev/null || smoke_fail "layer popup probe never became ready"
+[ "$(view_count)" = "0" ] || smoke_fail "layer popup probe must not create a toplevel view"
+LP_SCENE="$("$WCTL" -s "$SOCK" dump_scene)" || smoke_fail "dump_scene failed (layer popup)"
+lp_blur="$(echo "$LP_SCENE" | jq '[.. | objects | select(.type == "blur")] | length')"
+if [ "$EFFECTS" = "true" ]; then
+    [ "$lp_blur" = "1" ] || smoke_fail "layer popup blur must create 1 blur node (got $lp_blur)"
+    echo "$LP_SCENE" | jq -e '[.. | objects | select(.type == "blur")
+        | select(.w == 200 and .h == 150 and .optimized == false)] | length == 1' >/dev/null \
+        || smoke_fail "layer popup blur node must be 200x150 with optimized=false"
+else
+    [ "$lp_blur" = "0" ] || smoke_fail "non-effects build must not create blur nodes"
+fi
+kill -TERM "$probe_pid" 2>/dev/null || true
+wait "$probe_pid" 2>/dev/null || true
+probe_pid=""
+i=0
+lp_blur="?"
+while [ "$i" -lt 100 ]; do
+    lp_blur="$("$WCTL" -s "$SOCK" dump_scene 2>/dev/null \
+        | jq '[.. | objects | select(.type == "blur")] | length')" || lp_blur="?"
+    [ "$lp_blur" = "0" ] && break
+    sleep 0.05; i=$((i+1))
+done
+[ "$lp_blur" = "0" ] || smoke_fail "layer popup blur node must go away with its surface"
+
 echo "== 决策轨迹与不变量 =="
 "$WCTL" -s "$SOCK" get_trace | jq -e '
     [.entries[] | select(.what == "bg_effect")] | length >= 3' >/dev/null \

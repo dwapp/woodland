@@ -200,6 +200,9 @@ static struct woodland_view *context_resolve_view(struct woodland_deco_context *
     if (ctx->inert || !ctx->surface) {
         return NULL;
     }
+    if (wlr_xdg_popup_try_from_wlr_surface(ctx->surface) != NULL) {
+        return NULL;
+    }
     struct woodland_view *view = woodland_view_from_surface(ctx->surface);
     if (!view) {
         return NULL;

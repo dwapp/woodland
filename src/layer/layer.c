@@ -429,6 +429,7 @@ static void handle_popup_commit(struct wl_listener *listener, void *data)
             woodland_seat_focus_surface(server, popup->xdg_popup->base->surface);
         }
     }
+    woodland_effect_popup_update(popup->xdg_popup);
     (void)data;
 }
 

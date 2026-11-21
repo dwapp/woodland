@@ -3,6 +3,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include <assert.h>
 #include <fcntl.h>
+#include <pixman.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -28,6 +29,7 @@
 #include "scene.h"
 
 #include "cursor.h"
+#include "effect.h"
 #include "layer.h"
 #include "output.h"
 #include "seat.h"
@@ -175,6 +177,21 @@ static struct wl_buffer *create_shm_buffer(struct wl_shm *shm, int width, int he
     close(fd);
     return buf;
 }
+
+#if WOODLAND_HAVE_EFFECTS
+static struct wlr_scene_blur *find_tree_blur(struct wlr_scene_tree *tree) {
+    if (!tree) {
+        return NULL;
+    }
+    struct wlr_scene_node *node;
+    wl_list_for_each(node, &tree->children, link) {
+        if (node->type == WLR_SCENE_NODE_BLUR) {
+            return wlr_scene_blur_from_node(node);
+        }
+    }
+    return NULL;
+}
+#endif
 
 int main(void) {
     setenv("WLR_BACKENDS", "headless", 1);
@@ -386,6 +403,65 @@ int main(void) {
     assert(nested_layout_y >= 0);
     assert(nested_layout_y + nested_rec.height <= 600);
 
+    /* 为嵌套 popup 挂载 ARGB8888 buffer，使其具备有效尺寸与透明通道 */
+    struct wl_buffer *nested_buf = create_shm_buffer(state.shm, nested_rec.width, nested_rec.height);
+    wl_surface_attach(nested_surf, nested_buf, 0, 0);
+    wl_surface_commit(nested_surf);
+    pump_roundtrip(&server, client_display);
+
+#if WOODLAND_HAVE_EFFECTS
+    /* ============================================================
+     * 测试 4：Popup 模糊（显式区域与父级自动继承，强制 live blur）
+     * ============================================================ */
+    assert(!wl_list_empty(&view->xdg_toplevel->base->popups));
+    struct wlr_xdg_popup *srv_pop =
+        wl_container_of(view->xdg_toplevel->base->popups.next, srv_pop, link);
+    assert(!wl_list_empty(&srv_pop->base->popups));
+    struct wlr_xdg_popup *srv_nested =
+        wl_container_of(srv_pop->base->popups.next, srv_nested, link);
+
+    server.config->effects.blur = true;
+    server.config->effects.blur_optimized = true;
+
+    /* 测试 A：显式设置 popup 模糊区域，不污染父窗口，且强制 live blur */
+    pixman_region32_t blur_reg;
+    pixman_region32_init_rect(&blur_reg, 0, 0, pop_rec.width, pop_rec.height);
+    assert(woodland_effect_set_popup_blur_region(srv_pop, &blur_reg));
+    assert(!view->effect.blur);
+
+    struct wlr_scene_blur *pop_blur = find_tree_blur(srv_pop->base->data);
+    assert(pop_blur != NULL);
+    assert(pop_blur->node.enabled);
+    assert(pop_blur->width == pop_rec.width);
+    assert(pop_blur->height == pop_rec.height);
+    assert(!pop_blur->should_only_blur_bottom_layer);
+
+    struct wlr_scene_blur *nested_blur = find_tree_blur(srv_nested->base->data);
+    assert(nested_blur != NULL);
+    assert(nested_blur->node.enabled);
+    assert(!nested_blur->should_only_blur_bottom_layer);
+
+    woodland_effect_clear_popup_blur_region(srv_pop);
+    assert(!pop_blur->node.enabled);
+    assert(!nested_blur->node.enabled);
+
+    /* 测试 B：从父窗口自动继承模糊到透明子 popup 与嵌套子 popup */
+    pixman_region32_clear(&blur_reg);
+    pixman_region32_init_rect(&blur_reg, 0, 0, 200, 200);
+    woodland_effect_set_blur_region(view, &blur_reg, 200, 200);
+    assert(view->effect.blur);
+    assert(pop_blur->node.enabled);
+    assert(!pop_blur->should_only_blur_bottom_layer);
+    assert(nested_blur->node.enabled);
+    assert(!nested_blur->should_only_blur_bottom_layer);
+
+    woodland_effect_set_blur_region(view, NULL, 0, 0);
+    assert(!view->effect.blur);
+    assert(!pop_blur->node.enabled);
+    assert(!nested_blur->node.enabled);
+    pixman_region32_fini(&blur_reg);
+#endif
+
     /* 清理客户端资源 */
     xdg_positioner_destroy(repo_pos);
     xdg_positioner_destroy(nested_pos);
@@ -393,6 +469,7 @@ int main(void) {
     xdg_popup_destroy(nested_pop);
     xdg_surface_destroy(nested_xdg_surf);
     wl_surface_destroy(nested_surf);
+    wl_buffer_destroy(nested_buf);
     xdg_popup_destroy(pop);
     xdg_surface_destroy(pop_xdg_surf);
     wl_surface_destroy(pop_surf);

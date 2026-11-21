@@ -21,6 +21,7 @@
 
 #include <wayland-server-core.h>
 #include <wlr/types/wlr_compositor.h>
+#include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/util/addon.h>
 #include <wlr/util/log.h>
 
@@ -110,13 +111,19 @@ static void bg_state_move(void *dst_data, void *src_data)
 /*
  * 把 current 区域推给渲染端。
  *
- * 目标不一定是顶层窗口：面板、Dock、启动器这些 layer surface 同样会用这个
- * 协议（"把我身后那块糊掉"），它们没有 view 对象，得走 effect 模块的另一条
- * 入口。两条都不匹配（cursor、输入法这类没有可挂 blur 的树）时写一条 trace
- * 说明被忽略了，而不是让客户端以为设了就有用。
+ * 目标有三类：xdg_popup（必须先于 woodland_view_from_surface 判断，否则会被
+ * 穿透回溯到父 view 甚至忽略 layer popup）、顶层窗口、layer surface。
+ * 三条都不匹配（cursor、输入法这类没有可挂 blur 的树）时写一条 trace 说明被忽略。
  */
 static void bg_apply(struct woodland_bg_surface *bg)
 {
+    struct wlr_xdg_popup *popup = wlr_xdg_popup_try_from_wlr_surface(bg->surface);
+    if (popup) {
+        bool on = woodland_effect_set_popup_blur_region(popup, &bg->current.blur_region);
+        woodland_trace_add("bg_effect", 0, "popup blur=%s", on ? "on" : "off");
+        return;
+    }
+
     struct woodland_view *view = woodland_view_from_surface(bg->surface);
     if (view) {
         /*
@@ -144,9 +151,14 @@ static void bg_apply(struct woodland_bg_surface *bg)
     woodland_trace_add("bg_effect", 0, "ignored (surface has no view or layer)");
 }
 
-/* 撤掉效果：view 清状态，layer surface 直接关掉 blur 节点 */
+/* 撤掉效果：popup 清 addon，view 清状态，layer surface 直接关掉 blur 节点 */
 static void bg_clear(struct woodland_bg_surface *bg)
 {
+    struct wlr_xdg_popup *popup = wlr_xdg_popup_try_from_wlr_surface(bg->surface);
+    if (popup) {
+        woodland_effect_clear_popup_blur_region(popup);
+        return;
+    }
     struct woodland_view *view = woodland_view_from_surface(bg->surface);
     if (view) {
         woodland_effect_set_blur_region(view, NULL, 0, 0);
@@ -234,6 +246,7 @@ static void bg_handle_resource_destroy(struct wl_resource *resource)
     if (!bg) {
         return; /* 已经随 surface 回收过了 */
     }
+    bg->inert = true;
     bg_clear(bg);
     bg_destroy(bg);
     /* 客户端主动撤掉对象：效果立即消失（协议：区域下次提交时移除） */

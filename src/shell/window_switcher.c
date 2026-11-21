@@ -469,20 +469,29 @@ static void switcher_update_shadow(struct woodland_window_switcher *sw, double c
         }
         return;
     }
+    const int r = 12;
+    int sx = sw->x - r;
+    int sy = sw->y + 2 - r;
+    int shw = sw->width + 2 * r;
+    int shh = sw->height + 2 * r;
     float shadow_color[4] = {0.0f, 0.0f, 0.0f, 0.30f};
     if (!sw->shadow) {
-        sw->shadow = wlr_scene_shadow_create(sw->tree, sw->width, sw->height, (int)corner_r, 12.0f,
-                                             shadow_color);
+        sw->shadow =
+            wlr_scene_shadow_create(sw->tree, shw, shh, (int)corner_r, (float)r, shadow_color);
     } else {
-        wlr_scene_shadow_set_size(sw->shadow, sw->width, sw->height);
+        wlr_scene_shadow_set_size(sw->shadow, shw, shh);
         wlr_scene_shadow_set_corner_radius(sw->shadow, (int)corner_r);
-        wlr_scene_shadow_set_blur_sigma(sw->shadow, 12.0f);
+        wlr_scene_shadow_set_blur_sigma(sw->shadow, (float)r);
         wlr_scene_shadow_set_color(sw->shadow, shadow_color);
     }
     if (!sw->shadow) {
         return;
     }
-    wlr_scene_node_set_position(&sw->shadow->node, sw->x, sw->y + 2);
+    wlr_scene_node_set_position(&sw->shadow->node, sx, sy);
+    struct clipped_region clip = clipped_region_get_default();
+    clip.area = (struct wlr_box){r, r - 2, sw->width, sw->height};
+    clip.corners = corner_radii_all((int)corner_r);
+    wlr_scene_shadow_set_clipped_region(sw->shadow, clip);
     wlr_scene_node_set_enabled(&sw->shadow->node, true);
     if (sw->panel) {
         wlr_scene_node_place_below(&sw->shadow->node, &sw->panel->node);

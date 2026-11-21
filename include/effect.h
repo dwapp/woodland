@@ -12,6 +12,7 @@ struct woodland_server;
 struct woodland_view;
 struct wlr_scene_tree;
 struct wlr_surface;
+struct wlr_xdg_popup;
 
 /*
  * 运行期开关。编译期由 -Deffects 决定 scenefx 是否参与链接（WOODLAND_HAVE_EFFECTS），
@@ -98,6 +99,23 @@ void woodland_effect_blur_clear(struct wlr_scene_tree *tree);
  * 也不圆角，所以这里只处理"糊哪一块"。
  */
 void woodland_effect_layer_blur(struct woodland_layer_surface *layer, const struct wlr_box *region);
+
+/**
+ * 为 xdg_popup 设置/清除客户端显式模糊区域（ext-background-effect-v1）。
+ *
+ * 区域以 surface addon 保存，随 surface 销毁自动释放；popup 强制走实时模糊（live blur）。
+ * 返回裁剪到 popup surface 后的区域是否非空。
+ */
+bool woodland_effect_set_popup_blur_region(struct wlr_xdg_popup *popup,
+                                           const pixman_region32_t *region);
+void woodland_effect_clear_popup_blur_region(struct wlr_xdg_popup *popup);
+
+/**
+ * 更新 xdg_popup（及嵌套子 popup）的模糊节点。
+ *
+ * 优先使用客户端显式设定的区域；未显式设置且父链启用了模糊时，对半透明 popup 自动继承实时模糊。
+ */
+void woodland_effect_popup_update(struct wlr_xdg_popup *popup);
 
 /**
  * 窗口外框四角の内圆角半径（纯函数）。

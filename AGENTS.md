@@ -96,6 +96,21 @@ wctl wait <cond> [key=val...]  # 等待事件/状态/像素就绪（替代脚本
 
 ---
 
+## 参考代码指引（Reference Code）
+
+为方便智能体参考成熟实现与协议交互，工作区根目录下设立 `reference/` 目录（已被 `.gitignore` 忽略，不污染版本库与构建）：
+
+- **本地现有参考代码**：
+  - `reference/treeland`（软链接至 `/home/rewine/treeland`）：参考 Treeland 生态协议（appearance、wallpaper、shortcut 等）与 DDE 交互规范。
+  - `reference/labwc`（软链接至 `/home/rewine/labwc`）：参考纯 C + wlroots 合成器单体架构、SSD 边框与标题栏绘制、Scene 场景节点组织。
+  - `reference/umbriel`（浅克隆自 `https://github.com/noctalia-dev/umbriel`）：参考基于 scenefx/umbrielfx 的模糊、Popup 继承模糊与阴影等实现细节。
+- **按需下载新参考**：
+  - 若实现特定功能时需要参考其他外部仓库（如 sway、wayfire 等），智能体可在 `reference/` 下按需浅克隆：`git clone --depth=1 <repo_url> reference/<name>`。
+- **检索须知**：
+  - 因 `reference/` 被 git 忽略，使用 `rg` 搜索参考代码时必须带 `--no-ignore` 或显式指定路径，例如：`rg --no-ignore <symbol> reference/`。
+
+---
+
 ## 踩坑与陷阱专栏（Pitfalls）
 
 开发与排查疑难问题时，按主题参考详细踩坑记录：
