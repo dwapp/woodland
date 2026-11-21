@@ -182,6 +182,10 @@ smoke_stop_pid() {
 smoke_start_compositor() {
     SOCK=""
     unset WAYLAND_DISPLAY
+    if [ -z "${XDG_CONFIG_HOME:-}" ] && [ -n "${XDG_RUNTIME_DIR:-}" ]; then
+        export XDG_CONFIG_HOME="$XDG_RUNTIME_DIR/config"
+        mkdir -p "$XDG_CONFIG_HOME"
+    fi
     SMOKE_FLAGS="$*"
     "$BIN" "$@" >"$SMOKE_LOG" 2>&1 &
     SMOKE_COMP_PID=$!
