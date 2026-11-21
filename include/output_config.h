@@ -12,6 +12,7 @@ struct woodland_output;
 
 struct woodland_saved_output {
     char *name;
+    char *output_id; /* 物理设备标识 (model:serial)，无 EDID 时为 NULL */
     bool enabled;
     int32_t x;
     int32_t y;
@@ -34,13 +35,20 @@ bool woodland_saved_outputs_load(struct woodland_saved_outputs *list);
 /** 释放已载入的配置列表内存 */
 void woodland_saved_outputs_finish(struct woodland_saved_outputs *list);
 
+/** 在配置列表中按 wlr_output 查找记录（优先匹配物理 output_id，再退回 name） */
+const struct woodland_saved_output *
+woodland_saved_outputs_find(const struct woodland_saved_outputs *list,
+                            const struct wlr_output *wlr);
+
 /** 在配置列表中按输出名称查找记录 */
 const struct woodland_saved_output *
-woodland_saved_outputs_find(const struct woodland_saved_outputs *list, const char *name);
+woodland_saved_outputs_find_by_name(const struct woodland_saved_outputs *list,
+                                    const char *name);
 
 /**
  * 将 server 中当前所有活动输出的状态持久化到 $XDG_CONFIG_HOME/woodland/outputs.json。
  * 采取合并更新策略：当前在线的输出更新其最新参数，离线输出的历史配置予以保留。
+ * 当仅有单块输出在线时，保留其原有的历史坐标（preservePosition），避免临时居中冲掉多屏拼接布局。
  */
 void woodland_output_config_save(struct woodland_server *server);
 
