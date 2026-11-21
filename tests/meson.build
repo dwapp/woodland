@@ -1,4 +1,8 @@
 if get_option('test').enabled()
+  add_test_setup('default',
+    env: {'XDG_CONFIG_HOME': meson.current_build_dir() / 'isolated-config'},
+    is_default: true)
+
   fs = import('fs')
   wayland_client_dep = dependency('wayland-client', required: false)
   wp_dep = dependency('wayland-protocols', required: false)

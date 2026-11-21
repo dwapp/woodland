@@ -15,6 +15,8 @@ PROBE="${2:-./build/tests/output_mgmt_probe}"
 
 unset WAYLAND_DISPLAY
 export XDG_RUNTIME_DIR="$(mktemp -d)"
+export XDG_CONFIG_HOME="$XDG_RUNTIME_DIR/config"
+mkdir -p "$XDG_CONFIG_HOME"
 export WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1
 
 SMOKE_LOG="$XDG_RUNTIME_DIR/log"
