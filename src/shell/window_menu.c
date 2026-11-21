@@ -426,23 +426,34 @@ static void window_menu_render_level(struct woodland_window_menu *menu,
 #if WOODLAND_HAVE_EFFECTS
     if (menu->server->config && menu->server->config->effects.enabled &&
         menu->server->config->effects.shadow) {
+        const int r = 12;
+        int sx = level->x - r;
+        int sy = level->y + 2 - r;
+        int sw = level->width + 2 * r;
+        int sh = level->height + 2 * r;
         float shadow_color[4] = {0.0f, 0.0f, 0.0f, 0.30f};
         if (!level->shadow) {
-            level->shadow = wlr_scene_shadow_create(menu->tree, level->width, level->height,
-                                                    (int)corner_r, 12.0f, shadow_color);
+            level->shadow = wlr_scene_shadow_create(menu->tree, sw, sh, (int)corner_r, (float)r,
+                                                    shadow_color);
         } else {
-            wlr_scene_shadow_set_size(level->shadow, level->width, level->height);
+            wlr_scene_shadow_set_size(level->shadow, sw, sh);
             wlr_scene_shadow_set_corner_radius(level->shadow, (int)corner_r);
-            wlr_scene_shadow_set_blur_sigma(level->shadow, 12.0f);
+            wlr_scene_shadow_set_blur_sigma(level->shadow, (float)r);
             wlr_scene_shadow_set_color(level->shadow, shadow_color);
         }
         if (level->shadow) {
-            wlr_scene_node_set_position(&level->shadow->node, level->x, level->y + 2);
+            wlr_scene_node_set_position(&level->shadow->node, sx, sy);
+            struct clipped_region clip = clipped_region_get_default();
+            clip.area = (struct wlr_box){r, r - 2, level->width, level->height};
+            clip.corners = corner_radii_all((int)corner_r);
+            wlr_scene_shadow_set_clipped_region(level->shadow, clip);
             wlr_scene_node_set_enabled(&level->shadow->node, true);
             if (level->scene_buffer) {
                 wlr_scene_node_place_below(&level->shadow->node, &level->scene_buffer->node);
             }
         }
+    } else if (level->shadow) {
+        wlr_scene_node_set_enabled(&level->shadow->node, false);
     }
 #endif
 }

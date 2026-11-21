@@ -9,6 +9,7 @@
  *
  * 本文件负责意图翻译与几何计算，纯函数与渲染节点分离，易于单元测试。
  */
+#include <stdlib.h>
 #include <string.h>
 
 #include <wlr/types/wlr_compositor.h>
@@ -16,6 +17,8 @@
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_subcompositor.h>
+#include <wlr/types/wlr_xdg_shell.h>
+#include <wlr/util/addon.h>
 #include <wlr/util/box.h>
 #include <wlr/util/edges.h>
 #include <wlr/util/log.h>
@@ -23,6 +26,7 @@
 #include "effect.h"
 #include "layer.h"
 #include "output.h"
+#include "protocol.h"
 #include "scene.h"
 #include "ssd.h"
 #include "view.h"
@@ -445,6 +449,7 @@ static bool blur_apply_internal(struct wlr_scene_tree *tree,
     int node_w = is_full ? surf_w : clamped.width;
     int node_h = is_full ? surf_h : clamped.height;
 
+    bool created = false;
     if (!blur) {
         blur = wlr_scene_blur_create(tree, node_w, node_h);
         if (!blur) {
@@ -452,12 +457,22 @@ static bool blur_apply_internal(struct wlr_scene_tree *tree,
             return false;
         }
         wlr_scene_node_lower_to_bottom(&blur->node);
+        created = true;
+    }
+    if (created) {
+        struct wlr_scene_shadow *shadow = find_shadow_node(tree);
+        if (shadow) {
+            wlr_scene_node_lower_to_bottom(&shadow->node);
+        }
     }
     wlr_scene_node_set_position(&blur->node, node_x, node_y);
     wlr_scene_blur_set_size(blur, node_w, node_h);
 
-    if (is_full && corners) {
-        wlr_scene_blur_set_corner_radii(blur, to_fx(corners));
+    if (corners) {
+        struct woodland_effect_corners blur_corners;
+        woodland_effect_buffer_corners(corners, clamped.x, clamped.y, clamped.width,
+                                       clamped.height, surf_w, surf_h, &blur_corners);
+        wlr_scene_blur_set_corner_radii(blur, to_fx(&blur_corners));
     } else {
         wlr_scene_blur_set_corner_radii(blur, corner_radii_none());
     }
@@ -538,7 +553,7 @@ static void update_shadow(struct woodland_view *view)
 
     struct woodland_effect_corners frame_corners;
     woodland_effect_frame_corners(view, &frame_corners);
-    int b = view->ssd ? (m.left > 0 ? m.left : 1) : 0;
+    int b = m.left;
     int outer_radius = frame_corners.top_left > 0 ? frame_corners.top_left + b : 0;
     if (frame_corners.top_right > 0 && frame_corners.top_right + b > outer_radius) {
         outer_radius = frame_corners.top_right + b;
@@ -605,6 +620,219 @@ bool woodland_effect_blur_apply(struct wlr_scene_tree *tree, int x, int y, int w
     return blur_apply_internal(tree, NULL, x, y, width, height, region, corners, false);
 }
 
+struct woodland_popup_effect {
+    struct wlr_addon addon;
+    pixman_region32_t region;
+    bool explicit_set;
+};
+
+static void popup_effect_addon_destroy(struct wlr_addon *addon)
+{
+    struct woodland_popup_effect *pe = wl_container_of(addon, pe, addon);
+    pixman_region32_fini(&pe->region);
+    wlr_addon_finish(&pe->addon);
+    free(pe);
+}
+
+static const struct wlr_addon_interface popup_effect_addon_impl = {
+    .name = "woodland_popup_effect",
+    .destroy = popup_effect_addon_destroy,
+};
+
+static struct woodland_popup_effect *popup_effect_find(struct wlr_surface *surface)
+{
+    if (!surface || !surface->addons.WLR_PRIVATE.addons.next) {
+        return NULL;
+    }
+    struct wlr_addon *addon =
+        wlr_addon_find(&surface->addons, NULL, &popup_effect_addon_impl);
+    if (!addon) {
+        return NULL;
+    }
+    struct woodland_popup_effect *pe = wl_container_of(addon, pe, addon);
+    return pe;
+}
+
+static struct woodland_popup_effect *popup_effect_ensure(struct wlr_surface *surface)
+{
+    struct woodland_popup_effect *pe = popup_effect_find(surface);
+    if (pe) {
+        return pe;
+    }
+    pe = calloc(1, sizeof(*pe));
+    if (!pe) {
+        return NULL;
+    }
+    pixman_region32_init(&pe->region);
+    wlr_addon_init(&pe->addon, &surface->addons, NULL, &popup_effect_addon_impl);
+    return pe;
+}
+
+static struct woodland_server *popup_resolve_owner(struct wlr_xdg_popup *popup,
+                                                   bool *out_parent_blur)
+{
+    if (out_parent_blur) {
+        *out_parent_blur = false;
+    }
+    if (!popup) {
+        return NULL;
+    }
+
+    bool parent_blur = false;
+    struct wlr_surface *walk = popup->parent;
+    for (int depth = 0; walk && depth < 32; depth++) {
+        struct wlr_surface *root = woodland_surface_get_root_surface(walk);
+        if (!root) {
+            break;
+        }
+        struct wlr_xdg_popup *parent_popup = wlr_xdg_popup_try_from_wlr_surface(root);
+        if (parent_popup) {
+            if (parent_popup->base && parent_popup->base->surface) {
+                struct woodland_popup_effect *pe =
+                    popup_effect_find(parent_popup->base->surface);
+                if (pe && pe->explicit_set) {
+                    struct wlr_box tmp;
+                    if (woodland_effect_blur_box(&pe->region,
+                                                 parent_popup->base->surface->current.width,
+                                                 parent_popup->base->surface->current.height,
+                                                 &tmp)) {
+                        parent_blur = true;
+                    }
+                }
+            }
+            walk = parent_popup->parent;
+            continue;
+        }
+        struct woodland_view *view = woodland_view_from_surface(root);
+        if (view) {
+            if (out_parent_blur) {
+                *out_parent_blur = parent_blur || view->effect.blur;
+            }
+            return view->server;
+        }
+        struct woodland_layer_surface *layer = woodland_layer_surface_from_wlr_surface(root);
+        if (layer) {
+            if (out_parent_blur) {
+                *out_parent_blur = parent_blur || layer->effect.blur;
+            }
+            return layer->server;
+        }
+        break;
+    }
+    return NULL;
+}
+
+static void popup_update_recursive(struct wlr_xdg_popup *popup, int depth)
+{
+    if (!popup || !popup->base || depth >= 32) {
+        return;
+    }
+    struct wlr_scene_tree *tree = popup->base->data;
+    struct wlr_surface *surface = popup->base->surface;
+    if (!tree || !surface) {
+        return;
+    }
+
+    bool parent_has_blur = false;
+    struct woodland_server *server = popup_resolve_owner(popup, &parent_has_blur);
+    int surf_w = surface->current.width;
+    int surf_h = surface->current.height;
+
+    if (!server || !woodland_effect_server_blur_enabled(server) || surf_w <= 0 || surf_h <= 0) {
+        woodland_effect_blur_clear(tree);
+        goto recurse;
+    }
+
+    struct wlr_box box = {0};
+    bool want_blur = false;
+    struct woodland_popup_effect *pe = popup_effect_find(surface);
+    if (pe && pe->explicit_set) {
+        want_blur = woodland_effect_blur_box(&pe->region, surf_w, surf_h, &box);
+    } else if (parent_has_blur) {
+        struct wlr_box surf_box = {.x = 0, .y = 0, .width = surf_w, .height = surf_h};
+        struct wlr_box content_box = popup->base->geometry;
+        if (!wlr_box_intersection(&content_box, &content_box, &surf_box) ||
+            content_box.width <= 0 || content_box.height <= 0) {
+            content_box = surf_box;
+        }
+        pixman_box32_t rect = {
+            content_box.x,
+            content_box.y,
+            content_box.x + content_box.width,
+            content_box.y + content_box.height,
+        };
+        if (pixman_region32_contains_rectangle(&surface->opaque_region, &rect) !=
+            PIXMAN_REGION_IN) {
+            box = content_box;
+            want_blur = true;
+        }
+    }
+
+    if (!want_blur) {
+        woodland_effect_blur_clear(tree);
+        goto recurse;
+    }
+
+    int origin_x = 0;
+    int origin_y = 0;
+    struct wlr_scene_buffer *buf = find_surface_buffer(tree, surface, &origin_x, &origin_y);
+    /*
+     * Popup 悬浮在父窗口或普通窗口之上，不可采样壁纸预模糊缓存（optimized_blur），
+     * 必须固定传 false 走实时模糊（live blur）。
+     */
+    blur_apply_internal(tree, buf, origin_x, origin_y, surf_w, surf_h, &box, NULL, false);
+
+recurse:
+    if (popup->base->popups.next) {
+        struct wlr_xdg_popup *child;
+        wl_list_for_each(child, &popup->base->popups, link)
+        {
+            popup_update_recursive(child, depth + 1);
+        }
+    }
+}
+
+bool woodland_effect_set_popup_blur_region(struct wlr_xdg_popup *popup,
+                                           const pixman_region32_t *region)
+{
+    if (!popup || !popup->base || !popup->base->surface) {
+        return false;
+    }
+    struct wlr_surface *surface = popup->base->surface;
+    struct woodland_popup_effect *pe = popup_effect_ensure(surface);
+    if (!pe) {
+        return false;
+    }
+    pe->explicit_set = true;
+    if (region) {
+        pixman_region32_copy(&pe->region, region);
+    } else {
+        pixman_region32_clear(&pe->region);
+    }
+    struct wlr_box box = {0};
+    bool on = woodland_effect_blur_box(&pe->region, surface->current.width,
+                                       surface->current.height, &box);
+    woodland_effect_popup_update(popup);
+    return on;
+}
+
+void woodland_effect_clear_popup_blur_region(struct wlr_xdg_popup *popup)
+{
+    if (!popup || !popup->base || !popup->base->surface) {
+        return;
+    }
+    struct woodland_popup_effect *pe = popup_effect_find(popup->base->surface);
+    if (pe) {
+        popup_effect_addon_destroy(&pe->addon);
+    }
+    woodland_effect_popup_update(popup);
+}
+
+void woodland_effect_popup_update(struct wlr_xdg_popup *popup)
+{
+    popup_update_recursive(popup, 0);
+}
+
 void woodland_effect_layer_blur(struct woodland_layer_surface *layer, const struct wlr_box *region)
 {
     if (!layer || !layer->scene_layer_surface || !layer->layer_surface) {
@@ -612,11 +840,21 @@ void woodland_effect_layer_blur(struct woodland_layer_surface *layer, const stru
     }
     struct wlr_scene_tree *tree = layer->scene_layer_surface->tree;
     struct wlr_surface *surface = layer->layer_surface->surface;
-    if (!region || !woodland_effect_server_blur_enabled(layer->server)) {
+    if (!region || region->width <= 0 || region->height <= 0) {
         layer->effect.blur = false;
         layer->effect.blur_region = (struct wlr_box){0};
         woodland_effect_blur_clear(tree);
-        return;
+        goto update_popups;
+    }
+
+    struct wlr_box box = *region;
+    layer->effect.blur = true;
+    layer->effect.blur_region = box;
+
+    if (!woodland_effect_server_blur_enabled(layer->server) || !surface ||
+        surface->current.width <= 0 || surface->current.height <= 0) {
+        woodland_effect_blur_clear(tree);
+        goto update_popups;
     }
 
     int origin_x = 0;
@@ -633,10 +871,17 @@ void woodland_effect_layer_blur(struct woodland_layer_surface *layer, const stru
         }
     }
 
-    bool ok = blur_apply_internal(tree, buf, origin_x, origin_y, surface->current.width,
-                                  surface->current.height, region, NULL, opt);
-    layer->effect.blur = ok;
-    layer->effect.blur_region = ok ? *region : (struct wlr_box){0};
+    blur_apply_internal(tree, buf, origin_x, origin_y, surface->current.width,
+                        surface->current.height, &box, NULL, opt);
+
+update_popups:
+    if (layer->layer_surface->popups.next) {
+        struct wlr_xdg_popup *popup;
+        wl_list_for_each(popup, &layer->layer_surface->popups, link)
+        {
+            woodland_effect_popup_update(popup);
+        }
+    }
 }
 
 void woodland_effect_update(struct woodland_view *view)
@@ -647,6 +892,14 @@ void woodland_effect_update(struct woodland_view *view)
     update_corners(view);
     update_blur(view);
     update_shadow(view);
+    if (view->type == WOODLAND_VIEW_XDG && view->xdg_toplevel && view->xdg_toplevel->base &&
+        view->xdg_toplevel->base->popups.next) {
+        struct wlr_xdg_popup *popup;
+        wl_list_for_each(popup, &view->xdg_toplevel->base->popups, link)
+        {
+            woodland_effect_popup_update(popup);
+        }
+    }
 }
 
 void woodland_effect_apply_scene_config(struct woodland_server *server)
@@ -727,6 +980,21 @@ void woodland_effect_outputs_update(struct woodland_server *server)
     wl_list_for_each(output, &server->outputs, link)
     {
         woodland_effect_output_update(output);
+        for (int i = 0; i < 4; i++) {
+            if (!output->layer_tree[i]) {
+                continue;
+            }
+            struct wlr_scene_node *node;
+            wl_list_for_each(node, &output->layer_tree[i]->children, link)
+            {
+                struct woodland_layer_surface *layer = node->data;
+                if (!layer) {
+                    continue;
+                }
+                woodland_effect_layer_blur(layer,
+                                           layer->effect.blur ? &layer->effect.blur_region : NULL);
+            }
+        }
     }
 }
 
@@ -774,6 +1042,24 @@ void woodland_effect_layer_blur(struct woodland_layer_surface *layer, const stru
 {
     (void)layer;
     (void)region;
+}
+
+bool woodland_effect_set_popup_blur_region(struct wlr_xdg_popup *popup,
+                                           const pixman_region32_t *region)
+{
+    (void)popup;
+    (void)region;
+    return false;
+}
+
+void woodland_effect_clear_popup_blur_region(struct wlr_xdg_popup *popup)
+{
+    (void)popup;
+}
+
+void woodland_effect_popup_update(struct wlr_xdg_popup *popup)
+{
+    (void)popup;
 }
 
 void woodland_effect_apply_scene_config(struct woodland_server *server)

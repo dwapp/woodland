@@ -72,6 +72,15 @@ static struct zwlr_layer_surface_v1 *layer_surface_handle;
 static struct zxdg_toplevel_decoration_v1 *xdg_deco;
 static struct treeland_decoration_context_v1 *deco_ctx;
 static struct ext_background_effect_surface_v1 *bg_effect;
+static struct wl_surface *pop_surface;
+static struct xdg_surface *pop_xdg_surface;
+static struct xdg_popup *pop_handle;
+static struct ext_background_effect_surface_v1 *pop_bg_effect;
+static struct wl_buffer *pop_buffer;
+static int pop_configured;
+static int want_popup;
+static int want_popup_blur;
+static int pop_blur_x, pop_blur_y, pop_blur_w, pop_blur_h;
 static int configured;
 /* buffer 外观：alpha < 255 才能看出"后面被糊了"，pattern 让模糊前后有区别 */
 static uint32_t buffer_alpha = 255;
@@ -102,6 +111,39 @@ static void xdg_surface_configure(void *data, struct xdg_surface *surface_, uint
 
 static const struct xdg_surface_listener xdg_surface_listener = {
     .configure = xdg_surface_configure,
+};
+
+static void pop_xdg_surface_configure(void *data, struct xdg_surface *surface_, uint32_t serial)
+{
+    (void)data;
+    xdg_surface_ack_configure(surface_, serial);
+    pop_configured = 1;
+}
+
+static const struct xdg_surface_listener pop_xdg_surface_listener = {
+    .configure = pop_xdg_surface_configure,
+};
+
+static void xdg_popup_configure(void *data, struct xdg_popup *popup, int32_t x, int32_t y,
+                                int32_t width, int32_t height)
+{
+    (void)data;
+    (void)popup;
+    (void)x;
+    (void)y;
+    (void)width;
+    (void)height;
+}
+
+static void xdg_popup_done(void *data, struct xdg_popup *popup)
+{
+    (void)data;
+    (void)popup;
+}
+
+static const struct xdg_popup_listener pop_listener = {
+    .configure = xdg_popup_configure,
+    .popup_done = xdg_popup_done,
 };
 
 static void toplevel_configure(void *data, struct xdg_toplevel *toplevel_, int32_t width,
@@ -267,10 +309,10 @@ static int pump(int ms)
     }
 }
 
-static struct wl_buffer *create_buffer(void)
+static struct wl_buffer *create_buffer_sized(int width, int height)
 {
-    int stride = surf_w * 4;
-    int size = stride * surf_h;
+    int stride = width * 4;
+    int size = stride * height;
     int fd = memfd_create("deco-probe", MFD_CLOEXEC);
     if (fd < 0) {
         return NULL;
@@ -287,13 +329,13 @@ static struct wl_buffer *create_buffer(void)
     /* 纯灰：内容本身不重要，重要的是有一块真 buffer 让窗口 map 上来；
      * pattern 画彩条（模糊前后差别明显），alpha 用来做半透明窗口 */
     uint32_t *pixels = data;
-    for (int y = 0; y < surf_h; y++) {
-        for (int x = 0; x < surf_w; x++) {
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
             if (buffer_pad > 0 &&
-                (x < buffer_pad || y < buffer_pad || x >= surf_w - buffer_pad ||
-                 y >= surf_h - buffer_pad)) {
+                (x < buffer_pad || y < buffer_pad || x >= width - buffer_pad ||
+                 y >= height - buffer_pad)) {
                 /* 整像素 0（预乘 ARGB 的全透明）：客户端声明了区域但没画这块 */
-                pixels[y * surf_w + x] = 0;
+                pixels[y * width + x] = 0;
                 continue;
             }
             uint32_t r = 0x80, g = 0x80, b = 0x80;
@@ -316,18 +358,23 @@ static struct wl_buffer *create_buffer(void)
             r = r * a / 255;
             g = g * a / 255;
             b = b * a / 255;
-            pixels[y * surf_w + x] = (a << 24) | (r << 16) | (g << 8) | b;
+            pixels[y * width + x] = (a << 24) | (r << 16) | (g << 8) | b;
         }
     }
     munmap(data, (size_t)size);
 
     struct wl_shm_pool *pool = wl_shm_create_pool(shm, fd, size);
     struct wl_buffer *buffer = wl_shm_pool_create_buffer(
-        pool, 0, surf_w, surf_h, stride,
+        pool, 0, width, height, stride,
         buffer_alpha < 255 ? WL_SHM_FORMAT_ARGB8888 : WL_SHM_FORMAT_XRGB8888);
     wl_shm_pool_destroy(pool);
     close(fd);
     return buffer;
+}
+
+static struct wl_buffer *create_buffer(void)
+{
+    return create_buffer_sized(surf_w, surf_h);
 }
 
 static void print_protocol_error(void)
@@ -507,6 +554,14 @@ int main(int argc, char *argv[])
             i++;
         } else if (strcmp(argv[i], "--size") == 0 && i + 2 < argc) {
             i += 2; /* 已在上面预扫描时生效 */
+        } else if (strcmp(argv[i], "--popup") == 0) {
+            want_popup = 1;
+        } else if (strcmp(argv[i], "popup-blur") == 0 && i + 4 < argc) {
+            want_popup_blur = 1;
+            pop_blur_x = atoi(argv[++i]);
+            pop_blur_y = atoi(argv[++i]);
+            pop_blur_w = atoi(argv[++i]);
+            pop_blur_h = atoi(argv[++i]);
         } else if (strcmp(argv[i], "blur") == 0 && i + 4 < argc) {
             /*
              * 背景模糊：不依赖装饰上下文（协议是独立的 surface 扩展），所以
@@ -621,6 +676,65 @@ int main(int argc, char *argv[])
         print_protocol_error();
         return 3;
     }
+
+    if (want_popup) {
+        pop_surface = wl_compositor_create_surface(compositor);
+        pop_xdg_surface = xdg_wm_base_get_xdg_surface(wm_base, pop_surface);
+        xdg_surface_add_listener(pop_xdg_surface, &pop_xdg_surface_listener, NULL);
+        struct xdg_positioner *pos = xdg_wm_base_create_positioner(wm_base);
+        xdg_positioner_set_size(pos, 200, 150);
+        xdg_positioner_set_anchor_rect(pos, 10, 10, 20, 20);
+        xdg_positioner_set_anchor(pos, XDG_POSITIONER_ANCHOR_BOTTOM_RIGHT);
+        xdg_positioner_set_gravity(pos, XDG_POSITIONER_GRAVITY_BOTTOM_RIGHT);
+        if (use_layer) {
+            pop_handle = xdg_surface_get_popup(pop_xdg_surface, NULL, pos);
+            zwlr_layer_surface_v1_get_popup(layer_surface_handle, pop_handle);
+        } else {
+            pop_handle = xdg_surface_get_popup(pop_xdg_surface, xdg_surface, pos);
+        }
+        xdg_positioner_destroy(pos);
+        xdg_popup_add_listener(pop_handle, &pop_listener, NULL);
+
+        if (want_popup_blur) {
+            if (!bg_effect_manager) {
+                fprintf(stderr, "ext_background_effect_manager_v1 not advertised\n");
+                return 77;
+            }
+            pop_bg_effect = ext_background_effect_manager_v1_get_background_effect(
+                bg_effect_manager, pop_surface);
+            struct wl_region *region = wl_compositor_create_region(compositor);
+            wl_region_add(region, pop_blur_x, pop_blur_y, pop_blur_w, pop_blur_h);
+            ext_background_effect_surface_v1_set_blur_region(pop_bg_effect, region);
+            wl_region_destroy(region);
+        }
+
+        wl_surface_commit(pop_surface);
+        int pop_waited = 0;
+        while (!pop_configured && pop_waited < 3000) {
+            if (pump(50) != 0) {
+                print_protocol_error();
+                return 3;
+            }
+            pop_waited += 50;
+        }
+        if (!pop_configured) {
+            fprintf(stderr, "no popup configure in 3s\n");
+            return 1;
+        }
+        pop_buffer = create_buffer_sized(200, 150);
+        if (!pop_buffer) {
+            fprintf(stderr, "cannot create popup shm buffer\n");
+            return 1;
+        }
+        wl_surface_attach(pop_surface, pop_buffer, 0, 0);
+        wl_surface_damage_buffer(pop_surface, 0, 0, 200, 150);
+        wl_surface_commit(pop_surface);
+        if (pump(200) != 0) {
+            print_protocol_error();
+            return 3;
+        }
+    }
+
     printf("READY\n");
     fflush(stdout);
 
@@ -654,6 +768,21 @@ int main(int argc, char *argv[])
         return 3;
     }
 
+    if (pop_bg_effect) {
+        ext_background_effect_surface_v1_destroy(pop_bg_effect);
+    }
+    if (pop_buffer) {
+        wl_buffer_destroy(pop_buffer);
+    }
+    if (pop_handle) {
+        xdg_popup_destroy(pop_handle);
+    }
+    if (pop_xdg_surface) {
+        xdg_surface_destroy(pop_xdg_surface);
+    }
+    if (pop_surface) {
+        wl_surface_destroy(pop_surface);
+    }
     if (deco_ctx) {
         treeland_decoration_context_v1_destroy(deco_ctx);
     }

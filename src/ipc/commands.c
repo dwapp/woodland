@@ -924,6 +924,7 @@ static void dump_node(struct scene_dump_ctx *ctx, struct wlr_scene_node *node, i
         struct wlr_scene_blur *blur = wlr_scene_blur_from_node(node);
         woodland_json_obj_int(&obj, "w", blur->width);
         woodland_json_obj_int(&obj, "h", blur->height);
+        woodland_json_obj_bool(&obj, "optimized", blur->should_only_blur_bottom_layer);
         int corners[4] = {blur->corners.top_left, blur->corners.top_right,
                           blur->corners.bottom_right, blur->corners.bottom_left};
         woodland_json_obj_key(&obj, "corners");

@@ -1135,6 +1135,12 @@ float woodland_ssd_get_scale(const struct woodland_view *view)
 
 bool woodland_ssd_titlebar_visible(const struct woodland_view *view)
 {
+    if (!view || view->deco_csd || view->fullscreen) {
+        return false;
+    }
+    if (view->server && view->server->config && !view->server->config->ssd.enabled) {
+        return false;
+    }
     return ssd_titlebar_height(view) > 0;
 }
 
