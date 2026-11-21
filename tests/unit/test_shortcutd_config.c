@@ -282,6 +282,10 @@ static void test_defaults_use_path(void)
     assert(term && term->command && strcmp(term->command, "foot") == 0);
     assert(term->builtin_default);
 
+    const struct wsd_binding *term2 = find_key(&cfg, "Ctrl+Alt+T");
+    assert(term2 && term2->command && strcmp(term2->command, "foot") == 0);
+    assert(term2->builtin_default);
+
     /* 音量：wpctl 存在就用 wpctl，不退回 pactl */
     const struct wsd_binding *vol = find_key(&cfg, "XF86AudioRaiseVolume");
     assert(vol && vol->command && strstr(vol->command, "wpctl") != NULL);
@@ -291,9 +295,34 @@ static void test_defaults_use_path(void)
     assert(find_key(&cfg, "XF86MonBrightnessUp") == NULL);
     /* playerctl 也不在，媒体键同理 */
     assert(find_key(&cfg, "XF86AudioPlay") == NULL);
+    /* 截图、启动器、锁屏、浏览器、任务管理器程序不存在时同样跳过 */
+    assert(find_key(&cfg, "Print") == NULL);
+    assert(find_key(&cfg, "Meta+D") == NULL);
+    assert(find_key(&cfg, "Meta+L") == NULL);
+    assert(find_key(&cfg, "Meta+B") == NULL);
+    assert(find_key(&cfg, "Ctrl+Shift+Escape") == NULL);
+
     /* action 类不依赖 PATH，永远在 */
     const struct wsd_binding *tile = find_key(&cfg, "Meta+Left");
     assert(tile && tile->command == NULL && tile->action == WSD_ACTION_TILE_LEFT);
+    const struct wsd_binding *close_f4 = find_key(&cfg, "Alt+F4");
+    assert(close_f4 && close_f4->command == NULL && close_f4->action == WSD_ACTION_CLOSE_WINDOW);
+    const struct wsd_binding *menu = find_key(&cfg, "Alt+Space");
+    assert(menu && menu->command == NULL && menu->action == WSD_ACTION_SHOW_WINDOW_MENU);
+    const struct wsd_binding *min_w = find_key(&cfg, "Meta+M");
+    assert(min_w && min_w->command == NULL && min_w->action == WSD_ACTION_MINIMIZE);
+    const struct wsd_binding *ws_prev = find_key(&cfg, "Ctrl+Alt+Left");
+    assert(ws_prev && ws_prev->command == NULL && ws_prev->action == WSD_ACTION_PREV_WORKSPACE);
+    const struct wsd_binding *ws_next = find_key(&cfg, "Ctrl+Alt+Right");
+    assert(ws_next && ws_next->command == NULL && ws_next->action == WSD_ACTION_NEXT_WORKSPACE);
+    const struct wsd_binding *mv_prev = find_key(&cfg, "Ctrl+Alt+Shift+Left");
+    assert(mv_prev && mv_prev->command == NULL && mv_prev->action == WSD_ACTION_MOVE_WINDOW_TO_PREV_WORKSPACE);
+    const struct wsd_binding *mv_next = find_key(&cfg, "Ctrl+Alt+Shift+Right");
+    assert(mv_next && mv_next->command == NULL && mv_next->action == WSD_ACTION_MOVE_WINDOW_TO_NEXT_WORKSPACE);
+    const struct wsd_binding *ws1 = find_key(&cfg, "Meta+1");
+    assert(ws1 && ws1->command == NULL && ws1->action == WSD_ACTION_WORKSPACE_1);
+    const struct wsd_binding *ws9 = find_key(&cfg, "Meta+9");
+    assert(ws9 && ws9->command == NULL && ws9->action == WSD_ACTION_WORKSPACE_9);
 
     wsd_config_clear(&cfg);
     assert(setenv("PATH", old_path, 1) == 0);
