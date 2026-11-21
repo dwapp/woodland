@@ -21,6 +21,7 @@
 #include <wlr/util/log.h>
 
 #include "output.h"
+#include "output_config.h"
 #include "protocol_internal.h"
 #include "trace.h"
 #include "woodland.h"
@@ -231,6 +232,7 @@ static void output_handle_apply(struct wl_listener *listener, void *data)
     woodland_trace_add("cfg_apply", 0, "outputs=%zu ok=%d", len, ok ? 1 : 0);
 
     if (ok) {
+        woodland_output_config_save(server);
         wlr_output_configuration_v1_send_succeeded(config);
     } else {
         wlr_output_configuration_v1_send_failed(config);

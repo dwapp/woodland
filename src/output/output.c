@@ -15,6 +15,7 @@
 #include "cursor.h"
 #include "layer.h"
 #include "output.h"
+#include "output_config.h"
 #include "session_lock.h"
 #include "trace.h"
 #include "view.h"
@@ -379,27 +380,37 @@ static void handle_new_output(struct wl_listener *listener, void *data)
     /* ---- 4. 入链 + 布局 + 提交 + 广播 ---- */
     wl_list_insert(&server->outputs, &output->link);
 
-    struct wlr_output_layout_output *layout_output =
-        wlr_output_layout_add_auto(server->output_layout, wlr_output);
+    struct wlr_output_state state;
+    wlr_output_state_init(&state);
+
+    int32_t x = 0, y = 0;
+    bool has_saved = woodland_output_config_restore(output, &state, &x, &y);
+
+    struct wlr_output_layout_output *layout_output = NULL;
+    if (has_saved) {
+        layout_output = wlr_output_layout_add(server->output_layout, wlr_output, x, y);
+    } else {
+        layout_output = wlr_output_layout_add_auto(server->output_layout, wlr_output);
+        wlr_output_state_set_enabled(&state, true);
+        struct wlr_output_mode *mode = wlr_output_preferred_mode(wlr_output);
+        if (mode != NULL) {
+            wlr_output_state_set_mode(&state, mode);
+        }
+        struct woodland_config_output_rule *rule = find_output_rule(server, wlr_output->name);
+        if (rule && rule->scale > 0.0) {
+            wlr_output_state_set_scale(&state, rule->scale);
+        }
+    }
+
     if (!layout_output) {
         wlr_log(WLR_ERROR, "failed to add output to layout");
+        wlr_output_state_finish(&state);
         wl_list_remove(&output->link);
         goto err_trees;
     }
 
     wlr_scene_output_layout_add_output(server->scene_layout, layout_output, scene_output);
 
-    struct wlr_output_state state;
-    wlr_output_state_init(&state);
-    wlr_output_state_set_enabled(&state, true);
-    struct wlr_output_mode *mode = wlr_output_preferred_mode(wlr_output);
-    if (mode != NULL) {
-        wlr_output_state_set_mode(&state, mode);
-    }
-    struct woodland_config_output_rule *rule = find_output_rule(server, wlr_output->name);
-    if (rule && rule->scale > 0.0) {
-        wlr_output_state_set_scale(&state, rule->scale);
-    }
     if (!wlr_output_commit_state(wlr_output, &state)) {
         wlr_log(WLR_ERROR, "failed to commit output state");
     }

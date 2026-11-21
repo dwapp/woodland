@@ -4,6 +4,7 @@
 
 `src/output` 负责显示输出（Display Outputs）的生命周期、几何布局与渲染帧管理：
 - `src/output/output.c`：输出热插拔（`new_output`、`destroy`）、`wlr_output_layout` 管理、`handle_commit` 帧提交回调、输出模式（mode）与缩放（scale）应用。
+- `src/output/output_config.c`：显示配置持久化（`$XDG_CONFIG_HOME/woodland/outputs.json`），记录分辨率、刷新率、缩放、旋转与布局坐标，支持多屏配置合并与热插拔/启动恢复。
 - `woodland_output_refresh_all()`：缩放变化时的统一全局刷新中枢。
 
 ## 2. 关键硬约束
