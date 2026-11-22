@@ -75,11 +75,26 @@ void woodland_view_content_box(const struct woodland_view *view, struct wlr_box 
     }
 #if WOODLAND_HAVE_XWAYLAND
     if (view->type == WOODLAND_VIEW_XWAYLAND) {
-        /* X11 窗口的 surface 就是窗口本身，几何原点恒为 0,0 */
+        /* X11 窗口的 surface 就是窗口本身，几何原点恒为 0,0；
+         * 全屏且使用了 RandR 低分辨率模式时，Xwayland 会用 wp_viewport 把
+         * surface 拉伸到屏幕尺寸，取 surface->current 才是有效外框。 */
         struct wlr_xwayland_surface *xsurface = view->xwayland_surface;
         if (xsurface) {
-            box->width = xsurface->width;
-            box->height = xsurface->height;
+            if (view->fullscreen && xsurface->surface &&
+                xsurface->surface->current.width > 0 &&
+                xsurface->surface->current.height > 0) {
+                box->width = xsurface->surface->current.width;
+                box->height = xsurface->surface->current.height;
+            } else {
+                box->width = xsurface->width;
+                box->height = xsurface->height;
+            }
+            /* native_resolution：X 尺寸是物理像素，布局里用的是逻辑尺寸 */
+            struct woodland_xwl_region region;
+            if (woodland_xwl_view_region((struct woodland_view *)view, &region)) {
+                box->width = woodland_xwl_to_layout_width(&region, box->width);
+                box->height = woodland_xwl_to_layout_height(&region, box->height);
+            }
         }
         return;
     }
@@ -112,9 +127,45 @@ void woodland_view_request_size(struct woodland_view *view, int width, int heigh
         if (height < 1) {
             height = 1;
         }
-        wlr_xwayland_surface_configure(xsurface, (int16_t)view->scene_tree->node.x,
-                                       (int16_t)view->scene_tree->node.y, (uint16_t)width,
-                                       (uint16_t)height);
+        int x = view->scene_tree ? view->scene_tree->node.x : 0;
+        int y = view->scene_tree ? view->scene_tree->node.y : 0;
+        /* native_resolution：逻辑位置 / 尺寸换成 X 像素再发出去 */
+        struct woodland_xwl_region region;
+        if (woodland_xwl_view_region(view, &region)) {
+            x = woodland_xwl_to_x(&region, x);
+            y = woodland_xwl_to_y(&region, y);
+            width = woodland_xwl_to_x_width(&region, width);
+            height = woodland_xwl_to_x_height(&region, height);
+        }
+        if (x < INT16_MIN) {
+            x = INT16_MIN;
+        } else if (x > INT16_MAX) {
+            x = INT16_MAX;
+        }
+        if (y < INT16_MIN) {
+            y = INT16_MIN;
+        } else if (y > INT16_MAX) {
+            y = INT16_MAX;
+        }
+        if (width < 1) {
+            width = 1;
+        } else if (width > UINT16_MAX) {
+            width = UINT16_MAX;
+        }
+        if (height < 1) {
+            height = 1;
+        } else if (height > UINT16_MAX) {
+            height = UINT16_MAX;
+        }
+        if (xsurface->xwm) {
+            wlr_xwayland_surface_configure(xsurface, (int16_t)x, (int16_t)y,
+                                           (uint16_t)width, (uint16_t)height);
+        } else {
+            xsurface->x = (int16_t)x;
+            xsurface->y = (int16_t)y;
+            xsurface->width = (uint16_t)width;
+            xsurface->height = (uint16_t)height;
+        }
         return;
     }
 #endif

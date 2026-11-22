@@ -22,6 +22,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <wlr/types/wlr_xcursor_manager.h>
+#include <pixman.h>
 #include "cursor.h"
 #include "output.h"
 #include "placement.h"
@@ -29,6 +30,7 @@
 
 #include "scene.h"
 #include <wlr/util/log.h>
+#include <wlr/util/region.h>
 #include <wlr/xwayland.h>
 
 #include "effect.h"
@@ -36,6 +38,8 @@
 #include "view.h"
 #include "woodland.h"
 #include "xwayland.h"
+#include "xwayland_outputs.h"
+#include "xwayland_scale.h"
 #include "focus.h"
 
 /* ==================== unmanaged（override-redirect） ==================== */
@@ -50,6 +54,7 @@ struct woodland_unmanaged {
     struct wl_listener dissociate;
     struct wl_listener map;
     struct wl_listener unmap;
+    struct wl_listener commit;
     struct wl_listener destroy;
     struct wl_listener set_geometry;
     struct wl_listener set_override_redirect;
@@ -66,10 +71,100 @@ static void xwl_new_view(struct woodland_server *server, struct wlr_xwayland_sur
 static void xwl_new_unmanaged(struct woodland_server *server, struct wlr_xwayland_surface *xsurface);
 static void xwl_destroy(struct wl_listener *listener, void *data);
 
+/* ==================== native_resolution：X 坐标 <-> 布局坐标 ==================== */
+
+/*
+ * 命中测试回调：native_resolution 下 surface 被缩回逻辑尺寸显示，scene 给的
+ * 节点内坐标是逻辑单位，而 surface 本地坐标是 X 像素。按"surface 尺寸 / 显示
+ * 尺寸"把它放大回去；返回的 sx/sy 会原样交给 wlr_seat 做指针进入/移动，
+ * 所以 X11 客户端收到的是它自己的像素坐标。
+ */
+static bool xwl_point_accepts_input(struct wlr_scene_buffer *buffer, double *sx, double *sy) {
+    struct wlr_scene_surface *scene_surface = wlr_scene_surface_try_from_buffer(buffer);
+    if (!scene_surface || !scene_surface->surface) {
+        return false;
+    }
+    struct wlr_surface *surface = scene_surface->surface;
+    if (buffer->dst_width > 0 && buffer->dst_height > 0) {
+        *sx *= (double)surface->current.width / buffer->dst_width;
+        *sy *= (double)surface->current.height / buffer->dst_height;
+    }
+    return wlr_surface_point_accepts_input(surface, *sx, *sy);
+}
+
+/*
+ * 把 surface 缩回 region 对应的逻辑尺寸。必须在 wlr_scene_surface 自己处理完
+ * commit 之后调用（它每次 commit 都会把显示尺寸重置成 surface 的像素尺寸）。
+ * region 为 NULL（未启用 native_resolution）时什么也不做。
+ * 返回显示尺寸（dst_width / dst_height）是否发生了变化。
+ */
+static bool xwl_rescale_surface(struct wlr_scene_surface *scene_surface,
+                                const struct woodland_xwl_region *region) {
+    if (!region || !scene_surface || !scene_surface->buffer || !scene_surface->surface) {
+        return false;
+    }
+    struct wlr_surface *surface = scene_surface->surface;
+    int width = surface->current.width;
+    int height = surface->current.height;
+    if (width <= 0 || height <= 0) {
+        return false;
+    }
+    int dst_w = woodland_xwl_to_layout_width(region, width);
+    int dst_h = woodland_xwl_to_layout_height(region, height);
+    if (dst_w < 1) {
+        dst_w = 1;
+    }
+    if (dst_h < 1) {
+        dst_h = 1;
+    }
+    bool changed = (scene_surface->buffer->dst_width != dst_w ||
+                    scene_surface->buffer->dst_height != dst_h);
+
+    pixman_region32_t opaque;
+    pixman_region32_init(&opaque);
+    if (region->scale != 1.0 && region->scale > 0.0) {
+        wlr_region_scale(&opaque, &surface->opaque_region, (float)(1.0 / region->scale));
+    } else {
+        pixman_region32_copy(&opaque, &surface->opaque_region);
+    }
+    wlr_scene_buffer_set_opaque_region(scene_surface->buffer, &opaque);
+    pixman_region32_fini(&opaque);
+
+    wlr_scene_buffer_set_dest_size(scene_surface->buffer, dst_w, dst_h);
+    scene_surface->buffer->point_accepts_input = xwl_point_accepts_input;
+    return changed;
+}
+
+static bool xwl_native(const struct woodland_server *server) {
+    return server && server->xwl_map.enabled;
+}
+
+/* 受管理视图：按它所在输出把 surface 缩回逻辑尺寸（未启用时空操作） */
+static bool xwl_rescale_view(struct woodland_view *view) {
+    struct woodland_xwl_region region;
+    if (view->scene_surface && woodland_xwl_view_region(view, &region)) {
+        return xwl_rescale_surface(view->scene_surface, &region);
+    }
+    return false;
+}
+
+/* override-redirect 窗口：位置按 X 坐标换回布局坐标，并缩回逻辑尺寸 */
+static void unmanaged_place(struct woodland_unmanaged *unmanaged, int x, int y) {
+    if (xwl_native(unmanaged->server)) {
+        struct woodland_xwl_region region;
+        woodland_xwl_map_region_at_x(&unmanaged->server->xwl_map, x, y, &region);
+        wlr_scene_node_set_position(&unmanaged->scene_tree->node,
+                                    woodland_xwl_to_layout_x(&region, x),
+                                    woodland_xwl_to_layout_y(&region, y));
+        xwl_rescale_surface(unmanaged->scene_surface, &region);
+    } else {
+        wlr_scene_node_set_position(&unmanaged->scene_tree->node, x, y);
+    }
+}
+
 static void unmanaged_set_geometry(struct woodland_unmanaged *unmanaged) {
     struct wlr_xwayland_surface *xsurface = unmanaged->xsurface;
-    wlr_scene_node_set_position(&unmanaged->scene_tree->node,
-                                xsurface->x, xsurface->y);
+    unmanaged_place(unmanaged, xsurface->x, xsurface->y);
     unmanaged_update_filter_mode(unmanaged);
 }
 static enum wlr_scale_filter_mode xwl_get_scale_filter_mode(struct woodland_server *server,
@@ -107,6 +202,20 @@ static void unmanaged_update_filter_mode(struct woodland_unmanaged *unmanaged) {
     }
 }
 
+static void unmanaged_commit(struct wl_listener *listener, void *data) {
+    struct woodland_unmanaged *unmanaged =
+        wl_container_of(listener, unmanaged, commit);
+    (void)data;
+    if (!xwl_native(unmanaged->server)) {
+        return;
+    }
+    /* 注册在 wlr_scene_surface 的 commit 监听之后，此时它已重置过显示尺寸 */
+    struct woodland_xwl_region region;
+    woodland_xwl_map_region_at_x(&unmanaged->server->xwl_map, unmanaged->xsurface->x,
+                                 unmanaged->xsurface->y, &region);
+    xwl_rescale_surface(unmanaged->scene_surface, &region);
+}
+
 /* 挂上 wlr_surface：建 scene surface + 接 map/unmap */
 static void unmanaged_attach_surface(struct woodland_unmanaged *unmanaged,
                                      struct wlr_surface *surface) {
@@ -119,6 +228,8 @@ static void unmanaged_attach_surface(struct woodland_unmanaged *unmanaged,
                           unmanaged_map, "xwayland.map");
     woodland_listener_connect(&unmanaged->unmap, &surface->events.unmap,
                           unmanaged_unmap, "xwayland.unmap");
+    woodland_listener_connect(&unmanaged->commit, &surface->events.commit,
+                          unmanaged_commit, "xwayland.unmanaged_commit");
     /* set_geometry 里已经会刷一次滤波（buffer 这时通常还没有，是空操作），
      * 真正的第一次生效在 map 之后 */
     if (surface->mapped) {
@@ -140,6 +251,7 @@ static void unmanaged_dissociate(struct wl_listener *listener, void *data) {
     if (unmanaged->scene_surface) {
         wl_list_remove(&unmanaged->map.link);
         wl_list_remove(&unmanaged->unmap.link);
+        wl_list_remove(&unmanaged->commit.link);
         unmanaged->scene_surface = NULL;
     }
     (void)data;
@@ -208,6 +320,7 @@ static void unmanaged_destroy(struct wl_listener *listener, void *data) {
     if (unmanaged->scene_surface) {
         wl_list_remove(&unmanaged->map.link);
         wl_list_remove(&unmanaged->unmap.link);
+        wl_list_remove(&unmanaged->commit.link);
     }
     wl_list_remove(&unmanaged->link);
     wl_list_remove(&unmanaged->set_override_redirect.link);
@@ -234,7 +347,7 @@ static void unmanaged_request_configure(struct wl_listener *listener, void *data
     uint16_t width = (ev->mask & XCB_CONFIG_WINDOW_WIDTH) ? ev->width : xsurface->width;
     uint16_t height = (ev->mask & XCB_CONFIG_WINDOW_HEIGHT) ? ev->height : xsurface->height;
     wlr_xwayland_surface_configure(xsurface, x, y, width, height);
-    wlr_scene_node_set_position(&unmanaged->scene_tree->node, x, y);
+    unmanaged_place(unmanaged, x, y);
     unmanaged_update_filter_mode(unmanaged);
 }
 
@@ -314,7 +427,15 @@ static void xwl_place_and_configure(struct woodland_view *view) {
     if (!view->placed) {
         int16_t x, y;
         if (woodland_xwayland_initial_position_hint(view->xwayland_surface, &x, &y)) {
-            wlr_scene_node_set_position(&view->scene_tree->node, x, y);
+            int lx = x, ly = y;
+            if (xwl_native(view->server)) {
+                /* 位置提示是 X 坐标，换回布局坐标 */
+                struct woodland_xwl_region region;
+                woodland_xwl_map_region_at_x(&view->server->xwl_map, x, y, &region);
+                lx = woodland_xwl_to_layout_x(&region, x);
+                ly = woodland_xwl_to_layout_y(&region, y);
+            }
+            wlr_scene_node_set_position(&view->scene_tree->node, lx, ly);
             view->placed = true;
             woodland_view_update_outputs(view);
         } else {
@@ -361,6 +482,8 @@ static void xwl_unmap(struct wl_listener *listener, void *data) {
 
 static void xwl_commit(struct wl_listener *listener, void *data) {
     struct woodland_view *view = wl_container_of(listener, view, commit);
+    /* 注册在 wlr_scene_surface 的 commit 监听之后：它刚把显示尺寸重置成像素尺寸 */
+    xwl_rescale_view(view);
     woodland_ssd_update(view);
     if (!view->ssd) {
         woodland_effect_update(view);
@@ -508,32 +631,117 @@ static void xwl_request_configure(struct wl_listener *listener, void *data) {
     if (!view || !view->xwayland_surface) {
         return;
     }
+    struct woodland_xwl_region region;
+    bool native = woodland_xwl_view_region(view, &region);
 
-    /* 最大化/全屏下由 WM 决定几何；仅当客户端请求了几何时才回发 ConfigureNotify 驳回请求 */
+    /* 最大化/全屏下由 WM 决定几何；仅当客户端请求了几何时才回发 ConfigureNotify 驳回请求。
+     * 例外：全屏游戏切到较低的 RandR 模拟分辨率时允许缩到 <= 输出尺寸，好让
+     * Xwayland 通过 wp_viewport 把它拉伸铺满屏幕。 */
     if (view->maximized || view->fullscreen) {
         if (event->mask & (XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y |
                            XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT)) {
-            wlr_xwayland_surface_configure(view->xwayland_surface,
-                                           (int16_t)view->scene_tree->node.x,
-                                           (int16_t)view->scene_tree->node.y,
-                                           view->xwayland_surface->width,
-                                           view->xwayland_surface->height);
+            int x = view->scene_tree ? view->scene_tree->node.x : 0;
+            int y = view->scene_tree ? view->scene_tree->node.y : 0;
+            if (native) {
+                x = woodland_xwl_to_x(&region, x);
+                y = woodland_xwl_to_y(&region, y);
+            }
+            if (x < INT16_MIN) {
+                x = INT16_MIN;
+            } else if (x > INT16_MAX) {
+                x = INT16_MAX;
+            }
+            if (y < INT16_MIN) {
+                y = INT16_MIN;
+            } else if (y > INT16_MAX) {
+                y = INT16_MAX;
+            }
+
+            uint16_t cfg_w = view->xwayland_surface->width;
+            uint16_t cfg_h = view->xwayland_surface->height;
+            if (view->fullscreen &&
+                (event->mask & (XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT))) {
+                int req_w = (event->mask & XCB_CONFIG_WINDOW_WIDTH)
+                                ? event->width
+                                : view->xwayland_surface->width;
+                int req_h = (event->mask & XCB_CONFIG_WINDOW_HEIGHT)
+                                ? event->height
+                                : view->xwayland_surface->height;
+                int full_w = native && region.x.width > 0
+                                 ? region.x.width
+                                 : view->xwayland_surface->width;
+                int full_h = native && region.x.height > 0
+                                 ? region.x.height
+                                 : view->xwayland_surface->height;
+                if (!native && view->server && view->server->output_layout) {
+                    struct woodland_output *wo = woodland_output_for_view(view);
+                    if (wo && wo->wlr_output) {
+                        struct wlr_box obox = {0};
+                        wlr_output_layout_get_box(view->server->output_layout, wo->wlr_output,
+                                                  &obox);
+                        if (obox.width > 0 && obox.height > 0) {
+                            full_w = obox.width;
+                            full_h = obox.height;
+                        }
+                    }
+                }
+                if (req_w > 0 && req_h > 0 && req_w <= full_w && req_h <= full_h) {
+                    cfg_w = (uint16_t)req_w;
+                    cfg_h = (uint16_t)req_h;
+                }
+            }
+            if (view->xwayland_surface->xwm) {
+                wlr_xwayland_surface_configure(view->xwayland_surface,
+                                               (int16_t)x, (int16_t)y,
+                                               cfg_w, cfg_h);
+            } else {
+                view->xwayland_surface->x = (int16_t)x;
+                view->xwayland_surface->y = (int16_t)y;
+                view->xwayland_surface->width = cfg_w;
+                view->xwayland_surface->height = cfg_h;
+            }
         }
         return;
     }
 
-    /* 浮动状态：同步客户端的位置请求 */
+    /* 浮动状态：同步客户端的位置请求（native_resolution 下它给的是 X 坐标） */
     if (event->mask & (XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y)) {
-        int16_t x = (event->mask & XCB_CONFIG_WINDOW_X) ? event->x : (int16_t)view->scene_tree->node.x;
-        int16_t y = (event->mask & XCB_CONFIG_WINDOW_Y) ? event->y : (int16_t)view->scene_tree->node.y;
-        wlr_scene_node_set_position(&view->scene_tree->node, x, y);
+        int x = view->scene_tree->node.x;
+        int y = view->scene_tree->node.y;
+        if (native) {
+            struct woodland_xwl_region at;
+            woodland_xwl_map_region_at_x(&view->server->xwl_map,
+                (event->mask & XCB_CONFIG_WINDOW_X) ? event->x : woodland_xwl_to_x(&region, x),
+                (event->mask & XCB_CONFIG_WINDOW_Y) ? event->y : woodland_xwl_to_y(&region, y),
+                &at);
+            if (event->mask & XCB_CONFIG_WINDOW_X) {
+                x = woodland_xwl_to_layout_x(&at, event->x);
+            }
+            if (event->mask & XCB_CONFIG_WINDOW_Y) {
+                y = woodland_xwl_to_layout_y(&at, event->y);
+            }
+        } else {
+            if (event->mask & XCB_CONFIG_WINDOW_X) {
+                x = event->x;
+            }
+            if (event->mask & XCB_CONFIG_WINDOW_Y) {
+                y = event->y;
+            }
+        }
+        wlr_scene_node_set_position(&view->scene_tree->node, (int16_t)x, (int16_t)y);
         view->placed = true;
         woodland_view_update_outputs(view);
+        native = woodland_xwl_view_region(view, &region);
     }
 
-    /* 调整尺寸并 configure */
+    /* 调整尺寸并 configure。woodland_view_request_size 收逻辑尺寸，
+     * 而 X 客户端给的是 X 像素，先换算 */
     int width = (event->mask & XCB_CONFIG_WINDOW_WIDTH) ? event->width : view->xwayland_surface->width;
     int height = (event->mask & XCB_CONFIG_WINDOW_HEIGHT) ? event->height : view->xwayland_surface->height;
+    if (native) {
+        width = woodland_xwl_to_layout_width(&region, width);
+        height = woodland_xwl_to_layout_height(&region, height);
+    }
     woodland_view_request_size(view, width, height);
 }
 static void xwl_request_move(struct wl_listener *listener, void *data) {
@@ -613,6 +821,7 @@ static void xwl_set_parent(struct wl_listener *listener, void *data) {
 static void xwl_set_geometry(struct wl_listener *listener, void *data) {
     struct woodland_view *view = wl_container_of(listener, view, set_geometry);
     /* 位置由 WM 决定；尺寸变化后同步 SSD（客户端自己 resize 的情况） */
+    xwl_rescale_view(view);
     if (view->mapped) {
         woodland_ssd_update(view);
     }
@@ -795,6 +1004,178 @@ static void xwl_new_surface(struct wl_listener *listener, void *data) {
 
     xwl_new_view(server, xsurface);
 }
+struct woodland_xwl_xsettings {
+    xcb_connection_t *conn;
+    xcb_window_t window;
+    xcb_atom_t selection_atom;
+    xcb_atom_t settings_atom;
+    xcb_atom_t manager_atom;
+    uint32_t serial;
+    struct woodland_xsettings_values last;
+    int last_dpi;
+};
+
+static bool xwl_resolve_xsettings_atoms(const char *display_name, xcb_atom_t *sel,
+                                        xcb_atom_t *settings, xcb_atom_t *mgr) {
+    *sel = XCB_ATOM_NONE;
+    *settings = XCB_ATOM_NONE;
+    *mgr = XCB_ATOM_NONE;
+    if (!display_name) {
+        return false;
+    }
+    /* 用独立短连接同步取 atom，避免在 XWM 连接上等 reply 时把事件读空 */
+    xcb_connection_t *c = xcb_connect(display_name, NULL);
+    if (!c || xcb_connection_has_error(c) != 0) {
+        if (c) {
+            xcb_disconnect(c);
+        }
+        return false;
+    }
+    static const char *const names[3] = {"_XSETTINGS_S0", "_XSETTINGS_SETTINGS", "MANAGER"};
+    xcb_intern_atom_cookie_t cookies[3];
+    for (int i = 0; i < 3; i++) {
+        cookies[i] = xcb_intern_atom(c, 0, (uint16_t)strlen(names[i]), names[i]);
+    }
+    xcb_atom_t resolved[3] = {XCB_ATOM_NONE, XCB_ATOM_NONE, XCB_ATOM_NONE};
+    for (int i = 0; i < 3; i++) {
+        xcb_intern_atom_reply_t *reply = xcb_intern_atom_reply(c, cookies[i], NULL);
+        if (reply) {
+            resolved[i] = reply->atom;
+            free(reply);
+        }
+    }
+    xcb_disconnect(c);
+    *sel = resolved[0];
+    *settings = resolved[1];
+    *mgr = resolved[2];
+    return *sel != XCB_ATOM_NONE && *settings != XCB_ATOM_NONE && *mgr != XCB_ATOM_NONE;
+}
+
+static void xwl_publish_xsettings(struct woodland_server *server) {
+    if (!server || !server->xwayland || !server->xwl_xsettings) {
+        return;
+    }
+    if (server->config && !server->config->xwayland.xsettings) {
+        return;
+    }
+    struct woodland_xwl_xsettings *xs = server->xwl_xsettings;
+    xcb_connection_t *conn = wlr_xwayland_get_xwm_connection(server->xwayland);
+    if (!conn || conn != xs->conn || xcb_connection_has_error(conn) != 0) {
+        return;
+    }
+
+    double scale = server->xwl_map.scale > 1.0 ? server->xwl_map.scale : 1.0;
+    const char *cursor_theme = NULL;
+    int cursor_size = 24;
+    if (server->xcursor_manager) {
+        cursor_theme = server->xcursor_manager->name;
+        if (server->xcursor_manager->size > 0) {
+            cursor_size = (int)server->xcursor_manager->size;
+        }
+    } else if (server->config) {
+        cursor_theme = server->config->cursor.theme;
+        if (server->config->cursor.size > 0) {
+            cursor_size = server->config->cursor.size;
+        }
+    }
+
+    bool flushed_needed = false;
+    if (xs->window != XCB_NONE && xs->settings_atom != XCB_ATOM_NONE) {
+        struct woodland_xsettings_values values;
+        woodland_xsettings_for(scale, cursor_theme, cursor_size, &values);
+        if (xs->serial == 0 || memcmp(&values, &xs->last, sizeof(values)) != 0) {
+            uint8_t buf[512];
+            uint32_t next_serial = xs->serial + 1;
+            size_t len = woodland_xsettings_encode(next_serial, &values, buf, sizeof(buf));
+            if (len > 0) {
+                xs->serial = next_serial;
+                xs->last = values;
+                xcb_change_property(conn, XCB_PROP_MODE_REPLACE, xs->window,
+                                    xs->settings_atom, xs->settings_atom, 8,
+                                    (uint32_t)len, buf);
+                flushed_needed = true;
+            }
+        }
+    }
+
+    int dpi = (int)lround(96.0 * scale);
+    if (dpi != xs->last_dpi) {
+        xcb_screen_iterator_t screens = xcb_setup_roots_iterator(xcb_get_setup(conn));
+        if (screens.rem != 0) {
+            char res[64];
+            int n = snprintf(res, sizeof(res), "Xft.dpi:\t%d\n", dpi);
+            if (n > 0) {
+                xcb_change_property(conn, XCB_PROP_MODE_REPLACE, screens.data->root,
+                                    XCB_ATOM_RESOURCE_MANAGER, XCB_ATOM_STRING, 8,
+                                    (uint32_t)n, res);
+                xs->last_dpi = dpi;
+                flushed_needed = true;
+            }
+        }
+    }
+
+    if (flushed_needed) {
+        xcb_flush(conn);
+    }
+}
+
+static void xwl_start_xsettings(struct woodland_server *server) {
+    if (!server || !server->xwayland) {
+        return;
+    }
+    if (server->config && !server->config->xwayland.xsettings) {
+        return;
+    }
+    xcb_connection_t *conn = wlr_xwayland_get_xwm_connection(server->xwayland);
+    if (!conn || xcb_connection_has_error(conn) != 0) {
+        return;
+    }
+    xcb_screen_iterator_t screens = xcb_setup_roots_iterator(xcb_get_setup(conn));
+    if (screens.rem == 0) {
+        return;
+    }
+    if (!server->xwl_xsettings) {
+        server->xwl_xsettings = calloc(1, sizeof(*server->xwl_xsettings));
+        if (!server->xwl_xsettings) {
+            return;
+        }
+    } else {
+        memset(server->xwl_xsettings, 0, sizeof(*server->xwl_xsettings));
+    }
+    struct woodland_xwl_xsettings *xs = server->xwl_xsettings;
+    xs->conn = conn;
+    xs->window = XCB_NONE;
+
+    xcb_atom_t sel = XCB_ATOM_NONE, settings = XCB_ATOM_NONE, mgr = XCB_ATOM_NONE;
+    if (!xwl_resolve_xsettings_atoms(server->xwayland->display_name, &sel, &settings, &mgr)) {
+        wlr_log(WLR_INFO, "xwayland: XSETTINGS atoms unavailable, falling back to RESOURCE_MANAGER");
+        xwl_publish_xsettings(server);
+        return;
+    }
+
+    xcb_window_t root = screens.data->root;
+    xs->selection_atom = sel;
+    xs->settings_atom = settings;
+    xs->manager_atom = mgr;
+    xs->window = xcb_generate_id(conn);
+    xcb_create_window(conn, 0, xs->window, root, -1, -1, 1, 1, 0,
+                      XCB_WINDOW_CLASS_INPUT_ONLY, XCB_COPY_FROM_PARENT, 0, NULL);
+    /* 先写属性再宣称 selection 所有权，收到 MANAGER 的客户端立即就能读到 */
+    xwl_publish_xsettings(server);
+    xcb_set_selection_owner(conn, xs->window, sel, XCB_CURRENT_TIME);
+
+    xcb_client_message_event_t msg = {0};
+    msg.response_type = XCB_CLIENT_MESSAGE;
+    msg.format = 32;
+    msg.window = root;
+    msg.type = mgr;
+    msg.data.data32[0] = XCB_CURRENT_TIME;
+    msg.data.data32[1] = sel;
+    msg.data.data32[2] = xs->window;
+    xcb_send_event(conn, 0, root, XCB_EVENT_MASK_STRUCTURE_NOTIFY, (const char *)&msg);
+    xcb_flush(conn);
+}
+
 void woodland_xwayland_view_update_scale_filter(struct woodland_view *view) {
     if (!view || view->type != WOODLAND_VIEW_XWAYLAND || !view->scene_surface) {
         return;
@@ -805,15 +1186,93 @@ void woodland_xwayland_view_update_scale_filter(struct woodland_view *view) {
     if (view->scene_surface->buffer && view->scene_surface->buffer->filter_mode != mode) {
         wlr_scene_buffer_set_filter_mode(view->scene_surface->buffer, mode);
     }
+    /* 视图换了输出（缩放不同）时显示尺寸要跟着变，并同步 SSD / 特效外框 */
+    if (xwl_rescale_view(view) && view->mapped) {
+        if (view->ssd) {
+            woodland_ssd_update(view);
+        } else {
+            woodland_effect_update(view);
+        }
+    }
+    /* 拖动结束或 wctl move 挪动窗口后，把最终布局坐标同步给 X11 侧，
+     * 防止应用内右键菜单 / 下拉列表仍按旧位置弹出。 */
+    if (view->mapped && view->server && !view->server->grabbed_view &&
+        view->xwayland_surface && view->xwayland_surface->xwm && view->scene_tree) {
+        int xx = view->scene_tree->node.x;
+        int xy = view->scene_tree->node.y;
+        struct woodland_xwl_region region;
+        if (woodland_xwl_view_region(view, &region)) {
+            xx = woodland_xwl_to_x(&region, xx);
+            xy = woodland_xwl_to_y(&region, xy);
+        }
+        if (xx < INT16_MIN) {
+            xx = INT16_MIN;
+        } else if (xx > INT16_MAX) {
+            xx = INT16_MAX;
+        }
+        if (xy < INT16_MIN) {
+            xy = INT16_MIN;
+        } else if (xy > INT16_MAX) {
+            xy = INT16_MAX;
+        }
+        if (xx != view->xwayland_surface->x || xy != view->xwayland_surface->y) {
+            wlr_xwayland_surface_configure(view->xwayland_surface,
+                                           (int16_t)xx, (int16_t)xy,
+                                           view->xwayland_surface->width,
+                                           view->xwayland_surface->height);
+            woodland_xwayland_flush(view->server);
+        }
+    }
+}
+
+/*
+ * 输出布局 / 缩放变了：重算 X 屏幕并告诉 Xwayland，再把窗口摆回对应位置。
+ * 逻辑尺寸在这一刻是真值（用户眼里的窗口大小没变），X 尺寸才该跟着变，
+ * 所以受管理视图用当前显示尺寸（上一次缩放后的逻辑尺寸）重新 configure。
+ */
+static void xwl_remap_windows(struct woodland_server *server) {
+    struct woodland_view *view;
+    wl_list_for_each(view, &server->views, link) {
+        if (view->type != WOODLAND_VIEW_XWAYLAND || !view->xwayland_surface ||
+            !view->scene_surface || !view->scene_surface->buffer) {
+            continue;
+        }
+        int width = view->scene_surface->buffer->dst_width;
+        int height = view->scene_surface->buffer->dst_height;
+        if (width <= 0 || height <= 0) {
+            continue;
+        }
+        woodland_view_request_size(view, width, height);
+    }
+    woodland_xwayland_flush(server);
 }
 
 void woodland_xwayland_refresh_unmanaged_filters(struct woodland_server *server) {
-    if (!server || !server->xwayland_unmanaged.next) {
+    if (!server) {
+        return;
+    }
+    if (server->xwl_outputs && woodland_xwl_outputs_update(server) && server->views.next) {
+        xwl_remap_windows(server);
+    }
+    if (server->xwayland && wlr_xwayland_get_xwm_connection(server->xwayland)) {
+        if (!server->config || server->config->xwayland.xsettings) {
+            if (!server->xwl_xsettings) {
+                xwl_start_xsettings(server);
+            } else {
+                xwl_publish_xsettings(server);
+            }
+        }
+    }
+    if (!server->xwayland_unmanaged.next) {
         return;
     }
     struct woodland_unmanaged *u;
     wl_list_for_each(u, &server->xwayland_unmanaged, link) {
-        unmanaged_update_filter_mode(u);
+        if (xwl_native(server)) {
+            unmanaged_set_geometry(u);
+        } else {
+            unmanaged_update_filter_mode(u);
+        }
     }
 }
 
@@ -834,6 +1293,7 @@ void woodland_xwayland_update_cursor(struct woodland_server *server) {
                                     image->hotspot_x, image->hotspot_y);
         }
     }
+    xwl_publish_xsettings(server);
 }
 
 static void spawn_script_async(const char *path) {
@@ -924,6 +1384,8 @@ static void xwl_ready(struct wl_listener *listener, void *data) {
         wl_container_of(listener, server, xwayland_ready);
     wlr_log(WLR_INFO, "xwayland ready on DISPLAY=%s",
             server->xwayland ? server->xwayland->display_name : "(null)");
+    /* 先于 xinitrc 发布 XSETTINGS / Xft.dpi，让用户 xinitrc 中的 xrdb 有机会覆盖 */
+    xwl_start_xsettings(server);
     run_xinitrc();
     woodland_xwayland_update_cursor(server);
     (void)data;
@@ -932,13 +1394,17 @@ static bool xwl_global_filter(const struct wl_client *client,
                               const struct wl_global *global,
                               void *data) {
     struct woodland_server *server = data;
+    struct wl_client *xwayland_client = (server && server->xwayland && server->xwayland->server)
+        ? server->xwayland->server->client
+        : NULL;
+    /* native_resolution：Xwayland 只看专用 xdg-output，其余客户端只看 wlroots 的 */
+    if (!woodland_xwl_outputs_advertise(server, client, global, xwayland_client)) {
+        return false;
+    }
     const struct wl_interface *iface = wl_global_get_interface(global);
     if (!iface || !iface->name || strcmp(iface->name, "xwayland_shell_v1") != 0) {
         return true;
     }
-    struct wl_client *xwayland_client = (server && server->xwayland && server->xwayland->server)
-        ? server->xwayland->server->client
-        : NULL;
     return client == xwayland_client;
 }
 
@@ -961,6 +1427,19 @@ bool woodland_xwayland_init(struct woodland_server *server) {
     }
     if (server->seat) {
         wlr_xwayland_set_seat(server->xwayland, server->seat);
+    }
+
+    /* 原生分辨率：无条件建专用 xdg-output global（server->config 在 server_init
+     * 末尾才加载，这里若读不到配置先按默认 true 建好；稍后 cfg_apply 再同步开关）。 */
+    memset(&server->xwl_map, 0, sizeof(server->xwl_map));
+    server->xwl_map.scale = 1.0;
+    server->xwl_map.enabled = !server->config || server->config->xwayland.native_resolution;
+    server->xwl_outputs = woodland_xwl_outputs_create(server);
+    if (!server->xwl_outputs) {
+        wlr_log(WLR_ERROR, "xwayland: native_resolution unavailable, using logical size");
+        server->xwl_map.enabled = false;
+    } else if (server->xwl_map.enabled) {
+        wlr_log(WLR_INFO, "xwayland: native_resolution enabled");
     }
 
     server->xwayland_unmanaged_tree =
@@ -988,6 +1467,11 @@ void woodland_xwayland_finish(struct woodland_server *server) {
         return;
     }
     woodland_global_filter_remove(server->display, "xwayland_shell");
+    woodland_xwl_outputs_destroy(server->xwl_outputs);
+    server->xwl_outputs = NULL;
+    free(server->xwl_xsettings);
+    server->xwl_xsettings = NULL;
+    server->xwl_map.enabled = false;
     wl_list_remove(&server->new_xwayland_surface.link);
     wl_list_remove(&server->xwayland_ready.link);
     server->xwayland_cursor_hook = NULL;
@@ -1052,9 +1536,27 @@ bool woodland_xwayland_move_by_wid(struct woodland_server *server, uint32_t wid,
         }
         /* 协议只改位置：宽高用 X11 窗口自己的几何，别用 content_box——
          * 带 SSD / transform 时两者不等，会附带触发一次 resize。 */
+        int xx = x, xy = y;
+        if (xwl_native(server)) {
+            struct woodland_output *wo = woodland_output_at(server, x, y);
+            struct woodland_xwl_region region;
+            woodland_xwl_map_region(&server->xwl_map, wo ? wo->wlr_output : NULL, x, y, &region);
+            xx = woodland_xwl_to_x(&region, x);
+            xy = woodland_xwl_to_y(&region, y);
+        }
+        if (xx < INT16_MIN || xx > INT16_MAX || xy < INT16_MIN || xy > INT16_MAX) {
+            wlr_log(WLR_DEBUG, "xwindow-control: scaled target (%d,%d) outside X11 int16 range",
+                    xx, xy);
+            return false;
+        }
         wlr_scene_node_set_position(&view->scene_tree->node, x, y);
-        wlr_xwayland_surface_configure(xsurface, (int16_t)x, (int16_t)y,
-                                       xsurface->width, xsurface->height);
+        if (xsurface->xwm) {
+            wlr_xwayland_surface_configure(xsurface, (int16_t)xx, (int16_t)xy,
+                                           xsurface->width, xsurface->height);
+        } else {
+            xsurface->x = (int16_t)xx;
+            xsurface->y = (int16_t)xy;
+        }
         view->placed = true;
         woodland_view_update_outputs(view);
         woodland_xwayland_flush(server);
@@ -1074,9 +1576,31 @@ bool woodland_xwayland_move_by_wid(struct woodland_server *server, uint32_t wid,
             wlr_log(WLR_DEBUG, "xwindow-control: wid=%u exists but is not mapped", wid);
             return false;
         }
+        int xx = x, xy = y;
+        struct woodland_xwl_region region;
+        bool native = xwl_native(server);
+        if (native) {
+            struct woodland_output *wo = woodland_output_at(server, x, y);
+            woodland_xwl_map_region(&server->xwl_map, wo ? wo->wlr_output : NULL, x, y, &region);
+            xx = woodland_xwl_to_x(&region, x);
+            xy = woodland_xwl_to_y(&region, y);
+        }
+        if (xx < INT16_MIN || xx > INT16_MAX || xy < INT16_MIN || xy > INT16_MAX) {
+            wlr_log(WLR_DEBUG, "xwindow-control: scaled target (%d,%d) outside X11 int16 range",
+                    xx, xy);
+            return false;
+        }
         wlr_scene_node_set_position(&u->scene_tree->node, x, y);
-        wlr_xwayland_surface_configure(xsurface, (int16_t)x, (int16_t)y,
-                                       xsurface->width, xsurface->height);
+        if (native) {
+            xwl_rescale_surface(u->scene_surface, &region);
+        }
+        if (xsurface->xwm) {
+            wlr_xwayland_surface_configure(xsurface, (int16_t)xx, (int16_t)xy,
+                                           xsurface->width, xsurface->height);
+        } else {
+            xsurface->x = (int16_t)xx;
+            xsurface->y = (int16_t)xy;
+        }
         woodland_xwayland_flush(server);
         if (unmanaged) {
             *unmanaged = true;

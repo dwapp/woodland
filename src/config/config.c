@@ -130,6 +130,8 @@ void woodland_config_default_init(struct woodland_config *config)
 
     /* [xwayland] */
     config->xwayland.scale_filter = WOODLAND_SCALE_FILTER_SMART;
+    config->xwayland.native_resolution = true;
+    config->xwayland.xsettings = true;
 
     /* [[output]] */
     wl_list_init(&config->output_rules);
@@ -455,6 +457,10 @@ struct woodland_config *woodland_config_parse_string(const char *content, size_t
     /* 7. [xwayland] */
     const struct toml_table *xwl = toml_find_table(doc, "xwayland");
     if (xwl) {
+        cfg->xwayland.native_resolution =
+            toml_get_bool(xwl, "native_resolution", cfg->xwayland.native_resolution);
+        cfg->xwayland.xsettings =
+            toml_get_bool(xwl, "xsettings", cfg->xwayland.xsettings);
         const char *filter = toml_get_string(xwl, "scale_filter", NULL);
         if (filter) {
             if (strcmp(filter, "nearest") == 0) {
@@ -714,6 +720,8 @@ void woodland_config_dump_json(const struct woodland_config *config, struct wood
         sf_str = "linear";
     }
     woodland_json_obj_str(&xo, "scale_filter", sf_str);
+    woodland_json_obj_bool(&xo, "native_resolution", config->xwayland.native_resolution);
+    woodland_json_obj_bool(&xo, "xsettings", config->xwayland.xsettings);
     woodland_json_obj_close(&xo);
 
 

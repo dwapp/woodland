@@ -472,7 +472,9 @@ bool woodland_output_init(struct woodland_server *server)
 
     /* xdg-output：客户端（grim 等截图工具）靠它拿输出的布局位置与逻辑尺寸，
      * 否则只能按 wl_output 的物理模式猜，区域截图会算错。 */
-    if (!wlr_xdg_output_manager_v1_create(server->display, server->output_layout)) {
+    server->xdg_output_manager =
+        wlr_xdg_output_manager_v1_create(server->display, server->output_layout);
+    if (!server->xdg_output_manager) {
         wlr_log(WLR_ERROR, "failed to create xdg-output manager");
         return false;
     }

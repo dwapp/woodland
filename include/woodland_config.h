@@ -160,6 +160,11 @@ enum woodland_scale_filter {
 
 struct woodland_config_xwayland {
     enum woodland_scale_filter scale_filter;
+    /* X11 客户端看到输出的物理分辨率（而非逻辑分辨率），缩放输出上画面不再被
+     * 放大发糊，游戏也能选到真实分辨率。 */
+    bool native_resolution;
+    /* 通过 XSETTINGS（Gdk/WindowScalingFactor、Xft/DPI 等）与 Xft.dpi 通知 X11 应用缩放。 */
+    bool xsettings;
 };
 
 struct woodland_config {

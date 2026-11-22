@@ -27,8 +27,12 @@
 #include "dnd.h"
 #include "ssd.h"
 #include "view.h"
+#include "xwayland_scale.h"
 
 struct wlr_xwayland;
+struct wlr_xdg_output_manager_v1;
+struct woodland_xwl_outputs;
+struct woodland_xwl_xsettings;
 struct wlr_compositor;
 struct wlr_keyboard;
 /* wlr_session 只在 server 里存指针，模块要用它的字段时再各自 include */
@@ -325,6 +329,12 @@ struct woodland_server {
     /* Xwayland（src/xwayland） */
     struct wlr_compositor *compositor; // wlr_xwayland_create 需要
     struct wlr_xwayland *xwayland;
+    /* Xwayland 原生分辨率（[xwayland] native_resolution）：X 坐标映射表，
+     * 只给 Xwayland 看的 xdg-output global，以及 XSETTINGS 状态 */
+    struct woodland_xwl_map xwl_map;
+    struct woodland_xwl_outputs *xwl_outputs;
+    struct woodland_xwl_xsettings *xwl_xsettings;
+    struct wlr_xdg_output_manager_v1 *xdg_output_manager; // 其余客户端用的那个
     struct wl_list xwayland_unmanaged;              // override-redirect 窗口链表头
     struct wlr_scene_tree *xwayland_unmanaged_tree; // 浮在普通视图之上
     struct wl_listener new_xwayland_surface;

@@ -459,6 +459,9 @@ void woodland_cursor_reset_mode(struct woodland_server *server)
     server->grab_context.active = false;
     server->grab_context.view = NULL;
     if (moved_view) {
+        if (moved_view->type == WOODLAND_VIEW_XWAYLAND && server->xwayland_scale_filter_hook) {
+            server->xwayland_scale_filter_hook(moved_view);
+        }
         woodland_signal_emit(&server->view_changed, moved_view);
     }
 }
