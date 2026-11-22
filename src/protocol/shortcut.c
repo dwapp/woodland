@@ -726,6 +726,9 @@ static enum shortcut_outcome shortcut_run_action(struct woodland_proto_shortcut 
                 woodland_window_menu_hide(server);
                 break;
             }
+            if (!woodland_view_is_floating(view)) {
+                break;
+            }
             struct wlr_box content = {0};
             woodland_view_content_box(view, &content);
             struct woodland_ssd_margins margins = {0};
