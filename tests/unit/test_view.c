@@ -5,7 +5,9 @@
 #include "woodland.h"
 #include "woodland_config.h"
 #include "xwayland.h"
+#include "xwayland_scale.h"
 #include <assert.h>
+#include <math.h>
 #include <string.h>
 #include "placement.h"
 #include "util/json.h"
@@ -33,6 +35,241 @@ static void mock_test_restack_hook(struct woodland_view *v) {
     mock_restack_calls++;
 }
 #endif
+
+static struct wlr_output *add_scaled_headless(struct wlr_backend *backend,
+                                              struct wlr_output_layout *layout,
+                                              int width, int height, float scale,
+                                              int x, int y)
+{
+    struct wlr_output *o = wlr_headless_add_output(backend, width, height);
+    assert(o != NULL);
+    struct wlr_output_state state;
+    wlr_output_state_init(&state);
+    wlr_output_state_set_enabled(&state, true);
+    wlr_output_state_set_custom_mode(&state, width, height, 0);
+    wlr_output_state_set_scale(&state, scale);
+    assert(wlr_output_commit_state(o, &state));
+    wlr_output_state_finish(&state);
+    assert(wlr_output_layout_add(layout, o, x, y) != NULL);
+    return o;
+}
+
+static void test_xwayland_native_resolution_and_xsettings(void)
+{
+    /* 1. 多输出混合缩放映射（参考 Umbriel xwayland_outputs.cpp）：
+     *    - 3840x2160@1.25 在 (0, 0)
+     *    - 2560x1440@1.0  在 (1300, -1440)（使布局原点高于主输出）
+     *    - 1920x1080@1.0  在 (3072, 0) */
+    struct wl_display *disp = wl_display_create();
+    assert(disp != NULL);
+    struct wl_event_loop *loop = wl_display_get_event_loop(disp);
+    struct wlr_backend *backend = wlr_headless_backend_create(loop);
+    assert(backend != NULL);
+    struct wlr_output_layout *layout = wlr_output_layout_create(disp);
+    assert(layout != NULL);
+
+    struct wlr_output *o0 = add_scaled_headless(backend, layout, 3840, 2160, 1.25f, 0, 0);
+    struct wlr_output *o1 = add_scaled_headless(backend, layout, 2560, 1440, 1.0f, 1300, -1440);
+    struct wlr_output *o2 = add_scaled_headless(backend, layout, 1920, 1080, 1.0f, 3072, 0);
+
+    /* 1a. native_resolution = false：X 屏幕就是平移到 (0,0) 的逻辑布局 */
+    struct woodland_xwl_map logical_map = {.enabled = false};
+    assert(woodland_xwl_map_update(&logical_map, layout));
+    struct woodland_xwl_region r_log = {0};
+    woodland_xwl_map_region(&logical_map, o0, 0, 0, &r_log);
+    assert(r_log.x.x == 0);
+    assert(r_log.x.y == 1440);
+    assert(r_log.x.width == 3072);
+    assert(r_log.x.height == 1728);
+    assert(woodland_xwl_to_x(&r_log, 100) == 100);
+    assert(woodland_xwl_to_y(&r_log, 100) == 1540);
+    assert(woodland_xwl_to_x_width(&r_log, 640) == 640);
+
+    /* 1b. native_resolution = true：输出按物理尺寸，间距按最大缩放放大且互不重叠 */
+    struct woodland_xwl_map native_map = {.enabled = true};
+    assert(woodland_xwl_map_update(&native_map, layout));
+    assert(native_map.scale == 1.25);
+
+    struct wlr_box boxes[3] = {
+        woodland_xwl_map_x_box(&native_map, o0),
+        woodland_xwl_map_x_box(&native_map, o1),
+        woodland_xwl_map_x_box(&native_map, o2),
+    };
+    assert(boxes[0].width == 3840 && boxes[0].height == 2160);
+    assert(boxes[1].width == 2560 && boxes[1].height == 1440);
+    assert(boxes[2].width == 1920 && boxes[2].height == 1080);
+    assert(boxes[2].x == boxes[0].x + boxes[0].width);
+    assert(boxes[2].y == boxes[0].y);
+    assert(boxes[1].y + boxes[1].height <= boxes[0].y);
+    for (int i = 0; i < 3; i++) {
+        for (int j = i + 1; j < 3; j++) {
+            struct wlr_box overlap;
+            assert(!wlr_box_intersection(&overlap, &boxes[i], &boxes[j]));
+        }
+    }
+
+    /* 双向换算与 region_at_x */
+    struct woodland_xwl_region main_r = {0};
+    woodland_xwl_map_region(&native_map, o0, 0, 0, &main_r);
+    assert(main_r.scale == 1.25);
+    assert(woodland_xwl_to_x(&main_r, 800) == main_r.x.x + 1000);
+    assert(woodland_xwl_to_layout_x(&main_r, main_r.x.x + 1000) == 800);
+    assert(woodland_xwl_to_x_width(&main_r, 1000) == 1250);
+    assert(woodland_xwl_to_layout_height(&main_r, 1250) == 1000);
+
+    struct woodland_xwl_region at_r = {0};
+    woodland_xwl_map_region_at_x(&native_map, main_r.x.x + 10, main_r.x.y + 10, &at_r);
+    assert(at_r.scale == 1.25);
+    struct woodland_xwl_region right_r = {0};
+    woodland_xwl_map_region(&native_map, o2, 0, 0, &right_r);
+    woodland_xwl_map_region_at_x(&native_map, right_r.x.x + 10, right_r.x.y + 10, &at_r);
+    assert(at_r.scale == 1.0);
+
+    wlr_output_layout_destroy(layout);
+    wlr_backend_destroy(backend);
+    wl_display_destroy(disp);
+
+    /* 2. 1.5x 分数缩放整屏精确映射（避免 2560/1.5 取整后丢 1px） */
+    disp = wl_display_create();
+    assert(disp != NULL);
+    loop = wl_display_get_event_loop(disp);
+    backend = wlr_headless_backend_create(loop);
+    assert(backend != NULL);
+    layout = wlr_output_layout_create(disp);
+    assert(layout != NULL);
+
+    struct wlr_output *o_frac = add_scaled_headless(backend, layout, 2560, 1440, 1.5f, 0, 0);
+    struct woodland_xwl_map frac_map = {.enabled = true};
+    assert(woodland_xwl_map_update(&frac_map, layout));
+    struct woodland_xwl_region frac_r = {0};
+    woodland_xwl_map_region(&frac_map, o_frac, 0, 0, &frac_r);
+    assert(woodland_xwl_to_x_width(&frac_r, frac_r.layout.width) == 2560);
+    assert(woodland_xwl_to_x_height(&frac_r, frac_r.layout.height) == 1440);
+    assert(woodland_xwl_to_layout_width(&frac_r, 2560) == frac_r.layout.width);
+    assert(woodland_xwl_to_layout_height(&frac_r, 1440) == frac_r.layout.height);
+
+#if WOODLAND_HAVE_XWAYLAND
+    /* 3. 视图层换算：无递归、content_box / request_size / size_limits / outer_box / output_for_view */
+    struct woodland_server xsrv = {0};
+    xsrv.display = disp;
+    xsrv.event_loop = loop;
+    xsrv.backend = backend;
+    xsrv.output_layout = layout;
+    xsrv.scene = wlr_scene_create();
+    assert(xsrv.scene != NULL);
+    wl_list_init(&xsrv.outputs);
+    wl_list_init(&xsrv.views);
+
+    struct wlr_output_state st_125;
+    wlr_output_state_init(&st_125);
+    wlr_output_state_set_scale(&st_125, 1.25f);
+    assert(wlr_output_commit_state(o_frac, &st_125));
+    wlr_output_state_finish(&st_125);
+
+    struct woodland_output wo_125 = {
+        .server = &xsrv,
+        .id_bit = 1,
+        .wlr_output = o_frac,
+    };
+    wl_list_insert(&xsrv.outputs, &wo_125.link);
+    xsrv.xwl_map.enabled = true;
+    assert(woodland_xwl_map_update(&xsrv.xwl_map, layout));
+
+    xcb_size_hints_t hints = {
+        .flags = XCB_ICCCM_SIZE_HINT_P_MIN_SIZE | XCB_ICCCM_SIZE_HINT_P_MAX_SIZE,
+        .min_width = 500,
+        .min_height = 250,
+        .max_width = 2560,
+        .max_height = 1440,
+    };
+    struct wlr_xwayland_surface xs = {
+        .x = 125,
+        .y = 250,
+        .width = 2560,
+        .height = 1440,
+        .decorations = WLR_XWAYLAND_SURFACE_DECORATIONS_NO_BORDER |
+                       WLR_XWAYLAND_SURFACE_DECORATIONS_NO_TITLE,
+        .size_hints = &hints,
+    };
+    struct woodland_view xv = {
+        .server = &xsrv,
+        .id = 42,
+        .type = WOODLAND_VIEW_XWAYLAND,
+        .xwayland_surface = &xs,
+        .scene_tree = wlr_scene_tree_create(&xsrv.scene->tree),
+        .deco_csd = true,
+        .placed = false,
+    };
+    wlr_scene_node_set_position(&xv.scene_tree->node, 100, 200);
+
+    /* 未放置阶段 & 已放置阶段调用 content_box / outer_box / output_for_view 均不递归 */
+    struct wlr_box cbox = {0};
+    woodland_view_content_box(&xv, &cbox);
+    assert(cbox.width == 2048 && cbox.height == 1152);
+
+    xv.placed = true;
+    woodland_view_content_box(&xv, &cbox);
+    assert(cbox.width == 2048 && cbox.height == 1152);
+
+    struct wlr_box obox = {0};
+    woodland_view_outer_box(&xv, &obox);
+    assert(obox.x == 100 && obox.y == 200);
+    assert(obox.width == 2048 && obox.height == 1152);
+    assert(woodland_output_for_view(&xv) == &wo_125);
+
+    int min_w = 0, min_h = 0, max_w = 0, max_h = 0;
+    woodland_view_size_limits(&xv, &min_w, &min_h, &max_w, &max_h);
+    assert(min_w == 400 && min_h == 200);
+    assert(max_w == 2048 && max_h == 1152);
+
+    /* request_size(逻辑尺寸) -> X11 像素尺寸 */
+    woodland_view_request_size(&xv, 1000, 800);
+    assert(xs.x == 125 && xs.y == 250);
+    assert(xs.width == 1250 && xs.height == 1000);
+    woodland_view_request_size(&xv, 2048, 1152);
+    assert(xs.width == 2560 && xs.height == 1440);
+
+    wlr_scene_node_destroy(&xv.scene_tree->node);
+    wlr_scene_node_destroy(&xsrv.scene->tree.node);
+#endif
+
+    wlr_output_layout_destroy(layout);
+    wlr_backend_destroy(backend);
+    wl_display_destroy(disp);
+
+    /* 4. XSETTINGS 计算与二进制编码校验 */
+    struct woodland_xsettings_values v1, v125, v2;
+    woodland_xsettings_for(1.0, "", 24, &v1);
+    assert(v1.window_scaling_factor == 1);
+    assert(v1.xft_dpi == (int32_t)lround(96.0 * 1024.0));
+    assert(v1.unscaled_dpi == v1.xft_dpi);
+    assert(v1.cursor_size == 24);
+    assert(v1.cursor_theme[0] == '\0');
+
+    woodland_xsettings_for(1.25, "Adwaita", 24, &v125);
+    assert(v125.window_scaling_factor == 1);
+    assert(v125.xft_dpi == (int32_t)lround(96.0 * 1024.0 * 1.25));
+    assert(v125.unscaled_dpi == v125.xft_dpi);
+    assert(v125.cursor_size == 30);
+    assert(strcmp(v125.cursor_theme, "Adwaita") == 0);
+
+    woodland_xsettings_for(2.0, "breeze", 24, &v2);
+    assert(v2.window_scaling_factor == 2);
+    assert(v2.xft_dpi == (int32_t)lround(96.0 * 1024.0 * 2.0));
+    assert(v2.unscaled_dpi == (int32_t)lround(96.0 * 1024.0));
+    assert(v2.cursor_size == 48);
+
+    uint8_t buf[512];
+    size_t len4 = woodland_xsettings_encode(1, &v1, buf, sizeof(buf));
+    assert(len4 == 128);
+    assert(buf[0] == 0 && buf[4] == 1 && buf[8] == 4);
+
+    size_t len5 = woodland_xsettings_encode(2, &v125, buf, sizeof(buf));
+    assert(len5 == 168);
+    assert(buf[0] == 0 && buf[4] == 2 && buf[8] == 5);
+    /* 容量不足时安全返回 0 */
+    assert(woodland_xsettings_encode(1, &v1, buf, 16) == 0);
+}
 
 
 int main(void)
@@ -823,5 +1060,7 @@ int main(void)
     server.backend = NULL;
     wl_display_destroy(server.display);
     server.display = NULL;
+
+    test_xwayland_native_resolution_and_xsettings();
     return 0;
 }

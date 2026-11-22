@@ -178,7 +178,9 @@ void woodland_config_apply(struct woodland_server *server, struct woodland_confi
 
     /* 6. xwayland */
     bool xwl_changed = !old_config ||
-                       (new_config->xwayland.scale_filter != old_config->xwayland.scale_filter);
+                       (new_config->xwayland.scale_filter != old_config->xwayland.scale_filter) ||
+                       (new_config->xwayland.native_resolution != old_config->xwayland.native_resolution) ||
+                       (new_config->xwayland.xsettings != old_config->xwayland.xsettings);
     /* 7. 记入决策轨迹 */
     woodland_trace_add("cfg_apply", 0,
                        "path=%s placement=%s kb_changed=%d ssd_changed=%d fx_changed=%d",
@@ -207,6 +209,10 @@ void woodland_config_apply(struct woodland_server *server, struct woodland_confi
         woodland_protocol_refresh_background_effect(server);
     }
 
+    /* override-redirect 窗口不在 server->views 里，也由它先同步 xwl_map / xwl_outputs */
+    if (xwl_changed && server->xwayland_refresh_hook) {
+        server->xwayland_refresh_hook(server);
+    }
     if (xwl_changed && server->views.next && server->xwayland_scale_filter_hook) {
         struct woodland_view *view;
         wl_list_for_each(view, &server->views, link)
@@ -215,10 +221,6 @@ void woodland_config_apply(struct woodland_server *server, struct woodland_confi
                 server->xwayland_scale_filter_hook(view);
             }
         }
-    }
-    /* override-redirect 窗口不在 server->views 里，上面的循环扫不到它 */
-    if (xwl_changed && server->xwayland_refresh_hook) {
-        server->xwayland_refresh_hook(server);
     }
 
     /*

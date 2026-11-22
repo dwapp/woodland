@@ -72,6 +72,17 @@ static bool state_saw(const struct client_state *state, const char *iface)
     return false;
 }
 
+static size_t state_count(const struct client_state *state, const char *iface)
+{
+    size_t count = 0;
+    for (size_t i = 0; i < state->seen_count; i++) {
+        if (strcmp(state->seen[i], iface) == 0) {
+            count++;
+        }
+    }
+    return count;
+}
+
 static void registry_handle_global(void *data, struct wl_registry *registry,
                                    uint32_t name, const char *interface,
                                    uint32_t version)
@@ -525,8 +536,10 @@ static void test_server_integration(void)
 #if WOODLAND_HAVE_XWAYLAND
     if (xwl_ok) {
         assert(!state_saw(&parent_state, "xwayland_shell_v1"));
+        /* native_resolution 双 xdg-output global 互不泄漏，普通客户端恰好看见 1 次 */
+        assert(state_count(&parent_state, "zxdg_output_manager_v1") == 1);
 
-        /* Xwayland 自身客户端必须能看见 xwayland_shell_v1 */
+        /* Xwayland 自身客户端必须能看见 xwayland_shell_v1 与专用 zxdg_output_manager_v1（恰好 1 次） */
         int xwl_fds[2];
         assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, xwl_fds) == 0);
         struct wl_client *xwl_mock_client = wl_client_create(server.display, xwl_fds[0]);
@@ -543,6 +556,7 @@ static void test_server_integration(void)
         pump_roundtrip(server.event_loop, server.display, xwl_disp);
         assert(state_saw(&xwl_state, "xwayland_shell_v1"));
         assert(state_saw(&xwl_state, "wl_compositor"));
+        assert(state_count(&xwl_state, "zxdg_output_manager_v1") == 1);
 
         server.xwayland->server->client = saved_xwl_client;
         if (xwl_state.sec_ctx_manager) {

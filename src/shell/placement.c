@@ -1035,6 +1035,34 @@ void woodland_view_size_limits(const struct woodland_view *view, int *min_w, int
                 }
             }
         }
+        /* native_resolution：X11 size_hints 是物理像素，转回布局逻辑单位 */
+        struct woodland_xwl_region region;
+        if (woodland_xwl_view_region((struct woodland_view *)view, &region)) {
+            if (*min_w > 0) {
+                *min_w = woodland_xwl_to_layout_width(&region, *min_w);
+                if (*min_w < 1) {
+                    *min_w = 1;
+                }
+            }
+            if (*min_h > 0) {
+                *min_h = woodland_xwl_to_layout_height(&region, *min_h);
+                if (*min_h < 1) {
+                    *min_h = 1;
+                }
+            }
+            if (*max_w > 0) {
+                *max_w = woodland_xwl_to_layout_width(&region, *max_w);
+                if (*max_w < 1) {
+                    *max_w = 1;
+                }
+            }
+            if (*max_h > 0) {
+                *max_h = woodland_xwl_to_layout_height(&region, *max_h);
+                if (*max_h < 1) {
+                    *max_h = 1;
+                }
+            }
+        }
 #endif
     }
 }

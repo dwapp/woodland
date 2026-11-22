@@ -61,6 +61,8 @@ static void test_default_config(void)
     assert(cfg->effects.shadow_offset_y == 4);
     assert(wl_list_empty(&cfg->output_rules));
     assert(cfg->xwayland.scale_filter == WOODLAND_SCALE_FILTER_SMART);
+    assert(cfg->xwayland.native_resolution);
+    assert(cfg->xwayland.xsettings);
 
     woodland_config_destroy(cfg);
 }
@@ -221,10 +223,28 @@ static void test_xwayland_config(void)
     assert(c3 && c3->xwayland.scale_filter == WOODLAND_SCALE_FILTER_BILINEAR);
     woodland_config_destroy(c3);
 
-    const char *toml_nearest = "[xwayland]\nscale_filter = \"nearest\"\n";
+    const char *toml_nearest = "[xwayland]\nscale_filter = \"nearest\"\n"
+                               "native_resolution = false\nxsettings = false\n";
     struct woodland_config *c4 = woodland_config_parse_string(toml_nearest, strlen(toml_nearest), "t4");
     assert(c4 && c4->xwayland.scale_filter == WOODLAND_SCALE_FILTER_NEAREST);
+    assert(!c4->xwayland.native_resolution);
+    assert(!c4->xwayland.xsettings);
+
+    struct woodland_json j;
+    woodland_json_init(&j);
+    woodland_config_dump_json(c4, &j);
+    assert(woodland_json_ok(&j));
+    const char *js = woodland_json_data(&j);
+    assert(strstr(js, "\"native_resolution\":false") != NULL);
+    assert(strstr(js, "\"xsettings\":false") != NULL);
+    woodland_json_finish(&j);
     woodland_config_destroy(c4);
+
+    const char *toml_native = "[xwayland]\nnative_resolution = true\nxsettings = true\n";
+    struct woodland_config *c5 = woodland_config_parse_string(toml_native, strlen(toml_native), "t5");
+    assert(c5 && c5->xwayland.native_resolution);
+    assert(c5->xwayland.xsettings);
+    woodland_config_destroy(c5);
 }
 
 
@@ -339,6 +359,8 @@ static void test_json_dump(void)
     assert(strstr(data, "\"cursor\":") != NULL);
     assert(strstr(data, "\"active_border_color\":") != NULL);
     assert(strstr(data, "\"inactive_border_color\":") != NULL);
+    assert(strstr(data, "\"native_resolution\":true") != NULL);
+    assert(strstr(data, "\"xsettings\":true") != NULL);
     woodland_json_finish(&json);
     woodland_config_destroy(cfg);
 }
