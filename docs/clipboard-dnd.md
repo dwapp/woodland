@@ -400,7 +400,7 @@ wlroots 不桥接（xwm 只处理 X11 内部 Xdnd），labwc 也不桥接。保�
 
 ## 11. 落地记录（2026-11-08 实现）
 
-分支 `feature/clipboard-dnd`（worktree `/home/rewine/woodland-dnd`，基于 `origin/main`）。
+分支 `feature/clipboard-dnd`（worktree `~/woodland-dnd`，基于 `origin/main`）。
 
 ### 11.1 文件
 

@@ -2,7 +2,7 @@
 
 > 日期：2026-11-04  
 > 状态：已实现并合入 `feature/drm-lease-v1`  
-> 参考基线：wlroots 0.20.2、`/home/rewine/labwc`（`src/server.c` / `src/output.c`）
+> 参考基线：wlroots 0.20.2、`reference/labwc`（`src/server.c` / `src/output.c`）
 
 ---
 

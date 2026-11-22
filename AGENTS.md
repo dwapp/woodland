@@ -102,12 +102,22 @@ wctl wait <cond> [key=val...]  # 等待事件/状态/像素就绪（替代脚本
 
 - **主动检索原则**：
   - 在实现新协议（如 treeland 系列）、复杂窗口状态机、SSD 绘制、场景图组织或视觉特效（模糊/圆角/阴影）时，**必须优先主动检索 `reference/` 下的成熟开源实现**，对照其边界处理与状态流转，严禁脱离参考实现凭空臆造。
-- **本地现有参考代码**：
-  - `reference/treeland`（软链接至 `/home/rewine/treeland`）：参考 Treeland 生态私有协议（appearance, wallpaper, shortcut, window-management 等）与 DDE 交互规范。
-  - `reference/labwc`（软链接至 `/home/rewine/labwc`）：参考纯 C + wlroots 合成器单体架构、SSD 边框与标题栏绘制、Scene 场景节点组织、配置管理。
-  - `reference/umbriel`（浅克隆自 `https://github.com/noctalia-dev/umbriel`）：参考基于 scenefx/umbrielfx 的模糊、Popup 继承模糊、圆角阴影裁剪与特效优化细节。
+- **环境通用与多用户原则（严禁假定用户名为 rewine）**：
+  - **严禁硬编码任何绝对家目录路径**（如 `/home/rewine/`）。统一使用环境变量 `$HOME` 或 `~` 进行相对解析与定位。
+- **Git Worktree 场景定位与复用**：
+  - 当在 `git worktree` 下工作时，原仓库通常位于 `~/` 或 `~/work/`，亦可通过 `git rev-parse --path-format=absolute --git-common-dir` 定位主仓根目录。
+  - 若主仓已存在 `reference/` 目录，当前 worktree 应优先复用或软链接主仓的 `reference` 目录（`ln -s "$(git rev-parse --path-format=absolute --git-common-dir)/../reference" reference`），避免重复克隆。
+- **本地参考代码查找与链接（Discovery Order）**：
+  - 寻找本地已有第三方仓库（如 `treeland`、`labwc` 等）时，按如下顺序定位并软链至 `reference/<name>`：
+    1. 当前工作区根目录的 `reference/<name>`
+    2. 主仓库根目录下的 `reference/<name>`
+    3. `~/<name>` 或 `~/work/<name>`（用户本地已有开发目录）
+  - 常用参考库定位示例：
+    - `treeland`（`~/treeland` 或 `~/work/treeland`）：参考 Treeland 生态私有协议（appearance, wallpaper, shortcut, window-management 等）与 DDE 交互规范。
+    - `labwc`（`~/labwc` 或 `~/work/labwc`）：参考纯 C + wlroots 合成器单体架构、SSD 边框与标题栏绘制、Scene 场景节点组织、配置管理。
+    - `umbriel`：参考基于 scenefx/umbrielfx 的模糊、Popup 继承模糊、圆角阴影裁剪与特效优化细节。
 - **按需下载新参考**：
-  - 若任务涉及其他参考（如 sway、wayfire、hyprland 等），智能体应在 `reference/` 下按需执行浅克隆：`git clone --depth=1 <repo_url> reference/<name>`。
+  - 若本地未安装且任务需要参考其他开源项目（如 sway, wayfire, hyprland, umbriel 等），在 `reference/` 下按需执行浅克隆：`git clone --depth=1 <repo_url> reference/<name>`。
 - **代码检索须知**：
   - 因 `reference/` 位于 `.gitignore` 中，使用 `rg` 搜索参考代码时**必须带 `--no-ignore` 或显式指定路径**，例如：`rg --no-ignore <symbol> reference/`。
 
