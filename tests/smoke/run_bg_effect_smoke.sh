@@ -201,6 +201,29 @@ if [ "$EFFECTS" = "true" ]; then
 fi
 stop_probe
 
+echo "== 同一窗口：整窗 → 局部（透明度 mask 解链） =="
+# 这是点击半透明终端触发的真实崩溃路径：窗口先声明整窗模糊（挂上内容 buffer
+# 作为 transparency mask），再改成局部区域（source=NULL，解链旧 mask）。
+# scenefx 0.5 在 source=NULL 时解引用 &NULL->blur，直接 SIGSEGV。
+REBLUR_OUT="$XDG_RUNTIME_DIR/probe.reblur.log"
+"$PROBE" blur 0 0 400 300 reblur 50 40 200 100 --hold 3000 >"$REBLUR_OUT" 2>&1 &
+probe_pid=$!
+i=0
+while [ "$i" -lt 120 ]; do
+    grep -q '^REBLURRED' "$REBLUR_OUT" 2>/dev/null && break
+    if ! kill -0 "$probe_pid" 2>/dev/null; then
+        echo "--- reblur probe output:" >&2
+        cat "$REBLUR_OUT" >&2 || true
+        smoke_fail "probe exited before REBLURRED (reblur)"
+    fi
+    sleep 0.05; i=$((i+1))
+done
+grep -q '^REBLURRED' "$REBLUR_OUT" 2>/dev/null || smoke_fail "probe never re-blurred"
+TREE="$("$WCTL" -s "$SOCK" get_tree)" || smoke_fail "get_tree failed (reblur)"
+expect '.views[0].bg_effect.blur == true' "reblur must stay on"
+expect '.views[0].bg_effect.region == [50, 40, 200, 100]' "reblur must shrink to partial"
+stop_probe
+
 echo "== 越界区域：裁到 surface 尺寸 =="
 scenario oversized blur 0 0 1000 1000
 expect '.views[0].bg_effect.blur == true' "oversized blur must be on"

@@ -1,6 +1,7 @@
 [wrap-git]
 url = https://github.com/wlrfx/scenefx.git
 revision = 0.5
+diff_files = 0001-blur-fix-null-transparency-mask-source.diff
 
 [provide]
 dependency_names = scenefx-0.5

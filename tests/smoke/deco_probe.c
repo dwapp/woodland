@@ -87,6 +87,9 @@ static uint32_t buffer_alpha = 255;
 static int buffer_pattern;
 /* 边缘留多少像素完全不画（模拟 CSD 客户端的阴影预留区：surface 比可视区大） */
 static int buffer_pad;
+/* 同一 surface 上的第二次 blur region（blur-reblur：整窗 → 局部，触发透明度 mask 解链） */
+static int reblur;
+static int reblur_x, reblur_y, reblur_w, reblur_h;
 
 static const struct ext_background_effect_manager_v1_listener bg_listener;
 
@@ -514,6 +517,13 @@ int main(int argc, char *argv[])
             if (buffer_pad > surf_w / 4) {
                 buffer_pad = surf_w / 4;
             }
+        } else if (strcmp(argv[i], "reblur") == 0 && i + 4 < argc) {
+            /* 第二个 blur region：blur-reblur 冒烟用，同一 surface 上重设区域 */
+            reblur = 1;
+            reblur_x = atoi(argv[++i]);
+            reblur_y = atoi(argv[++i]);
+            reblur_w = atoi(argv[++i]);
+            reblur_h = atoi(argv[++i]);
         }
     }
     if (use_layer) {
@@ -562,6 +572,9 @@ int main(int argc, char *argv[])
             pop_blur_y = atoi(argv[++i]);
             pop_blur_w = atoi(argv[++i]);
             pop_blur_h = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "reblur") == 0 && i + 4 < argc) {
+            /* 已在上面预扫描时生效 */
+            i += 4;
         } else if (strcmp(argv[i], "blur") == 0 && i + 4 < argc) {
             /*
              * 背景模糊：不依赖装饰上下文（协议是独立的 surface 扩展），所以
@@ -737,6 +750,21 @@ int main(int argc, char *argv[])
 
     printf("READY\n");
     fflush(stdout);
+
+    /* 第二次 blur region：整窗 → 局部。这正是触发透明度 mask 解链的路径：
+     * blur_apply_internal 对局部区域传 source=NULL 给
+     * wlr_scene_blur_set_transparency_mask_source，scenefx 0.5 会在解链旧 mask
+     * 时解引用 &NULL->blur（上游 bug）。必须再次 commit 才会走 surface_commit。 */
+    if (reblur && bg_effect) {
+        struct wl_region *region = wl_compositor_create_region(compositor);
+        wl_region_add(region, reblur_x, reblur_y, reblur_w, reblur_h);
+        ext_background_effect_surface_v1_set_blur_region(bg_effect, region);
+        wl_region_destroy(region);
+        wl_surface_commit(surface);
+        pump(200);
+        printf("REBLURRED\n");
+        fflush(stdout);
+    }
 
     /*
      * 销毁 context：协议允许合成器把属性恢复默认。脚本用这一刻断言
