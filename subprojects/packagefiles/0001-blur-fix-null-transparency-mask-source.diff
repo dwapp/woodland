@@ -1,0 +1,20 @@
+diff --git a/types/scene/wlr_scene.c b/types/scene/wlr_scene.c
+index 9a9fcc0..c48703c 100644
+--- a/types/scene/wlr_scene.c
++++ b/types/scene/wlr_scene.c
+@@ -1149,10 +1149,11 @@ void wlr_scene_blur_set_transparency_mask_source(struct wlr_scene_blur *blur,
+ 		return;
+ 	}
+ 
+-	linked_node_destroy(&blur->transparency_mask_source);
+-	linked_node_destroy(&source->blur);
+-
+-	if (source != NULL) {
++	if (source == NULL) {
++		linked_node_destroy(&blur->transparency_mask_source);
++	} else {
++		linked_node_destroy(&blur->transparency_mask_source);
++		linked_node_destroy(&source->blur);
+ 		linked_node_init_link(&blur->transparency_mask_source, &source->blur);
+ 	}
+ 
