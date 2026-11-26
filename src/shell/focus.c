@@ -24,6 +24,7 @@
 #include "cursor.h"
 #include "focus.h"
 #include "layer.h"
+#include "multitask_view.h"
 #include "selfcheck.h"
 #include "session_lock.h"
 #include "ssd.h"
@@ -207,7 +208,8 @@ static bool view_is_modal(const struct woodland_view *view)
     return false;
 }
 
-struct woodland_view *woodland_focus_modal_dialog(struct woodland_view *view)
+static struct woodland_view *focus_modal_dialog_ex(struct woodland_view *view,
+                                                   bool include_minimized)
 {
     if (!view || !view->server) {
         return view;
@@ -225,11 +227,13 @@ struct woodland_view *woodland_focus_modal_dialog(struct woodland_view *view)
     /*
      * 在 z 序里找 root 的子孙中第一个模态窗口（表头最上，先命中即最上层）。
      * 这样点父窗口任意位置，焦点都会落到它当前打开的模态对话框上。
+     * 普通聚焦跳过已最小化的模态窗口（避免最小化对话框后焦点回退又把它弹回来），
+     * 强制激活时则穿透最小化找到模态窗口一并恢复。
      */
     struct woodland_view *it;
     wl_list_for_each(it, &view->server->views, link)
     {
-        if (!it->mapped || it->minimized || !it->parent) {
+        if (!it->mapped || (!include_minimized && it->minimized) || !it->parent) {
             continue;
         }
         struct woodland_view *p = it->parent;
@@ -244,6 +248,11 @@ struct woodland_view *woodland_focus_modal_dialog(struct woodland_view *view)
         }
     }
     return view;
+}
+
+struct woodland_view *woodland_focus_modal_dialog(struct woodland_view *view)
+{
+    return focus_modal_dialog_ex(view, false);
 }
 
 /* ==================== 聚焦入口 ==================== */
@@ -494,6 +503,76 @@ void woodland_focus_view(struct woodland_view *view, bool raise)
     }
     woodland_pointer_constraint_update(server);
     woodland_selfcheck_schedule(server, "focus");
+}
+
+bool woodland_focus_force_activate(struct woodland_view *view)
+{
+    if (!view || !view->server) {
+        return false;
+    }
+    struct woodland_server *server = view->server;
+    if (woodland_session_lock_is_locked(server)) {
+        return false;
+    }
+    if (view->override_redirect || !view->mapped) {
+        return false;
+    }
+
+    /*
+     * 强制激活需要穿透模态与最小化状态：
+     * - 若目标有模态子窗口（哪怕当前已最小化），改为激活该模态窗口，
+     *   并与父窗口对齐到同一工作区后一并恢复；
+     * - 若直接激活的是模态子窗口，也要恢复已最小化的祖先窗口，
+     *   避免模态对话框孤立浮在空桌面上。
+     */
+    struct woodland_view *original = view;
+    struct woodland_view *target = focus_modal_dialog_ex(view, true);
+    if (!target || !target->mapped || target->override_redirect) {
+        return false;
+    }
+    enum woodland_view_wants_focus wants = woodland_view_wants_focus(target);
+    if ((target->dde_shell.active && !target->dde_shell.accept_keyboard_focus) ||
+        (wants != WOODLAND_VIEW_WANTS_FOCUS_ALWAYS &&
+         wants != WOODLAND_VIEW_WANTS_FOCUS_LIKELY)) {
+        return false;
+    }
+
+    if (woodland_multitask_view_is_active(server)) {
+        woodland_multitask_view_close(server, false);
+    }
+
+    if (target != original && original->workspace &&
+        target->workspace != original->workspace && target->scene_tree) {
+        target->workspace = original->workspace;
+        wlr_scene_node_reparent(&target->scene_tree->node, original->workspace->tree);
+    }
+
+    if (original->minimized) {
+        woodland_view_set_minimized(original, false);
+    }
+    struct woodland_view *p = target->parent;
+    for (int i = 0; i < FOCUS_CHAIN_MAX && p; i++, p = p->parent) {
+        if (p->mapped && p->minimized) {
+            woodland_view_set_minimized(p, false);
+        }
+        if (p == target) {
+            break;
+        }
+    }
+    if (target->minimized) {
+        woodland_view_set_minimized(target, false);
+    }
+
+    if (target->workspace && target->workspace != server->active_workspace) {
+        woodland_workspace_switch_focus(server, target->workspace, false);
+    }
+
+    if (!woodland_view_focusable(target)) {
+        return false;
+    }
+
+    woodland_focus_view(target, true);
+    return true;
 }
 
 void woodland_focus_none(struct woodland_server *server)

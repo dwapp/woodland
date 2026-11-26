@@ -157,10 +157,14 @@ expect '.toplevel_manager.last_outcome == "recorded (no minimize animation)"' \
     "outcome must spell out that nothing is animated"
 stop_probe
 
-echo "== activate：只认本合成器的 seat =="
-scenario activate activate
+echo "== activate：只认本合成器的 seat，且能取消最小化并激活 =="
+scenario activate min activate
 expect '.toplevel_manager.last_request == "activate"' "activate must reach the protocol layer"
 expect '.toplevel_manager.last_outcome == "focused"' "activate must focus the view"
+expect '.views[0].minimized == false' "activate must unminimize the view"
+expect '.views[0].scene_visible == true' "activated view must be visible"
+expect '.views[0].activated == true' "activated view must be focused"
+expect_probe 'state=.*activated' "state event must report activated after unminimize"
 stop_probe
 
 echo "== dock preview：请求被接收但不渲染 =="
