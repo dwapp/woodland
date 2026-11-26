@@ -1,9 +1,0 @@
-[Unit]
-Description=Woodland Wayland compositor socket
-PartOf=woodland.service
-Before=woodland.service
-
-[Socket]
-ListenStream=%t/woodland.socket
-RemoveOnStop=true
-FileDescriptorName=woodland
