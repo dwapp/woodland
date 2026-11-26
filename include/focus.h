@@ -56,6 +56,14 @@ struct woodland_view *woodland_focus_current(struct woodland_server *server);
  * raise=false 用于"只给焦点不改层叠"（如从 layer 退回、焦点回退）。
  */
 void woodland_focus_view(struct woodland_view *view, bool raise);
+/**
+ * 强制激活视图（供 foreign-toplevel activate 等显式激活入口使用）。
+ *
+ * 与 woodland_focus_view 的区别：会退出多任务视图、穿透最小化状态找到模态
+ * 对话框、将模态窗口与父窗口一并恢复并对齐工作区、必要时切换当前工作区，
+ * 最后置顶并聚焦。锁屏或目标不可聚焦时返回 false 且不做任何状态变更。
+ */
+bool woodland_focus_force_activate(struct woodland_view *view);
 void woodland_view_raise(struct woodland_view *view);
 
 /**

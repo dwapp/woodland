@@ -49,6 +49,7 @@
 #include "output.h"
 #include "protocol.h"
 #include "protocol_internal.h"
+#include "session_lock.h"
 #include "trace.h"
 #include "util/json.h"
 #include "util/listener.h"
@@ -829,10 +830,13 @@ static void handle_activate(struct wl_client *client, struct wl_resource *resour
         record_request(h->ftl, view->id, "activate", "ignored: not this seat");
         return;
     }
-    if (view->minimized) {
-        woodland_view_set_minimized(view, false);
+    if (!woodland_focus_force_activate(view)) {
+        record_request(h->ftl, view->id, "activate",
+                       woodland_session_lock_is_locked(view->server)
+                           ? "ignored: session locked"
+                           : "ignored");
+        return;
     }
-    woodland_focus_view(view, true);
     record_request(h->ftl, view->id, "activate", "focused");
 }
 

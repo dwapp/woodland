@@ -363,11 +363,7 @@ static void xdg_toplevel_set_parent(struct wl_listener *listener, void *data)
 static void ft_request_activate(struct wl_listener *listener, void *data)
 {
     struct woodland_view *view = wl_container_of(listener, view, ft_request_activate);
-    /* 若最小化则先恢复 */
-    if (view->minimized) {
-        woodland_view_set_minimized(view, false);
-    }
-    woodland_focus_view(view, true);
+    woodland_focus_force_activate(view);
     (void)data;
 }
 

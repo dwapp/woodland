@@ -9,6 +9,8 @@
 #include <stdbool.h>
 
 #include <wayland-server-core.h>
+#include <wlr/types/wlr_compositor.h>
+#include "scene.h"
 
 #include "config.h"
 #if WOODLAND_HAVE_XWAYLAND
@@ -122,6 +124,103 @@ int main(void) {
     };
     assert(woodland_view_wants_focus(&xview) == WOODLAND_VIEW_WANTS_FOCUS_ALWAYS);
     assert(woodland_view_focusable(&xview) == true);
+
+    /* ---------- 强制激活：切工作区 + 取消最小化 + 模态穿透 ---------- */
+    struct woodland_server f_srv = {0};
+    wl_list_init(&f_srv.views);
+    wl_list_init(&f_srv.workspaces);
+    wl_signal_init(&f_srv.view_changed);
+    wl_signal_init(&f_srv.workspace_changed);
+    f_srv.scene = wlr_scene_create();
+    assert(f_srv.scene != NULL);
+
+    struct woodland_workspace f_ws1 = {
+        .server = &f_srv,
+        .name = "1",
+        .tree = wlr_scene_tree_create(&f_srv.scene->tree),
+    };
+    struct woodland_workspace f_ws2 = {
+        .server = &f_srv,
+        .name = "2",
+        .tree = wlr_scene_tree_create(&f_srv.scene->tree),
+    };
+    wlr_scene_node_set_enabled(&f_ws2.tree->node, false);
+    f_srv.active_workspace = &f_ws1;
+
+    struct wlr_surface s_other = {0};
+    struct wlr_surface s_parent = {0};
+    struct wlr_surface s_modal = {0};
+    struct wlr_xwayland_surface xs_other = { .surface = &s_other };
+    struct wlr_xwayland_surface xs_parent = { .surface = &s_parent };
+    struct wlr_xwayland_surface xs_modal = { .surface = &s_modal, .modal = true };
+
+    struct woodland_view v_other = {
+        .id = 1,
+        .server = &f_srv,
+        .type = WOODLAND_VIEW_XWAYLAND,
+        .xwayland_surface = &xs_other,
+        .mapped = true,
+        .workspace = &f_ws1,
+        .scene_tree = wlr_scene_tree_create(f_ws1.tree),
+    };
+    struct woodland_view v_parent = {
+        .id = 2,
+        .server = &f_srv,
+        .type = WOODLAND_VIEW_XWAYLAND,
+        .xwayland_surface = &xs_parent,
+        .mapped = true,
+        .minimized = true,
+        .workspace = &f_ws2,
+        .scene_tree = wlr_scene_tree_create(f_ws2.tree),
+    };
+    wlr_scene_node_set_enabled(&v_parent.scene_tree->node, false);
+
+    /* 模态子窗口故意放在 ws1 且处于最小化，验证强制激活父窗口能一并对齐并恢复 */
+    struct woodland_view v_modal = {
+        .id = 3,
+        .server = &f_srv,
+        .type = WOODLAND_VIEW_XWAYLAND,
+        .xwayland_surface = &xs_modal,
+        .parent = &v_parent,
+        .mapped = true,
+        .minimized = true,
+        .workspace = &f_ws1,
+        .scene_tree = wlr_scene_tree_create(f_ws1.tree),
+    };
+    wlr_scene_node_set_enabled(&v_modal.scene_tree->node, false);
+
+    wl_list_insert(&f_srv.views, &v_modal.link);
+    wl_list_insert(&f_srv.views, &v_parent.link);
+    wl_list_insert(&f_srv.views, &v_other.link);
+    f_srv.focused_view = &v_other;
+    v_other.activated = true;
+
+    assert(woodland_focus_force_activate(&v_parent) == true);
+    assert(f_srv.active_workspace == &f_ws2);
+    assert(!v_parent.minimized);
+    assert(!v_modal.minimized);
+    assert(v_modal.workspace == &f_ws2);
+    assert(v_modal.scene_tree->node.parent == f_ws2.tree);
+    assert(f_srv.focused_view == &v_modal);
+    assert(v_modal.activated);
+    assert(!v_other.activated);
+
+    /* 直接强制激活模态窗口时，若父窗口已最小化也应一并恢复 */
+    v_parent.minimized = true;
+    v_modal.minimized = true;
+    wlr_scene_node_set_enabled(&v_parent.scene_tree->node, false);
+    wlr_scene_node_set_enabled(&v_modal.scene_tree->node, false);
+    f_srv.active_workspace = &f_ws1;
+    wlr_scene_node_set_enabled(&f_ws2.tree->node, false);
+    wlr_scene_node_set_enabled(&f_ws1.tree->node, true);
+
+    assert(woodland_focus_force_activate(&v_modal) == true);
+    assert(f_srv.active_workspace == &f_ws2);
+    assert(!v_parent.minimized);
+    assert(!v_modal.minimized);
+    assert(f_srv.focused_view == &v_modal);
+
+    wlr_scene_node_destroy(&f_srv.scene->tree.node);
 #endif
 
 
