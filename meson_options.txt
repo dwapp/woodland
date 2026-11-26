@@ -4,5 +4,7 @@ option('tiling-layout', type: 'feature', value: 'disabled',
        description: 'Enable non-stacking layout modes')
 option('xwayland', type: 'feature', value: 'enabled',
        description: 'Start Xwayland at runtime (X11 application support)')
+option('systemd', type: 'feature', value: 'enabled',
+       description: 'Enable systemd socket activation and readiness notification')
 option('test', type: 'feature', value: 'disabled',
        description: 'Build and run tests')

@@ -54,7 +54,15 @@ pangocairo = dependency('pangocairo')
 cairo = dependency('cairo')
 # sd_notify / sd_listen_fds（socket activation + Type=notify 就绪报告）。
 # 只在 user session 的 systemd 场景有意义，headless 冒烟下是空操作。
-libsystemd_dep = dependency('libsystemd')
+# 默认强制依赖；-Dsystemd=disabled 可完全去除 libsystemd 依赖（无 systemd 的
+# 发行版/嵌入式场景），对应 WOODLAND_HAVE_SYSTEMD 宏为 0。
+libsystemd_dep = dependency('libsystemd', required: get_option('systemd'))
+# server 目标的依赖列表用这个变量：systemd 关闭时它是空的，避免把
+# not-found 的 dependency 塞进 static_library 导致链接报错。
+systemd_deps = []
+if libsystemd_dep.found()
+  systemd_deps = [libsystemd_dep]
+endif
 rsvg_dep = dependency('librsvg-2.0', version: '>=2.52', required: false)
 # Xwayland：依赖只提供 Xwayland 可执行文件路径（wlroots 编译期读取）。
 # 代码始终参与编译（view 访问器里要引用 wlroots 的 xwayland API），
@@ -67,6 +75,7 @@ conf_data.set10('WOODLAND_HAVE_XWAYLAND',
 conf_data.set10('WOODLAND_HAVE_EFFECTS',
                 get_option('effects').enabled() and scenefx.found())
 conf_data.set10('WOODLAND_HAVE_LIBRSVG', rsvg_dep.found())
+conf_data.set10('WOODLAND_HAVE_SYSTEMD', libsystemd_dep.found())
 # 合成器启动快捷键客户端时按这个路径找可执行文件（见 server.c）
 conf_data.set_quoted('WOODLAND_BINDIR', get_option('prefix') / get_option('bindir'))
 configure_file(output: 'config.h', configuration: conf_data)

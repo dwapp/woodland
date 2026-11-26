@@ -7,7 +7,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
-#include <systemd/sd-daemon.h>
 #include <unistd.h>
 
 #include <wlr/types/wlr_alpha_modifier_v1.h>
@@ -26,6 +25,9 @@
 
 #include "capture.h"
 #include "config.h"
+#if WOODLAND_HAVE_SYSTEMD
+#include <systemd/sd-daemon.h>
+#endif
 #if WOODLAND_HAVE_EFFECTS
 #include <scenefx/render/fx_renderer/fx_renderer.h>
 #endif
@@ -509,9 +511,11 @@ bool woodland_server_start(struct woodland_server *server)
      *      由 socket unit 的 ListenStream 固定为 woodland.socket，对应
      *      WAYLAND_DISPLAY=woodland.socket（treeland 用 treeland.socket 的
      *      同一套做法，只是名字换成 woodland 自己的）。
+     *      [仅 WOODLAND_HAVE_SYSTEMD]
      *   2. --socket 固定名（手动 / 调试用），名字落在 $XDG_RUNTIME_DIR 下。
      *   3. 都缺省时退回 wl_display_add_socket_auto（wayland-N 自动找空位）。
      */
+#if WOODLAND_HAVE_SYSTEMD
     int n_fds = sd_listen_fds(0);
     if (n_fds < 0) {
         wlr_log(WLR_ERROR, "sd_listen_fds failed: %s", strerror(-n_fds));
@@ -530,6 +534,9 @@ bool woodland_server_start(struct woodland_server *server)
         wlr_log(WLR_INFO, "using systemd-activated socket (WAYLAND_DISPLAY=%s)",
                 socket);
     } else if (server->socket_name) {
+#else /* !WOODLAND_HAVE_SYSTEMD：只剩 --socket 和自动分配两条来源 */
+    if (server->socket_name) {
+#endif /* WOODLAND_HAVE_SYSTEMD */
         if (wl_display_add_socket(server->display, server->socket_name) < 0) {
             wlr_log(WLR_ERROR, "failed to add wayland socket %s",
                     server->socket_name);
@@ -556,7 +563,9 @@ bool woodland_server_start(struct woodland_server *server)
      * 也用于 service 到达 active 态后（systemd 会给同一 socket 上的客户端
      * 排队 accept）。没有 NOTIFY_SOCKET（裸跑/冒烟）时是空操作。
      */
+#if WOODLAND_HAVE_SYSTEMD
     sd_notify(0, "READY=1");
+#endif
 
     if (server->debug_ctl && !woodland_seat_init_debug_keyboard(server)) {
         wlr_log(WLR_ERROR, "failed to init debug virtual keyboard");
