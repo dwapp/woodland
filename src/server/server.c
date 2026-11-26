@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/prctl.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -501,6 +502,114 @@ static void start_shortcut_client(struct woodland_server *server)
     wlr_log(WLR_INFO, "shortcut client: started %s", exe ? exe : "woodland-shortcutd");
 }
 
+/* ==================== DDE 会话里的合成器辅助拉起 ==================== */
+
+#if WOODLAND_HAVE_SYSTEMD
+/*
+ * 跑一个一次性命令并回收（阻塞等它退出）。只用于 systemctl --user
+ * set-environment 这类即时返回的短命令，不用于常驻进程。
+ */
+static void run_one_shot(const char *const argv[])
+{
+    pid_t pid = fork();
+    if (pid < 0) {
+        wlr_log_errno(WLR_ERROR, "fork failed");
+        return;
+    }
+    if (pid == 0) {
+        execvp(argv[0], (char *const *)argv);
+        _exit(127);
+    }
+    while (waitpid(pid, NULL, 0) < 0 && errno == EINTR) {
+        /* 等它退出，别被信号打断成僵尸 */
+    }
+}
+
+/*
+ * 把 name=value 导进用户 systemd 会话环境（等价于
+ * `systemctl --user set-environment name=value`），让 systemd 之后拉起的
+ * 服务（dde-shell、X11 应用、wallpaper-factory 等）都能看到。
+ *
+ * 为什么不能只 setenv：合成器进程里 setenv 只影响自己和 fork 的子进程，
+ * systemd 启动的服务有自己的环境块，看不到合成器进程的内存环境。
+ * 动态值（DISPLAY=:1 的 display 号）不能写死在 unit 里，只能运行时导。
+ */
+static void export_user_environment(const char *name, const char *value)
+{
+    if (!name || !value || !value[0]) {
+        return;
+    }
+    char entry[512];
+    int n = snprintf(entry, sizeof(entry), "%s=%s", name, value);
+    if (n < 0 || (size_t)n >= sizeof(entry)) {
+        wlr_log(WLR_ERROR, "environment entry too long: %s", name);
+        return;
+    }
+    const char *argv[] = {
+        "/usr/bin/systemctl", "--user", "set-environment", entry, NULL,
+    };
+    run_one_shot(argv);
+}
+#endif /* WOODLAND_HAVE_SYSTEMD */
+
+/*
+ * 拉起 treeland-wallpaper-factory（外部壁纸渲染进程）。
+ *
+ * 背景：woodland 只实现壁纸协议族（manager/shell/notifier），不解码图片
+ * 或视频——解码在 treeland-wallpaper-factory 里（图片用 Qt、视频用 mpv）。
+ * treeland 在创建 session 时用 WallpaperLauncher 拉起它，woodland 单用户
+ * 合成器在这里补同样的动作，只对 DDE 会话启用（其它轻量桌面不受影响）。
+ *
+ * 开关：$WOODLAND_DISABLE_WALLPAPER（off/0/false 等，见 util/env.h）。
+ * 对齐 treeland 的 $TREELAND_DISABLE_WALLPAPER。
+ */
+static void start_wallpaper_factory(struct woodland_server *server)
+{
+    (void)server;
+    if (!woodland_session_is_dde()) {
+        return;
+    }
+    if (woodland_env_is_off(getenv("WOODLAND_DISABLE_WALLPAPER"))) {
+        wlr_log(WLR_INFO, "wallpaper factory: disabled by WOODLAND_DISABLE_WALLPAPER");
+        return;
+    }
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        wlr_log_errno(WLR_ERROR, "failed to fork for wallpaper factory");
+        return;
+    }
+    if (pid == 0) {
+        /* 与 shortcut client 同一套模型：中间层退出、孙进程脱离会话，
+         * 但加了 PR_SET_PDEATHSIG——合成器正常退出或崩溃时，内核给 factory
+         * 发 SIGTERM，避免孤儿进程（对齐 treeland WallpaperLauncher 的
+         * setChildProcessModifier）。 */
+        setsid();
+        pid_t grandchild = fork();
+        if (grandchild < 0) {
+            _exit(127);
+        }
+        if (grandchild == 0) {
+            prctl(PR_SET_PDEATHSIG, SIGTERM);
+            /* 父进程若在 prctl 之前就已退出，PDEATHSIG 不会补发；这里再
+             * 用 getppid 兜底一次，发现父进程没了就直接退。 */
+            if (getppid() == 1) {
+                _exit(0);
+            }
+            setenv("QT_QPA_PLATFORM", "wayland", 1);
+            execlp("treeland-wallpaper-factory", "treeland-wallpaper-factory",
+                   (char *)NULL);
+            _exit(127);
+        }
+        _exit(0);
+    }
+    while (waitpid(pid, NULL, 0) < 0 && errno == EINTR) {
+        /* 等壳退出 */
+    }
+
+    wlr_log(WLR_INFO, "wallpaper factory: launched treeland-wallpaper-factory");
+}
+
 bool woodland_server_start(struct woodland_server *server)
 {
     const char *socket = NULL;
@@ -580,6 +689,11 @@ bool woodland_server_start(struct woodland_server *server)
     /* X 客户端（以及 startup command 拉起的 X 程序）通过 DISPLAY 找 Xwayland */
     if (server->xwayland && server->xwayland->display_name) {
         setenv("DISPLAY", server->xwayland->display_name, true);
+#if WOODLAND_HAVE_SYSTEMD
+        /* 同步导进用户 systemd 环境：dde-shell、X11 应用等由 systemd 拉起的
+         * 进程看不到合成器进程的内存环境，必须走 set-environment。 */
+        export_user_environment("DISPLAY", server->xwayland->display_name);
+#endif
         wlr_log(WLR_INFO, "DISPLAY=%s", server->xwayland->display_name);
     }
     if (server->startup_cmd) {
@@ -597,6 +711,7 @@ bool woodland_server_start(struct woodland_server *server)
      * 客户端一连上来就能看到完整的 global 列表。
      */
     start_shortcut_client(server);
+    start_wallpaper_factory(server);
 
     return true;
 }
