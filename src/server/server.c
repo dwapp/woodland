@@ -574,40 +574,39 @@ static void start_wallpaper_factory(struct woodland_server *server)
         return;
     }
 
+    /*
+     * 与 shortcut client / wsd_spawn_command 的双 fork 不同，这里用单 fork：
+     * 双 fork 会让孙进程脱离合成器的进程组/会话（合成器退出不带走它），
+     * 但壁纸工厂恰恰相反——它必须跟着合成器一起死（对齐 treeland 的
+     * WallpaperLauncher，QProcess 单 fork + setChildProcessModifier）。
+     *
+     * 单 fork 下 child 的父进程就是合成器，PR_SET_PDEATHSIG 直接绑定到
+     * 合成器：合成器正常退出或崩溃（甚至 SIGKILL）时，内核都会给 factory
+     * 发 SIGTERM，不留孤儿。没有中间层，也没有 prctl 之后父进程提前退出
+     * 导致 PDEATHSIG 失效的竞态窗口。
+     */
     pid_t pid = fork();
     if (pid < 0) {
         wlr_log_errno(WLR_ERROR, "failed to fork for wallpaper factory");
         return;
     }
     if (pid == 0) {
-        /* 与 shortcut client 同一套模型：中间层退出、孙进程脱离会话，
-         * 但加了 PR_SET_PDEATHSIG——合成器正常退出或崩溃时，内核给 factory
-         * 发 SIGTERM，避免孤儿进程（对齐 treeland WallpaperLauncher 的
-         * setChildProcessModifier）。 */
-        setsid();
-        pid_t grandchild = fork();
-        if (grandchild < 0) {
-            _exit(127);
+        prctl(PR_SET_PDEATHSIG, SIGTERM);
+        /* 竞态兑底：若合成器在 fork 之后、prctl 之前就被杀，prctl 不会
+         * 补发 PDEATHSIG，这里发现父进程已变 1（init）就直接退。 */
+        if (getppid() == 1) {
+            _exit(0);
         }
-        if (grandchild == 0) {
-            prctl(PR_SET_PDEATHSIG, SIGTERM);
-            /* 父进程若在 prctl 之前就已退出，PDEATHSIG 不会补发；这里再
-             * 用 getppid 兜底一次，发现父进程没了就直接退。 */
-            if (getppid() == 1) {
-                _exit(0);
-            }
-            setenv("QT_QPA_PLATFORM", "wayland", 1);
-            execlp("treeland-wallpaper-factory", "treeland-wallpaper-factory",
-                   (char *)NULL);
-            _exit(127);
-        }
-        _exit(0);
-    }
-    while (waitpid(pid, NULL, 0) < 0 && errno == EINTR) {
-        /* 等壳退出 */
+        setenv("QT_QPA_PLATFORM", "wayland", 1);
+        execlp("treeland-wallpaper-factory", "treeland-wallpaper-factory",
+               (char *)NULL);
+        _exit(127);
     }
 
-    wlr_log(WLR_INFO, "wallpaper factory: launched treeland-wallpaper-factory");
+    /* 单 fork 的子进程是 factory 本身，合成器不能阻塞等它退出（factory
+     * 常驻到会话结束），也不装 SIGCHLD handler（与 shortcut client 一致，
+     * 孤儿交给 init）。这里只记日志。 */
+    wlr_log(WLR_INFO, "wallpaper factory: launched treeland-wallpaper-factory (pid %d)", pid);
 }
 
 bool woodland_server_start(struct woodland_server *server)
