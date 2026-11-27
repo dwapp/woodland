@@ -255,4 +255,64 @@ grep -q 'treeland-appearance-v1 and -manager-v1 enabled' "$SMOKE_LOG" \
 grep -q 'recorded (no per-window alpha path)' "$SMOKE_LOG" \
     || smoke_fail "compositor did not log the recorded-only opacity"
 
+# ---------- 10. 重启恢复：set_* 落盘后重启，observer 收到持久化的值 ----------
+# 前面的 set_* 已经改了若干字段（cursor_size 32、titlebar_height 30 后又改 0、
+# color_scheme dark、font Noto Sans + 12.5pt、icon_theme Papirus、
+# window_opacity 0.5、monospace 等），这些都应写进 appearance.json。
+kill -TERM "$pid" 2>/dev/null || true
+wait "$pid" 2>/dev/null || true
+
+# 重启时保留同一个 XDG_CONFIG_HOME / XDG_RUNTIME_DIR，让 appearance.json 还在
+"$BIN" --trace >"$SMOKE_LOG" 2>&1 &
+pid=$!
+i=0
+while [ "$(ls "$XDG_RUNTIME_DIR/" 2>/dev/null | grep -c '^wayland-')" -eq 0 ] \
+        && [ "$i" -lt 50 ]; do
+    sleep 0.1; i=$((i+1))
+done
+socket_name="$(ls "$XDG_RUNTIME_DIR/" 2>/dev/null | grep '^wayland-' | head -1)"
+[ -n "$socket_name" ] || smoke_fail "wayland socket did not reappear after restart"
+export WAYLAND_DISPLAY="$socket_name"
+SOCK=""
+smoke_wait_socket || smoke_fail "debug socket did not reappear after restart"
+
+RESTART_OBS="$XDG_RUNTIME_DIR/obs_restart.txt"
+"$PROBE" --observe 400 >"$RESTART_OBS"
+grep -qx 'ready' "$RESTART_OBS" || smoke_fail "restart observer never became ready"
+# 持久化后的值（与第 2/4/6/7 步设置的最终态一致）：
+#   cursor_size 32 32（第 2 步 set 后又被第 3 步 set 0/0 → 8、32/48 → 32）
+#   titlebar_height 0（第 8 步最后设为 0 隐藏标题栏）
+#   color_scheme dark（第 2 步设为 1）
+#   font Noto Sans（第 4 步） + 12.5pt（第 4 步 set_font_size 125 后又 set 0 → 50）
+#   icon_theme Papirus（第 7 步）
+#   window_opacity 0.5（第 6 步）
+#   monospace_font DejaVu Sans Mono（第 6 步）
+grep -q '^cursor_size 32 32$' "$RESTART_OBS" \
+    || smoke_fail "cursor_size not restored: $(cat "$RESTART_OBS")"
+grep -q '^titlebar_height 0$' "$RESTART_OBS" \
+    || smoke_fail "titlebar_height not restored: $(cat "$RESTART_OBS")"
+grep -q '^color_scheme 1$' "$RESTART_OBS" \
+    || smoke_fail "color_scheme not restored: $(cat "$RESTART_OBS")"
+grep -q '^font Noto Sans$' "$RESTART_OBS" \
+    || smoke_fail "font not restored: $(cat "$RESTART_OBS")"
+grep -q '^font_size 50$' "$RESTART_OBS" \
+    || smoke_fail "font_size not restored: $(cat "$RESTART_OBS")"
+grep -q '^icon_theme Papirus$' "$RESTART_OBS" \
+    || smoke_fail "icon_theme not restored: $(cat "$RESTART_OBS")"
+grep -q '^window_opacity 0.500$' "$RESTART_OBS" \
+    || smoke_fail "window_opacity not restored: $(cat "$RESTART_OBS")"
+grep -q '^monospace_font DejaVu Sans Mono$' "$RESTART_OBS" \
+    || smoke_fail "monospace_font not restored: $(cat "$RESTART_OBS")"
+
+# wctl 侧同样反映持久化后的值
+_rtree="$(wctl_cmd get_tree)" || smoke_fail "get_tree failed after restart"
+printf '%s' "$_rtree" | jq -e \
+    '.appearance.cursor_width == 32
+     and .appearance.titlebar_height == 0
+     and .appearance.color_scheme == "dark"
+     and .appearance.icon_theme == "Papirus"
+     and .appearance.window_opacity_milli == 500
+     and .appearance.monospace_font == "DejaVu Sans Mono"' >/dev/null \
+    || smoke_fail "persisted appearance not reflected in wctl: $(printf '%s' "$_rtree" | jq -c '.appearance')"
+
 echo "appearance smoke passed"

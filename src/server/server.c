@@ -61,6 +61,14 @@ static int handle_terminate(int signal, void *data)
     return 0;
 }
 
+bool woodland_server_appearance_save(struct woodland_server *server)
+{
+    if (!server || !server->config) {
+        return false;
+    }
+    return woodland_config_appearance_save(server->config);
+}
+
 static int handle_sighup(int signal, void *data)
 {
     struct woodland_server *server = data;
@@ -362,6 +370,9 @@ bool woodland_server_init(struct woodland_server *server)
         struct woodland_config *cfg = woodland_config_load(server->config_path);
         woodland_config_apply(server, cfg);
     }
+    /* 协议层 set_* 后要落盘：config 的写入口经钩子暴露，避免 protocol_lib
+     * 链接 config_lib 成环（见 woodland.h 的 appearance_save_hook 注释）。 */
+    server->appearance_save_hook = woodland_server_appearance_save;
     return true;
 }
 

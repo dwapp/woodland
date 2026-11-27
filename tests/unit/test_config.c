@@ -83,10 +83,8 @@ static void test_parse_valid_toml(void)
                        "\n"
                        "[decorations]\n"
                        "enabled = false\n"
-                       "titlebar_height = 30\n"
                        "border_width = 2\n"
                        "button_width = 28\n"
-                       "font = \"monospace 11\"\n"
                        "active_title_color = \"#123456\"\n"
                        "inactive_title_color = \"#654321\"\n"
                        "\n"
@@ -105,13 +103,11 @@ static void test_parse_valid_toml(void)
                        "accel_profile = \"flat\"\n"
                        "\n"
                        "[cursor]\n"
-                       "theme = \"Adwaita\"\n"
-                       "size = 32\n"
+                       "# theme / size 已迁移到 appearance.json，这里不再解析\n"
                        "\n"
                        "[effects]\n"
                        "enabled = true\n"
                        "blur = true\n"
-                       "corner_radius = 10\n"
                        "shadow = true\n"
                        "blur_optimized = true\n"
                        "blur_passes = 4\n"
@@ -154,10 +150,10 @@ static void test_parse_valid_toml(void)
     assert(cfg->general.snap_preview_border_width == 4);
 
     assert(!cfg->ssd.enabled);
-    assert(cfg->ssd.titlebar_height == 30);
+    assert(cfg->ssd.titlebar_height == 32); /* 已迁移到 appearance.json */
     assert(cfg->ssd.border_width == 2);
     assert(cfg->ssd.button_width == 28);
-    assert(strcmp(cfg->ssd.font, "monospace 11") == 0);
+    assert(strcmp(cfg->ssd.font, "sans 10") == 0); /* 已迁移到 appearance.json */
     assert(cfg->ssd.active_title_color == 0xFF123456);
     assert(cfg->ssd.inactive_title_color == 0xFF654321);
 
@@ -173,12 +169,12 @@ static void test_parse_valid_toml(void)
     assert(cfg->touchpad.accel_speed == 0.5);
     assert(strcmp(cfg->touchpad.accel_profile, "flat") == 0);
 
-    assert(strcmp(cfg->cursor.theme, "Adwaita") == 0);
-    assert(cfg->cursor.size == 32);
+    assert(strcmp(cfg->cursor.theme, "default") == 0); /* 已迁移到 appearance.json */
+    assert(cfg->cursor.size == 24);                      /* 已迁移到 appearance.json */
 
     assert(cfg->effects.enabled);
     assert(cfg->effects.blur);
-    assert(cfg->effects.corner_radius == 10);
+    assert(cfg->effects.corner_radius == 4); /* 已迁移到 appearance.json */
     assert(cfg->effects.shadow);
     assert(cfg->effects.blur_optimized);
     assert(cfg->effects.blur_passes == 4);
@@ -289,7 +285,8 @@ static void test_boundary_clamping(void)
     assert(!cfg->general.snap_preview_color_specified);
     assert(cfg->general.snap_preview_opacity == 0.25);
     assert(cfg->general.snap_preview_border_width == 2);
-    /* 非法高度/边框被忽略，保留默认 32/1 */
+    /* titlebar_height 已迁移到 appearance.json，这里即使写了 -5 也直接不解析；
+     * 非法 border_width 被忽略，保留默认 1 */
     assert(cfg->ssd.titlebar_height == 32);
     assert(cfg->ssd.border_width == 1);
     /* 加速敏感度限制在 [-1.0, 1.0] */
@@ -440,6 +437,80 @@ static void test_hot_reload_file(void)
     unlink(tmppath);
 }
 
+static void test_appearance_persist_roundtrip(void)
+{
+    /* 用临时 XDG_CONFIG_HOME 隔离，避免污染真实配置目录 */
+    char tmpdir[] = "/tmp/woodland_appearance_XXXXXX";
+    char *dir = mkdtemp(tmpdir);
+    assert(dir != NULL);
+    char config_home[512];
+    snprintf(config_home, sizeof(config_home), "%s/config", dir);
+
+    const char *old_home = getenv("XDG_CONFIG_HOME");
+    setenv("XDG_CONFIG_HOME", config_home, 1);
+
+    struct woodland_config *cfg = woodland_config_create_default();
+    assert(cfg != NULL);
+
+    /* 模拟 treeland-appearance 的 set_*：改 11 项里的代表字段 */
+    free(cfg->cursor.theme);
+    cfg->cursor.theme = strdup("Adwaita");
+    cfg->cursor.size = 32;
+    free(cfg->ssd.font);
+    cfg->ssd.font = strdup("Noto Sans Bold 12");
+    cfg->ssd.titlebar_height = 30;
+    cfg->effects.corner_radius = 12;
+    cfg->appearance.accent_set = true;
+    cfg->appearance.accent_rgb = 0xFF0000;
+    cfg->appearance.color_scheme_set = true;
+    cfg->appearance.dark = true;
+    free(cfg->appearance.icon_theme);
+    cfg->appearance.icon_theme = strdup("Papirus");
+    cfg->appearance.monospace_font = strdup("DejaVu Sans Mono");
+    cfg->appearance.opacity_set = true;
+    cfg->appearance.window_opacity = 0.5;
+
+    assert(woodland_config_appearance_save(cfg));
+
+    /* 用一个全新的默认 config 读回，验证恢复 */
+    struct woodland_config *restored = woodland_config_create_default();
+    assert(restored != NULL);
+    woodland_config_appearance_overlay(restored);
+
+    assert(strcmp(restored->cursor.theme, "Adwaita") == 0);
+    assert(restored->cursor.size == 32);
+    assert(strcmp(restored->ssd.font, "Noto Sans Bold 12") == 0);
+    assert(restored->ssd.titlebar_height == 30);
+    assert(restored->effects.corner_radius == 12);
+    assert(restored->appearance.accent_set);
+    assert(restored->appearance.accent_rgb == 0xFF0000);
+    assert(restored->appearance.color_scheme_set);
+    assert(restored->appearance.dark);
+    assert(strcmp(restored->appearance.icon_theme, "Papirus") == 0);
+    assert(strcmp(restored->appearance.monospace_font, "DejaVu Sans Mono") == 0);
+    assert(restored->appearance.opacity_set);
+    assert(restored->appearance.window_opacity == 0.5);
+
+    woodland_config_destroy(restored);
+    woodland_config_destroy(cfg);
+
+    /* 清理 */
+    unlink(config_home); /* 不存在的文件忽略 */
+    char wp[700];
+    snprintf(wp, sizeof(wp), "%s/woodland/appearance.json", config_home);
+    unlink(wp);
+    snprintf(wp, sizeof(wp), "%s/woodland", config_home);
+    rmdir(wp);
+    rmdir(config_home);
+    rmdir(dir);
+
+    if (old_home) {
+        setenv("XDG_CONFIG_HOME", old_home, 1);
+    } else {
+        unsetenv("XDG_CONFIG_HOME");
+    }
+}
+
 int main(void)
 {
     test_default_config();
@@ -450,6 +521,7 @@ int main(void)
     test_json_dump();
     test_hot_reload_file();
     test_xwayland_config();
+    test_appearance_persist_roundtrip();
 
     printf("test_config: all assertions passed\n");
     return 0;

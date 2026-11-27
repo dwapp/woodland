@@ -25,7 +25,8 @@
 - **跨层接线**：键盘事件由 seat 模块转发至 `woodland_protocol_shortcuts_key()`；指针点击与滚轮事件通过 `server->shortcut_pointer_hook` 函数指针跨层分发，避免 shell/cursor 模块反向链接 protocol 库。
 
 ### 外观设置（`treeland-appearance-v1`）
-- **会话级配置不落盘**：通过协议 `set_*` 修改的外观值直接写入内存中的 `server->config`，不落盘。当收到 SIGHUP 重新加载文件配置时，配置会重置为文件内容，并在末尾调用 `woodland_protocol_refresh_appearance()` 全量重新向客户端广播。
+- **会话级配置落盘到 appearance.json**：通过协议 `set_*` 修改的外观值写入内存中的 `server->config`，并在每次 set_* 后由 `woodland_config_appearance_save()` 持久化到 `$XDG_CONFIG_HOME/woodland/appearance.json`（临时文件 + rename 原子写）。重启或 SIGHUP 重载时由 `woodland_config_appearance_overlay()` 读回并覆写 config，末尾 `woodland_protocol_refresh_appearance()` 全量重播给客户端。
+- **config.toml 与 appearance 的同名键已移除**：`[cursor] theme/size`、`[decorations] font/titlebar_height`、`[effects] corner_radius` 不再从 config.toml 解析——appearance.json 是这 5 个键重启后的唯一权威，避免两处来源互相覆盖。
 - **深色方案与用户显式覆盖**：若配置文件中显式配置了标题栏/边框色（`ssd.colors_specified` 为真），`set_color_scheme` 只调整光标、图标与强调色，不得覆盖用户显式指定的 SSD 配色。
 - **字体描述串规范**：修改字体必须调用 `woodland_font_with(desc, family, size_pt, ...)` 基于现有 Pango 描述对象微调。严禁自行拼接字符串，否则会丢失粗体（Bold 等 Pango weight）属性。
 - **光标主题热替换安全性**：更换主题必须使用 `woodland_cursor_apply_theme()`（先创建新 manager，成功后再销毁旧 manager），防止因目标主题不存在而导致 `server->cursor->xcursor_manager` 变为 NULL 崩溃。

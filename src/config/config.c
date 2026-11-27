@@ -173,6 +173,7 @@ void woodland_config_destroy(struct woodland_config *config)
     free(config->touchpad.accel_profile);
     free(config->cursor.theme);
     free(config->appearance.icon_theme);
+    free(config->appearance.monospace_font);
     free_output_rules(&config->output_rules);
     free(config);
 }
@@ -292,14 +293,12 @@ struct woodland_config *woodland_config_parse_string(const char *content, size_t
             toml_get_bool(gen, "allow_tearing", cfg->general.allow_tearing);
     }
 
-    /* 2. [decorations] */
+    /* 2. [decorations]：font 与 titlebar_height 已交给 treeland-appearance
+     * 持久化（appearance.json）作为唯一权威，这里不再解析，避免同一字段
+     * 两个来源互相覆盖。其余键照旧。 */
     const struct toml_table *ssd = toml_find_table(doc, "decorations");
     if (ssd) {
         cfg->ssd.enabled = toml_get_bool(ssd, "enabled", cfg->ssd.enabled);
-        int64_t th = toml_get_int(ssd, "titlebar_height", cfg->ssd.titlebar_height);
-        if (th > 0 && th < 200) {
-            cfg->ssd.titlebar_height = (int32_t)th;
-        }
         int64_t bw = toml_get_int(ssd, "border_width", cfg->ssd.border_width);
         if (bw >= 0 && bw < 50) {
             cfg->ssd.border_width = (int32_t)bw;
@@ -311,11 +310,6 @@ struct woodland_config *woodland_config_parse_string(const char *content, size_t
         int64_t rgw = toml_get_int(ssd, "resize_grab_width", cfg->ssd.resize_grab_width);
         if (rgw >= 0 && rgw < 50) {
             cfg->ssd.resize_grab_width = (int32_t)rgw;
-        }
-        const char *font_str = toml_get_string(ssd, "font", NULL);
-        if (font_str) {
-            free(cfg->ssd.font);
-            cfg->ssd.font = strdup(font_str);
         }
         cfg->ssd.active_title_color = parse_color(toml_get_string(ssd, "active_title_color", NULL),
                                                   cfg->ssd.active_title_color);
@@ -389,21 +383,10 @@ struct woodland_config *woodland_config_parse_string(const char *content, size_t
         }
     }
 
-    /* 5. [cursor] */
-    const struct toml_table *cur = toml_find_table(doc, "cursor");
-    if (cur) {
-        const char *theme = toml_get_string(cur, "theme", NULL);
-        if (theme) {
-            free(cfg->cursor.theme);
-            cfg->cursor.theme = strdup(theme);
-        }
-        int64_t size = toml_get_int(cur, "size", cfg->cursor.size);
-        if (size > 0 && size < 512) {
-            cfg->cursor.size = (int32_t)size;
-        }
-    }
+    /* 5. [cursor] 的 theme/size 已交给 treeland-appearance 持久化
+     * （appearance.json）作为唯一权威，config.toml 不再解析这两个键。 */
 
-    /* 6. [effects] */
+    /* 6. [effects]：corner_radius 同样交给 appearance.json，其余键照旧。 */
     const struct toml_table *fx = toml_find_table(doc, "effects");
     if (fx) {
         cfg->effects.enabled = toml_get_bool(fx, "enabled", cfg->effects.enabled);
@@ -433,10 +416,6 @@ struct woodland_config *woodland_config_parse_string(const char *content, size_t
         double bsat = toml_get_float(fx, "blur_saturation", cfg->effects.blur_saturation);
         if (bsat >= 0.0 && bsat <= 2.0) {
             cfg->effects.blur_saturation = bsat;
-        }
-        int64_t cr = toml_get_int(fx, "corner_radius", cfg->effects.corner_radius);
-        if (cr >= 0 && cr <= WOODLAND_SSD_MAX_SIZE) {
-            cfg->effects.corner_radius = (int32_t)cr;
         }
         cfg->effects.shadow = toml_get_bool(fx, "shadow", cfg->effects.shadow);
         int64_t sr = toml_get_int(fx, "shadow_radius", cfg->effects.shadow_radius);
@@ -544,29 +523,38 @@ char *woodland_config_resolve_path(const char *path_override)
 
 struct woodland_config *woodland_config_load(const char *path_override)
 {
+    struct woodland_config *cfg = NULL;
     char *path = woodland_config_resolve_path(path_override);
     if (!path) {
         wlr_log(WLR_INFO, "config: no config file found, using defaults");
-        return woodland_config_create_default();
+        cfg = woodland_config_create_default();
+        woodland_config_appearance_overlay(cfg);
+        return cfg;
     }
 
     FILE *f = fopen(path, "rb");
     if (!f) {
         wlr_log(WLR_ERROR, "config: failed to open %s: %s (using defaults)", path, strerror(errno));
         free(path);
-        return woodland_config_create_default();
+        cfg = woodland_config_create_default();
+        woodland_config_appearance_overlay(cfg);
+        return cfg;
     }
 
     if (fseek(f, 0, SEEK_END) != 0) {
         fclose(f);
         free(path);
-        return woodland_config_create_default();
+        cfg = woodland_config_create_default();
+        woodland_config_appearance_overlay(cfg);
+        return cfg;
     }
     long size = ftell(f);
     if (size < 0) {
         fclose(f);
         free(path);
-        return woodland_config_create_default();
+        cfg = woodland_config_create_default();
+        woodland_config_appearance_overlay(cfg);
+        return cfg;
     }
     rewind(f);
 
@@ -574,17 +562,21 @@ struct woodland_config *woodland_config_load(const char *path_override)
     if (!buf) {
         fclose(f);
         free(path);
-        return woodland_config_create_default();
+        cfg = woodland_config_create_default();
+        woodland_config_appearance_overlay(cfg);
+        return cfg;
     }
 
     size_t read_bytes = fread(buf, 1, size, f);
     fclose(f);
     buf[read_bytes] = '\0';
 
-    struct woodland_config *cfg = woodland_config_parse_string(buf, read_bytes, path);
+    cfg = woodland_config_parse_string(buf, read_bytes, path);
     free(buf);
     if (cfg) {
         cfg->loaded_path = path;
+        /* treeland-appearance 的设置独立持久化，config.toml 不再含同名字段 */
+        woodland_config_appearance_overlay(cfg);
     } else {
         free(path);
     }
@@ -708,6 +700,10 @@ void woodland_config_dump_json(const struct woodland_config *config, struct wood
     woodland_json_obj_bool(&ap, "accent_set", config->appearance.accent_set);
     woodland_json_obj_int(&ap, "accent_rgb", (long long)config->appearance.accent_rgb);
     woodland_json_obj_str(&ap, "icon_theme", config->appearance.icon_theme);
+    woodland_json_obj_str(&ap, "monospace_font", config->appearance.monospace_font);
+    woodland_json_obj_bool(&ap, "opacity_set", config->appearance.opacity_set);
+    woodland_json_obj_int(&ap, "window_opacity_milli",
+                          (long long)(config->appearance.window_opacity * 1000.0 + 0.5));
     woodland_json_obj_close(&ap);
     /* xwayland */
     woodland_json_obj_key(&root, "xwayland");

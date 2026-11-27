@@ -138,11 +138,17 @@ struct woodland_config_effects {
  * 配置对象里，三者都只是"读 server->config"，协议层负责写——和
  * view->ssd_overrides 同一套思路，只是粒度是用户级而不是窗口级。
  *
- * 语义边界：这些字段**不落盘**。配置文件是初值来源，SIGHUP 重载会把它们
- * 重置回文件里的值（协议改的是"此刻"，不是"以后"）。想持久化就写文件。
+ * 语义边界：这些字段由 treeland-appearance-manager 的 set_* 写入，并持久化
+ * 到 $XDG_CONFIG_HOME/woodland/appearance.json（见 src/config/appearance_persist.c）。
+ * config.toml 不再包含与它们重叠的同名字段（[cursor] theme/size、
+ * [decorations] font/titlebar_height、[effects] corner_radius 已移除），
+ * appearance.json 是这些字段重启后恢复的唯一权威来源。
  *
- * 只有真有渲染消费方的设置在这里；monospace_font / window_opacity 这类
- * woodland 还没有消费方的，存在协议族里，wctl 标成 recorded_only。
+ * 渲染消费方（ssd / icon / effect）只读 server->config，协议层负责写——
+ * 和 view->ssd_overrides 同一套思路，只是粒度是用户级而不是窗口级。
+ *
+ * monospace_font / window_opacity 仍没有渲染消费方（wctl 标 recorded_only），
+ * 但它们同样落盘，保证重启后能恢复。
  */
 struct woodland_config_appearance {
     bool color_scheme_set; /* 协议设过配色方案；false 时按浅色渲染 */
@@ -150,6 +156,9 @@ struct woodland_config_appearance {
     bool accent_set;       /* 协议设过强调色 */
     uint32_t accent_rgb;   /* 0xRRGGBB，只影响激活窗口的边框 */
     char *icon_theme;      /* NULL = 未设，按 icon.c 的内置主题表找图标 */
+    char *monospace_font;  /* NULL = 未设，无消费方（recorded_only） */
+    bool opacity_set;      /* 协议设过窗口不透明度 */
+    double window_opacity; /* opacity_set 时有效，范围 [0,1]；无消费方 */
 };
 
 enum woodland_scale_filter {
@@ -228,5 +237,20 @@ void woodland_config_apply(struct woodland_server *server, struct woodland_confi
  * 将配置对象导出为 JSON（供 IPC get_config 命令）。
  */
 void woodland_config_dump_json(const struct woodland_config *config, struct woodland_json *out);
+
+/**
+ * 读 $XDG_CONFIG_HOME/woodland/appearance.json 并把 treeland-appearance 的
+ * 11 项设置覆写到 config（文件不存在/损坏时保持 config 当前值不变）。
+ *
+ * 只覆写 appearance 相关的字段：cursor.theme/size、ssd.font/titlebar_height、
+ * effects.corner_radius，以及 appearance.* 全部。其余字段不受影响。
+ */
+void woodland_config_appearance_overlay(struct woodland_config *config);
+
+/**
+ * 把 appearance 相关字段写回 appearance.json（临时文件 + rename 原子写）。
+ * 失败只记日志，不影响运行期状态。
+ */
+bool woodland_config_appearance_save(const struct woodland_config *config);
 
 #endif /* WOODLAND_CONFIG_H */

@@ -302,6 +302,9 @@ bool woodland_config_reload(struct woodland_server *server)
         return false;
     }
     new_cfg->loaded_path = strdup(path);
+    /* treeland-appearance 的设置独立持久化，config.toml 不再含同名字段；
+     * 重载后外观必须从 appearance.json 恢复，而不是回到默认。 */
+    woodland_config_appearance_overlay(new_cfg);
 
     woodland_config_apply(server, new_cfg);
     wlr_log(WLR_INFO, "config: reloaded successfully from %s",
