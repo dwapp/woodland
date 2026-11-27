@@ -47,6 +47,12 @@ struct wlr_pointer_constraint_v1;
 struct woodland_window_menu;
 struct woodland_multitask_view;
 struct woodland_window_switcher;
+
+/**
+ * treeland-appearance 的持久化写入口（由 server 层实现，协议层经
+ * server->appearance_save_hook 调用；见该钩子的注释）。
+ */
+bool woodland_server_appearance_save(struct woodland_server *server);
 /* 贴边铺满预览（拖动窗口靠近屏幕边缘时显示的半透明目标区域预览） */
 struct woodland_snap_preview {
     struct woodland_server *server;
@@ -317,6 +323,16 @@ struct woodland_server {
      * 由 protocol/dde_shell.c 挂上，在 view map 时调用。
      */
     void (*dde_shell_init_view_hook)(struct woodland_view *view);
+    /*
+     * treeland-appearance 的持久化入口。
+     *
+     * 协议层 set_* 后要落盘，但 woodland_config_appearance_save 在 config_lib
+     * 里，而 protocol_lib 不能链接 config_lib（config_lib 的 apply.c 已经反向
+     * 调 protocol 层，链接会成环；只链 protocol_lib 的单测也会缺符号）。由
+     * server 在启动时把 config 的写入口挂到这里，协议层只经钩子调用；
+     * NULL 表示持久化不可用（单测里就是），此时 set_* 只改内存不落盘。
+     */
+    bool (*appearance_save_hook)(struct woodland_server *server);
 
     /* 截图/录屏（src/capture） */
     struct wlr_screencopy_manager_v1 *screencopy_manager;

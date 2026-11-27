@@ -13,11 +13,10 @@
  * 值存在哪儿（这是本文件唯一需要先想清楚的事）：
  *   有渲染消费方的设置写进 `server->config`——cursor / ssd / icon / effect
  *   都只读配置，而项目规定依赖单向（协议层可以调它们，它们不能反向依赖
- *   协议层）。协议族只保留"谁都不消费"的记录（monospace_font /
- *   window_opacity）和诊断计数。
- *   推论：**这些值不落盘**。SIGHUP 重载会按文件重建配置，协议写进去的运行期
- *   值随之回到文件值——配置文件是持久化的唯一来源，协议改的是"此刻"。
- *   重载之后 refresh() 会把新值重播给观测端，控制中心不会看到过期状态。
+ *   协议层）。没有消费方的两项（monospace_font / window_opacity）现在也
+ *   存入 config->appearance，与有消费方的一样持久化到 appearance.json。
+ *   推论：**这些值都落盘**。重启后由 woodland_config_appearance_overlay
+ *   恢复，SIGHUP 重载后 refresh() 把恢复值重播给观测端。
  *
  * 分档（与 decoration / compositor-action 同一套口径，不假装生效）：
  *   真生效：cursor_theme / cursor_size / font / font_size / icon_theme /
@@ -96,14 +95,6 @@ struct woodland_proto_appearance {
     struct wl_list managers;
 
     /*
-     * 只记录、没有渲染消费方的两项。放这里而不是 config：config 是"能画出来的
-     * 东西的唯一事实源"，把画不出来的塞进去会让读配置的人以为它生效了。
-     */
-    char *monospace_font;
-    bool opacity_set;
-    double window_opacity;
-
-    /*
      * 协议设过的光标尺寸。config 只有单个 size（wlr_xcursor_manager 只吃一个），
      * 但协议要求把 width/height 都报回去；宽高不等时按宽度取 square（height 也
      * 记成宽度），广播的也是这个实际生效值，另记一条 trace 说明降级。
@@ -111,7 +102,11 @@ struct woodland_proto_appearance {
     int32_t cursor_width;
     int32_t cursor_height;
 
-    /* 诊断：最近一次 set_* 被怎么处置，以及累计计数 */
+    /*
+     * 只记录、没有渲染消费方的两项（monospace_font / window_opacity）已并入
+     * server->config->appearance 统一持久化（appearance.json），不再留在族里。
+     * 诊断计数仍在。
+     */
     uint32_t request_count;
     uint32_t applied_count;
     uint32_t recorded_count;
@@ -347,12 +342,13 @@ static void broadcast_font(struct woodland_proto_appearance *state, const char *
 
 static void broadcast_monospace_font(struct woodland_proto_appearance *state)
 {
+    struct woodland_config *cfg = appearance_config(state);
+    const char *value = (cfg && cfg->appearance.monospace_font) ? cfg->appearance.monospace_font
+                                                               : "";
     struct appearance_observer *obs;
     wl_list_for_each(obs, &state->observers, link)
     {
-        treeland_appearance_v1_send_monospace_font(obs->resource,
-                                                   state->monospace_font ? state->monospace_font
-                                                                         : "");
+        treeland_appearance_v1_send_monospace_font(obs->resource, value);
     }
 }
 
@@ -386,11 +382,14 @@ static void broadcast_accent_color(struct woodland_proto_appearance *state, uint
 
 static void broadcast_window_opacity(struct woodland_proto_appearance *state)
 {
-    wl_fixed_t value = wl_fixed_from_double(state->opacity_set ? state->window_opacity : 1.0);
+    struct woodland_config *cfg = appearance_config(state);
+    bool set = cfg && cfg->appearance.opacity_set;
+    double value = set ? cfg->appearance.window_opacity : 1.0;
+    wl_fixed_t fixed = wl_fixed_from_double(value);
     struct appearance_observer *obs;
     wl_list_for_each(obs, &state->observers, link)
     {
-        treeland_appearance_v1_send_window_opacity(obs->resource, value);
+        treeland_appearance_v1_send_window_opacity(obs->resource, fixed);
     }
 }
 
@@ -432,9 +431,11 @@ static void appearance_send_all(struct woodland_proto_appearance *state,
     treeland_appearance_v1_send_cursor_size(resource, w, h);
 
     treeland_appearance_v1_send_font(resource, appearance_font_family(state));
-    treeland_appearance_v1_send_monospace_font(resource, state->monospace_font
-                                                             ? state->monospace_font
-                                                             : "");
+    struct woodland_config *cfg = appearance_config(state);
+    treeland_appearance_v1_send_monospace_font(resource,
+                                               (cfg && cfg->appearance.monospace_font)
+                                                   ? cfg->appearance.monospace_font
+                                                   : "");
     treeland_appearance_v1_send_font_size(resource, appearance_font_size(state));
     treeland_appearance_v1_send_icon_theme(resource, appearance_icon_theme(state));
 
@@ -443,7 +444,9 @@ static void appearance_send_all(struct woodland_proto_appearance *state,
     treeland_appearance_v1_send_accent_color(resource, r, g, b);
 
     treeland_appearance_v1_send_window_opacity(
-        resource, wl_fixed_from_double(state->opacity_set ? state->window_opacity : 1.0));
+        resource, wl_fixed_from_double((cfg && cfg->appearance.opacity_set)
+                                           ? cfg->appearance.window_opacity
+                                           : 1.0));
 
     treeland_appearance_v1_send_color_scheme(
         resource, appearance_dark(state) ? TREELAND_APPEARANCE_V1_COLOR_SCHEME_DARK
@@ -518,6 +521,16 @@ static struct woodland_proto_appearance *appearance_from_manager(struct wl_resou
     return mgr ? mgr->state : NULL;
 }
 
+/* set_* 成功后把外观落盘：协议写进 config 的值现在是要跨重启的，不能再
+ * 只改内存。写入口由 server 启动时挂到 appearance_save_hook（避免
+ * protocol_lib 链接 config_lib 成环）；失败只记日志，不影响当前状态。 */
+static void appearance_persist(struct woodland_proto_appearance *state)
+{
+    if (state->server && state->server->appearance_save_hook) {
+        state->server->appearance_save_hook(state->server);
+    }
+}
+
 static void manager_handle_destroy(struct wl_client *client, struct wl_resource *resource)
 {
     (void)client;
@@ -556,6 +569,7 @@ static void manager_set_cursor_theme(struct wl_client *client, struct wl_resourc
                     (want && effective && strcmp(want, effective) != 0)
                         ? "requested theme missing, fell back to default"
                         : NULL);
+    appearance_persist(state);
     broadcast_cursor_theme(state, appearance_cursor_theme(state));
 }
 
@@ -600,6 +614,7 @@ static void manager_set_cursor_size(struct wl_client *client, struct wl_resource
     }
     /* 广播实际生效值（square）：观测端拿到的不是它请求的那个，不能把被
      * 降级的 height 原样报回去。 */
+    appearance_persist(state);
     broadcast_cursor_size(state, cw, cw);
 }
 
@@ -629,6 +644,7 @@ static void manager_set_font(struct wl_client *client, struct wl_resource *resou
     }
     woodland_ssd_refresh_all(state->server);
     appearance_note(state, "set_font", APPEARANCE_OUTCOME_APPLIED, NULL);
+    appearance_persist(state);
     broadcast_font(state, family);
 }
 
@@ -640,18 +656,26 @@ static void manager_set_monospace_font(struct wl_client *client, struct wl_resou
     if (!state) {
         return;
     }
+    struct woodland_config *cfg = appearance_config(state);
     char *copy = strdup(font_name ? font_name : "");
     if (!copy) {
         return;
     }
-    free(state->monospace_font);
-    state->monospace_font = copy;
+    if (cfg) {
+        free(cfg->appearance.monospace_font);
+        cfg->appearance.monospace_font = copy;
+    } else {
+        free(copy);
+    }
     /* woodland 不画等宽字体（没有终端/代码视图），但协议要求"改了就说"。
      * 记下来 + 广播 + 明写只记录，客户端才不会以为它生效了。 */
     wlr_log(WLR_INFO, "appearance: monospace font '%s' recorded (no monospace consumer)",
-            state->monospace_font[0] ? state->monospace_font : "(empty)");
+            (cfg && cfg->appearance.monospace_font && cfg->appearance.monospace_font[0])
+                ? cfg->appearance.monospace_font
+                : "(empty)");
     appearance_note(state, "set_monospace_font", APPEARANCE_OUTCOME_RECORDED,
                     "no monospace consumer in this compositor");
+    appearance_persist(state);
     broadcast_monospace_font(state);
 }
 
@@ -683,6 +707,7 @@ static void manager_set_font_size(struct wl_client *client, struct wl_resource *
     appearance_note(state, "set_font_size",
                     pt10 != size ? APPEARANCE_OUTCOME_CLAMPED : APPEARANCE_OUTCOME_APPLIED,
                     pt10 != size ? "clamped to supported range" : NULL);
+    appearance_persist(state);
     broadcast_font_size(state, pt10);
 }
 
@@ -711,6 +736,7 @@ static void manager_set_icon_theme(struct wl_client *client, struct wl_resource 
     woodland_ssd_refresh_all(state->server);
     appearance_note(state, "set_icon_theme", APPEARANCE_OUTCOME_APPLIED,
                     (theme_name && *theme_name) ? NULL : "empty theme, built-in list used");
+    appearance_persist(state);
     broadcast_icon_theme(state, appearance_icon_theme(state));
 }
 
@@ -744,6 +770,7 @@ static void manager_set_accent_color(struct wl_client *client, struct wl_resourc
     appearance_note(state, "set_accent_color",
                     clamped ? APPEARANCE_OUTCOME_CLAMPED : APPEARANCE_OUTCOME_APPLIED,
                     clamped ? "component clamped to 255" : NULL);
+    appearance_persist(state);
     broadcast_accent_color(state, r, g, b);
 }
 
@@ -762,14 +789,18 @@ static void manager_set_window_opacity(struct wl_client *client, struct wl_resou
     if (value > 1.0) {
         value = 1.0;
     }
-    state->opacity_set = true;
-    state->window_opacity = value;
+    struct woodland_config *cfg = appearance_config(state);
+    if (cfg) {
+        cfg->appearance.opacity_set = true;
+        cfg->appearance.window_opacity = value;
+    }
     /* woodland 没有逐窗口 alpha 通道：要让整个窗口半透明，得给每个 surface
      * 挂 alpha-modifier 并和 blur/圆角排序，属单独一版。这里如实记录并明说。 */
     wlr_log(WLR_INFO, "appearance: window opacity %.3f recorded (no per-window alpha path)",
             value);
     appearance_note(state, "set_window_opacity", APPEARANCE_OUTCOME_RECORDED,
                     "no per-window alpha path in this compositor");
+    appearance_persist(state);
     broadcast_window_opacity(state);
 }
 
@@ -799,6 +830,7 @@ static void manager_set_color_scheme(struct wl_client *client, struct wl_resourc
                     (cfg && cfg->ssd.colors_specified)
                         ? "file-set colors win over the scheme palette"
                         : NULL);
+    appearance_persist(state);
     broadcast_color_scheme(state, scheme);
 }
 
@@ -824,6 +856,7 @@ static void manager_set_titlebar_height(struct wl_client *client, struct wl_reso
     appearance_note(state, "set_titlebar_height",
                     value != height ? APPEARANCE_OUTCOME_CLAMPED : APPEARANCE_OUTCOME_APPLIED,
                     value != height ? "clamped to [0,200]" : NULL);
+    appearance_persist(state);
     broadcast_titlebar_height(state, value);
 }
 
@@ -857,6 +890,7 @@ static void manager_set_corner_radius(struct wl_client *client, struct wl_resour
                              ? "no render backend for corners"
                              : (value != radius ? "clamped to [0,1000]" : NULL);
     appearance_note(state, "set_corner_radius", outcome, detail);
+    appearance_persist(state);
     broadcast_corner_radius(state, appearance_corner_radius(state));
 }
 
@@ -1021,7 +1055,10 @@ void woodland_protocol_appearance_status(struct woodland_server *server, struct 
     woodland_json_obj_str(&obj, "font", appearance_font_desc(state));
     woodland_json_obj_str(&obj, "font_family", appearance_font_family(state));
     woodland_json_obj_int(&obj, "font_size_pt10", appearance_font_size(state));
-    woodland_json_obj_str(&obj, "monospace_font", state->monospace_font);
+    struct woodland_config *cfg = appearance_config(state);
+    woodland_json_obj_str(&obj, "monospace_font",
+                          (cfg && cfg->appearance.monospace_font) ? cfg->appearance.monospace_font
+                                                                 : "");
     woodland_json_obj_str(&obj, "icon_theme", appearance_icon_theme(state));
 
     uint32_t r, g, b;
@@ -1029,12 +1066,12 @@ void woodland_protocol_appearance_status(struct woodland_server *server, struct 
     int accent[3] = {(int)r, (int)g, (int)b};
     woodland_json_obj_key(&obj, "accent");
     woodland_json_int_array(out, accent, 3);
-    struct woodland_config *cfg = appearance_config(state);
     woodland_json_obj_bool(&obj, "accent_set", cfg && cfg->appearance.accent_set);
 
-    woodland_json_obj_int(&obj, "window_opacity_milli",
-                          (long long)((state->opacity_set ? state->window_opacity : 1.0) * 1000.0));
-    woodland_json_obj_bool(&obj, "window_opacity_set", state->opacity_set);
+    bool opacity_set = cfg && cfg->appearance.opacity_set;
+    double opacity = opacity_set ? cfg->appearance.window_opacity : 1.0;
+    woodland_json_obj_int(&obj, "window_opacity_milli", (long long)(opacity * 1000.0));
+    woodland_json_obj_bool(&obj, "window_opacity_set", opacity_set);
     woodland_json_obj_str(&obj, "color_scheme", appearance_dark(state) ? "dark" : "light");
     woodland_json_obj_bool(&obj, "color_scheme_set", cfg && cfg->appearance.color_scheme_set);
     woodland_json_obj_int(&obj, "titlebar_height", appearance_titlebar_height(state));
@@ -1127,7 +1164,6 @@ void woodland_proto_appearance_finish(struct woodland_proto *proto)
         wl_list_remove(&mgr->link);
         free(mgr);
     }
-    free(state->monospace_font);
     free(state);
     proto->appearance = NULL;
 }
