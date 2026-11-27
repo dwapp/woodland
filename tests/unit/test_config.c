@@ -511,6 +511,144 @@ static void test_appearance_persist_roundtrip(void)
     }
 }
 
+/* appearance.json 的绝对路径写入位置：$XDG_CONFIG_HOME/woodland/appearance.json */
+static void appearance_test_config_home(char *buf, size_t size, const char *tmpdir)
+{
+    snprintf(buf, size, "%s/config", tmpdir);
+}
+
+static void appearance_test_write_raw(const char *config_home, const char *content)
+{
+    char dir[700];
+    snprintf(dir, sizeof(dir), "%s/woodland", config_home);
+    /* mkdir -p（与 appearance_persist.c 一致） */
+    char p[700];
+    snprintf(p, sizeof(p), "%s", dir);
+    for (char *c = p + 1; *c; c++) {
+        if (*c == '/') {
+            *c = '\0';
+            mkdir(p, 0755);
+            *c = '/';
+        }
+    }
+    mkdir(p, 0755);
+    char path[760];
+    snprintf(path, sizeof(path), "%s/appearance.json", dir);
+    FILE *f = fopen(path, "w");
+    assert(f != NULL);
+    fputs(content, f);
+    fclose(f);
+}
+
+static void appearance_test_cleanup(const char *tmpdir, const char *old_home)
+{
+    char config_home[512];
+    appearance_test_config_home(config_home, sizeof(config_home), tmpdir);
+    char wp[700];
+    snprintf(wp, sizeof(wp), "%s/woodland/appearance.json", config_home);
+    unlink(wp);
+    snprintf(wp, sizeof(wp), "%s/woodland", config_home);
+    rmdir(wp);
+    rmdir(config_home);
+    rmdir(tmpdir);
+    if (old_home) {
+        setenv("XDG_CONFIG_HOME", old_home, 1);
+    } else {
+        unsetenv("XDG_CONFIG_HOME");
+    }
+}
+
+/* 未设过任何值的默认态 round-trip：标志位应保持 false，不被数值键误翻 */
+static void test_appearance_persist_unset_roundtrip(void)
+{
+    char tmpdir[] = "/tmp/woodland_appearance_unset_XXXXXX";
+    char *dir = mkdtemp(tmpdir);
+    assert(dir != NULL);
+    char config_home[512];
+    appearance_test_config_home(config_home, sizeof(config_home), dir);
+    const char *old_home = getenv("XDG_CONFIG_HOME");
+    setenv("XDG_CONFIG_HOME", config_home, 1);
+
+    /* 默认配置：什么都没设 */
+    struct woodland_config *cfg = woodland_config_create_default();
+    assert(cfg != NULL);
+    assert(!cfg->appearance.accent_set);
+    assert(!cfg->appearance.opacity_set);
+    assert(!cfg->appearance.color_scheme_set);
+    assert(cfg->appearance.icon_theme == NULL);
+    assert(cfg->appearance.monospace_font == NULL);
+    assert(woodland_config_appearance_save(cfg));
+
+    struct woodland_config *restored = woodland_config_create_default();
+    assert(restored != NULL);
+    woodland_config_appearance_overlay(restored);
+
+    /* 关键：数值键 0 / 0.000 不应翻转标志位 */
+    assert(!restored->appearance.accent_set);
+    assert(restored->appearance.accent_rgb == 0);
+    assert(!restored->appearance.opacity_set);
+    assert(restored->appearance.window_opacity == 0.0);
+    assert(!restored->appearance.color_scheme_set);
+    assert(!restored->appearance.dark);
+    assert(restored->appearance.icon_theme == NULL);
+    assert(restored->appearance.monospace_font == NULL);
+
+    woodland_config_destroy(restored);
+    woodland_config_destroy(cfg);
+    appearance_test_cleanup(dir, old_home);
+}
+
+/* 空字符串 / null 回落、越界 clamp、malformed JSON 回退默认 */
+static void test_appearance_persist_edge_cases(void)
+{
+    char tmpdir[] = "/tmp/woodland_appearance_edge_XXXXXX";
+    char *dir = mkdtemp(tmpdir);
+    assert(dir != NULL);
+    char config_home[512];
+    appearance_test_config_home(config_home, sizeof(config_home), dir);
+    const char *old_home = getenv("XDG_CONFIG_HOME");
+    setenv("XDG_CONFIG_HOME", config_home, 1);
+
+    /* 1. 空字符串回落 + 越界 clamp + null 回落 */
+    appearance_test_write_raw(config_home,
+                              "{\"cursor_theme\":\"\",\"cursor_size\":999,"
+                              "\"titlebar_height\":999,\"corner_radius\":9999,"
+                              "\"icon_theme\":\"\",\"monospace_font\":null,"
+                              "\"window_opacity\":2.5,\"opacity_set\":true,"
+                              "\"accent_set\":true,\"accent_rgb\":16777215}");
+    struct woodland_config *cfg = woodland_config_create_default();
+    assert(cfg != NULL);
+    woodland_config_appearance_overlay(cfg);
+
+    /* 空串 cursor_theme 不应用（保持默认，协议层永不会写出空串） */
+    assert(strcmp(cfg->cursor.theme, "default") == 0);
+    assert(cfg->cursor.size == 256);                 /* clamp 到上限 */
+    assert(cfg->ssd.titlebar_height == 200);          /* clamp 到上限 */
+    assert(cfg->effects.corner_radius == WOODLAND_SSD_MAX_SIZE); /* clamp */
+    assert(cfg->appearance.icon_theme == NULL);       /* 空串回落 NULL */
+    assert(cfg->appearance.monospace_font == NULL);   /* null 回落 NULL */
+    assert(cfg->appearance.opacity_set);
+    assert(cfg->appearance.window_opacity == 1.0);    /* 2.5 clamp 到 1.0 */
+    assert(cfg->appearance.accent_set);
+    assert(cfg->appearance.accent_rgb == 0xFFFFFF);   /* 16777215 = 0xFFFFFF */
+    woodland_config_destroy(cfg);
+
+    /* 2. malformed JSON：回退当前值（全新默认） */
+    appearance_test_write_raw(config_home, "{ this is not valid json");
+    cfg = woodland_config_create_default();
+    assert(cfg != NULL);
+    woodland_config_appearance_overlay(cfg);
+    /* 保持默认 */
+    assert(cfg->cursor.size == 24);
+    assert(cfg->ssd.titlebar_height == 32);
+    assert(cfg->effects.corner_radius == 4);
+    assert(!cfg->appearance.accent_set);
+    assert(!cfg->appearance.opacity_set);
+    woodland_config_destroy(cfg);
+
+    appearance_test_cleanup(dir, old_home);
+}
+
 int main(void)
 {
     test_default_config();
@@ -522,6 +660,8 @@ int main(void)
     test_hot_reload_file();
     test_xwayland_config();
     test_appearance_persist_roundtrip();
+    test_appearance_persist_unset_roundtrip();
+    test_appearance_persist_edge_cases();
 
     printf("test_config: all assertions passed\n");
     return 0;
