@@ -295,7 +295,6 @@ static void ap_apply_field(struct woodland_config *cfg, const char *key,
                            const char *str, bool has_str, double num, bool is_bool,
                            bool bool_val, bool is_null)
 {
-    (void)num;
     if (strcmp(key, "cursor_theme") == 0) {
         if (!is_null && has_str && str[0]) {
             char *copy = strdup(str);

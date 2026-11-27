@@ -311,6 +311,11 @@ struct woodland_config *woodland_config_parse_string(const char *content, size_t
         if (rgw >= 0 && rgw < 50) {
             cfg->ssd.resize_grab_width = (int32_t)rgw;
         }
+        if (toml_get(ssd, "font") || toml_get(ssd, "titlebar_height")) {
+            wlr_log(WLR_INFO,
+                    "config: [decorations] font/titlebar_height moved to appearance.json "
+                    "(treeland-appearance), ignoring legacy keys");
+        }
         cfg->ssd.active_title_color = parse_color(toml_get_string(ssd, "active_title_color", NULL),
                                                   cfg->ssd.active_title_color);
         cfg->ssd.inactive_title_color = parse_color(
@@ -385,10 +390,21 @@ struct woodland_config *woodland_config_parse_string(const char *content, size_t
 
     /* 5. [cursor] 的 theme/size 已交给 treeland-appearance 持久化
      * （appearance.json）作为唯一权威，config.toml 不再解析这两个键。 */
+    const struct toml_table *cur = toml_find_table(doc, "cursor");
+    if (cur && (toml_get(cur, "theme") || toml_get(cur, "size"))) {
+        wlr_log(WLR_INFO,
+                "config: [cursor] theme/size moved to appearance.json "
+                "(treeland-appearance), ignoring legacy keys");
+    }
 
     /* 6. [effects]：corner_radius 同样交给 appearance.json，其余键照旧。 */
     const struct toml_table *fx = toml_find_table(doc, "effects");
     if (fx) {
+        if (toml_get(fx, "corner_radius")) {
+            wlr_log(WLR_INFO,
+                    "config: [effects] corner_radius moved to appearance.json "
+                    "(treeland-appearance), ignoring legacy key");
+        }
         cfg->effects.enabled = toml_get_bool(fx, "enabled", cfg->effects.enabled);
         cfg->effects.blur = toml_get_bool(fx, "blur", cfg->effects.blur);
         cfg->effects.blur_optimized =
@@ -689,8 +705,8 @@ void woodland_config_dump_json(const struct woodland_config *config, struct wood
     woodland_json_obj_close(&fx);
 
     /*
-     * appearance：协议运行期写入的值。和文件里的键分开报，免得读的人以为
-     * 这些能写进 config.toml（它们不落盘，见 woodland_config.h 的注释）。
+     * appearance：treeland-appearance 的运行期值（含落盘到 appearance.json 的
+     * 状态）。和文件里的键分开报，避免读的人以为这些是 config.toml 的键。
      */
     woodland_json_obj_key(&root, "appearance");
     struct woodland_json_obj ap;
