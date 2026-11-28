@@ -307,25 +307,16 @@ void woodland_snap_preview_show(struct woodland_server *server, struct woodland_
 
 #if WOODLAND_HAVE_EFFECTS
     /*
-     * 圆角描边：外框 rect 画满色，再用 clipped_region 把内框挖掉，
-     * 剩下的一圈就是边框；内半径 r、外半径 r+b 才能让内外弧同心。
-     * 不在 1px 细条上设圆角（scenefx 会按 rect 自身尺寸 clamp 掉半径）。
+     * 预览是贴满目标区域的直角指示框，不是窗口，不跟随 effects 圆角。
+     * 外框 rect 画满色，再用 clipped_region 把内框挖掉留出一圈边框——
+     * 挖空与圆角无关：fill 是半透明的，不挖空就会透出底下的边框色。
+     * 四角一律保持 scenefx 默认的直角（corner_radii_none）。
      */
     if (sp->border && sp->fill) {
-        int r = (server->config && server->config->effects.enabled)
-                    ? server->config->effects.corner_radius
-                    : 0;
         struct clipped_region clip = clipped_region_get_default();
         clip.area = (struct wlr_box){b, b, inner_w, inner_h};
-
-        if (r > 0) {
-            wlr_scene_rect_set_corner_radii(sp->border, corner_radii_new(r + b, r + b, r + b, r + b));
-            clip.corners = corner_radii_new(r, r, r, r);
-            wlr_scene_rect_set_corner_radii(sp->fill, corner_radii_new(r, r, r, r));
-        } else {
-            wlr_scene_rect_set_corner_radii(sp->border, corner_radii_none());
-            wlr_scene_rect_set_corner_radii(sp->fill, corner_radii_none());
-        }
+        wlr_scene_rect_set_corner_radii(sp->border, corner_radii_none());
+        wlr_scene_rect_set_corner_radii(sp->fill, corner_radii_none());
         wlr_scene_rect_set_clipped_region(sp->border, clip);
     }
 #endif
