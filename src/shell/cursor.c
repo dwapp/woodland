@@ -103,6 +103,67 @@ static void ssd_button_release(struct woodland_server *server)
 
 /* ==================== motion 分发 ==================== */
 
+struct woodland_view *woodland_cursor_ssd_at(struct woodland_server *server,
+                                             struct woodland_view *surface_view, double lx,
+                                             double ly, enum woodland_ssd_part *out_part,
+                                             uint32_t *out_edges)
+{
+    if (!server || !server->views.next) {
+        return NULL;
+    }
+    struct woodland_view *v;
+    wl_list_for_each(v, &server->views, link)
+    {
+        if (!v->mapped || v->minimized || v->workspace != server->active_workspace ||
+            !v->scene_tree || !v->scene_tree->node.enabled) {
+            continue;
+        }
+        if (v == surface_view) {
+            /*
+             * server->views 按从顶到底的 Z 序排列：走到 surface_view
+             * 仍未命中更上层视图的 SSD，说明命中处由 surface_view 的
+             * 客户端 surface 遮挡，不能被下层窗口的 SSD/resize 抢走。
+             */
+            break;
+        }
+        uint32_t edges = 0;
+        enum woodland_ssd_part part = woodland_ssd_at(v, lx, ly, &edges);
+        if (part != WOODLAND_SSD_NONE) {
+            if (out_part) {
+                *out_part = part;
+            }
+            if (out_edges) {
+                *out_edges = edges;
+            }
+            return v;
+        }
+    }
+    return NULL;
+}
+
+static uint32_t ssd_resize_edges(const struct woodland_view *ssd_view, double lx, double ly,
+                                 uint32_t edges)
+{
+    uint32_t resize_edges = edges;
+    int w = 0, h = 0;
+    if (woodland_ssd_content_size(ssd_view, &w, &h) && w > 0 && h > 0) {
+        double rx = lx - ssd_view->scene_tree->node.x;
+        double ry = ly - ssd_view->scene_tree->node.y;
+        int corner_dist = 16;
+        if (rx <= corner_dist) {
+            resize_edges |= WLR_EDGE_LEFT;
+        } else if (rx >= w - corner_dist) {
+            resize_edges |= WLR_EDGE_RIGHT;
+        }
+        if (ry <= corner_dist) {
+            resize_edges |= WLR_EDGE_TOP;
+        } else if (ry >= h - corner_dist) {
+            resize_edges |= WLR_EDGE_BOTTOM;
+        }
+    }
+    return resize_edges;
+}
+
 void woodland_cursor_process_motion(struct woodland_server *server, uint32_t time)
 {
     if (woodland_session_lock_is_locked(server)) {
@@ -164,46 +225,19 @@ void woodland_cursor_process_motion(struct woodland_server *server, uint32_t tim
     struct woodland_view *view =
         woodland_view_at(server, server->cursor->x, server->cursor->y, &surface, &sx, &sy);
 
-    /* 未命中 surface 时，检查是否悬停在某视图的 SSD 区域（标题栏/边框） */
+    /* 检查是否悬停在高于 surface 命中视图（或无 surface 命中）的 SSD 区域 */
     enum woodland_ssd_part ssd_part = WOODLAND_SSD_NONE;
     uint32_t edges = 0;
-    struct woodland_view *ssd_view = NULL;
-    if (!view) {
-        struct woodland_view *v;
-        wl_list_for_each(v, &server->views, link)
-        {
-            enum woodland_ssd_part part =
-                woodland_ssd_at(v, server->cursor->x, server->cursor->y, &edges);
-            if (part != WOODLAND_SSD_NONE) {
-                ssd_part = part;
-                ssd_view = v;
-                break;
-            }
-        }
-    }
+    struct woodland_view *ssd_view = woodland_cursor_ssd_at(
+        server, view, server->cursor->x, server->cursor->y, &ssd_part, &edges);
 
     if (ssd_view) {
         /* 悬停 SSD：按区域切换光标，不给 surface 指针焦点 */
         if (ssd_part == WOODLAND_SSD_TITLEBAR) {
             woodland_cursor_set(server, "default");
         } else if (ssd_part >= WOODLAND_SSD_BORDER_LEFT && ssd_part <= WOODLAND_SSD_BORDER_BOTTOM) {
-            uint32_t resize_edges = edges;
-            int w = 0, h = 0;
-            if (woodland_ssd_content_size(ssd_view, &w, &h) && w > 0 && h > 0) {
-                double rx = server->cursor->x - ssd_view->scene_tree->node.x;
-                double ry = server->cursor->y - ssd_view->scene_tree->node.y;
-                int corner_dist = 16;
-                if (rx <= corner_dist) {
-                    resize_edges |= WLR_EDGE_LEFT;
-                } else if (rx >= w - corner_dist) {
-                    resize_edges |= WLR_EDGE_RIGHT;
-                }
-                if (ry <= corner_dist) {
-                    resize_edges |= WLR_EDGE_TOP;
-                } else if (ry >= h - corner_dist) {
-                    resize_edges |= WLR_EDGE_BOTTOM;
-                }
-            }
+            uint32_t resize_edges =
+                ssd_resize_edges(ssd_view, server->cursor->x, server->cursor->y, edges);
             woodland_cursor_set_resize(server, resize_edges);
         } else {
             woodland_cursor_set(server, "default");
@@ -399,7 +433,65 @@ static void server_cursor_button(struct wl_listener *listener, void *data)
         struct wlr_surface *surface = NULL;
         struct woodland_view *view =
             woodland_view_at(server, server->cursor->x, server->cursor->y, &surface, &sx, &sy);
-        if (view) {
+#if WOODLAND_HAVE_XWAYLAND
+        if (!view && surface) {
+            struct wlr_xwayland_surface *xsurface =
+                wlr_xwayland_surface_try_from_wlr_surface(surface);
+            if (xsurface && wlr_xwayland_surface_override_redirect_wants_focus(xsurface)) {
+                woodland_seat_focus_surface(server, surface);
+                return;
+            }
+        }
+#endif
+        /* 先查高于 surface 命中视图的 SSD 区域（含向外扩展的 resize 抓取区） */
+        uint32_t edges = 0;
+        enum woodland_ssd_part ssd_part = WOODLAND_SSD_NONE;
+        struct woodland_view *ssd_view = woodland_cursor_ssd_at(
+            server, view, server->cursor->x, server->cursor->y, &ssd_part, &edges);
+        if (ssd_view) {
+            woodland_focus_view(ssd_view, true);
+            server->grab_context.view = ssd_view;
+            server->grab_context.cursor_x = server->cursor->x;
+            server->grab_context.cursor_y = server->cursor->y;
+            server->grab_context.node_x = ssd_view->scene_tree ? ssd_view->scene_tree->node.x : 0;
+            server->grab_context.node_y = ssd_view->scene_tree ? ssd_view->scene_tree->node.y : 0;
+            server->grab_context.active = true;
+            switch (ssd_part) {
+            case WOODLAND_SSD_BUTTON_CLOSE:
+            case WOODLAND_SSD_BUTTON_MAXIMIZE:
+            case WOODLAND_SSD_BUTTON_MINIMIZE:
+                /* 记下按下目标，释放时再执行（见 ssd_button_release） */
+                server->pressed_view = ssd_view;
+                server->pressed_part = ssd_part;
+                woodland_ssd_set_pressed(ssd_view, ssd_part);
+                break;
+            case WOODLAND_SSD_TITLEBAR:
+                if (event->button == BTN_RIGHT) {
+                    woodland_window_menu_show(ssd_view, server->cursor->x, server->cursor->y);
+                    return;
+                }
+                {
+                    double rx = server->cursor->x - ssd_view->scene_tree->node.x;
+                    if (event->button == BTN_LEFT && rx >= 0 && rx <= 28) {
+                        woodland_window_menu_show(ssd_view, server->cursor->x, server->cursor->y);
+                        return;
+                    }
+                }
+                woodland_view_begin_interactive(ssd_view, WOODLAND_CURSOR_MOVE, 0);
+                break;
+            case WOODLAND_SSD_BORDER_LEFT:
+            case WOODLAND_SSD_BORDER_RIGHT:
+            case WOODLAND_SSD_BORDER_TOP:
+            case WOODLAND_SSD_BORDER_BOTTOM: {
+                uint32_t resize_edges =
+                    ssd_resize_edges(ssd_view, server->cursor->x, server->cursor->y, edges);
+                woodland_view_begin_interactive(ssd_view, WOODLAND_CURSOR_RESIZE, resize_edges);
+                break;
+            }
+            default:
+                break;
+            }
+        } else if (view) {
             woodland_focus_view(view, true);
             server->grab_context.view = view;
             server->grab_context.cursor_x = server->cursor->x;
@@ -408,98 +500,13 @@ static void server_cursor_button(struct wl_listener *listener, void *data)
             server->grab_context.node_y = view->scene_tree ? view->scene_tree->node.y : 0;
             server->grab_context.active = true;
         } else {
-#if WOODLAND_HAVE_XWAYLAND
-            if (surface) {
-                struct wlr_xwayland_surface *xsurface =
-                    wlr_xwayland_surface_try_from_wlr_surface(surface);
-                if (xsurface && wlr_xwayland_surface_override_redirect_wants_focus(xsurface)) {
-                    woodland_seat_focus_surface(server, surface);
-                    return;
-                }
-            }
-#endif
-            /* 未命中 surface：先查 SSD 区域（按钮/标题栏/边框） */
-            uint32_t edges = 0;
-            struct woodland_view *ssd_view = NULL;
-            enum woodland_ssd_part ssd_part = WOODLAND_SSD_NONE;
-            struct woodland_view *v;
-            wl_list_for_each(v, &server->views, link)
-            {
-                enum woodland_ssd_part part =
-                    woodland_ssd_at(v, server->cursor->x, server->cursor->y, &edges);
-                if (part != WOODLAND_SSD_NONE) {
-                    ssd_part = part;
-                    ssd_view = v;
-                    break;
-                }
-            }
-            if (ssd_view) {
-                woodland_focus_view(ssd_view, true);
-                server->grab_context.view = ssd_view;
-                server->grab_context.cursor_x = server->cursor->x;
-                server->grab_context.cursor_y = server->cursor->y;
-                server->grab_context.node_x = ssd_view->scene_tree ? ssd_view->scene_tree->node.x : 0;
-                server->grab_context.node_y = ssd_view->scene_tree ? ssd_view->scene_tree->node.y : 0;
-                server->grab_context.active = true;
-                switch (ssd_part) {
-                case WOODLAND_SSD_BUTTON_CLOSE:
-                case WOODLAND_SSD_BUTTON_MAXIMIZE:
-                case WOODLAND_SSD_BUTTON_MINIMIZE:
-                    /* 记下按下目标，释放时再执行（见 ssd_button_release） */
-                    server->pressed_view = ssd_view;
-                    server->pressed_part = ssd_part;
-                    woodland_ssd_set_pressed(ssd_view, ssd_part);
-                    break;
-                case WOODLAND_SSD_TITLEBAR:
-                    if (event->button == BTN_RIGHT) {
-                        woodland_window_menu_show(ssd_view, server->cursor->x, server->cursor->y);
-                        return;
-                    }
-                    {
-                        double rx = server->cursor->x - ssd_view->scene_tree->node.x;
-                        if (event->button == BTN_LEFT && rx >= 0 && rx <= 28) {
-                            woodland_window_menu_show(ssd_view, server->cursor->x, server->cursor->y);
-                            return;
-                        }
-                    }
-                    woodland_view_begin_interactive(ssd_view, WOODLAND_CURSOR_MOVE, 0);
-                    break;
-                case WOODLAND_SSD_BORDER_LEFT:
-                case WOODLAND_SSD_BORDER_RIGHT:
-                case WOODLAND_SSD_BORDER_TOP:
-                case WOODLAND_SSD_BORDER_BOTTOM: {
-                    uint32_t resize_edges = edges;
-                    int w = 0, h = 0;
-                    if (woodland_ssd_content_size(ssd_view, &w, &h) && w > 0 && h > 0) {
-                        double rx = server->cursor->x - ssd_view->scene_tree->node.x;
-                        double ry = server->cursor->y - ssd_view->scene_tree->node.y;
-                        int corner_dist = 16;
-                        if (rx <= corner_dist) {
-                            resize_edges |= WLR_EDGE_LEFT;
-                        } else if (rx >= w - corner_dist) {
-                            resize_edges |= WLR_EDGE_RIGHT;
-                        }
-                        if (ry <= corner_dist) {
-                            resize_edges |= WLR_EDGE_TOP;
-                        } else if (ry >= h - corner_dist) {
-                            resize_edges |= WLR_EDGE_BOTTOM;
-                        }
-                    }
-                    woodland_view_begin_interactive(ssd_view, WOODLAND_CURSOR_RESIZE, resize_edges);
-                    break;
-                }
-                default:
-                    break;
-                }
-            } else {
-                /* 点中 layer surface 时按 interactivity 给焦点 */
-                struct wlr_surface *lsurf = NULL;
-                double lsx, lsy;
-                struct wlr_layer_surface_v1 *layer = woodland_layer_surface_at(
-                    server, server->cursor->x, server->cursor->y, &lsurf, &lsx, &lsy);
-                if (layer) {
-                    woodland_layer_try_focus(server, layer);
-                }
+            /* 点中 layer surface 时按 interactivity 给焦点 */
+            struct wlr_surface *lsurf = NULL;
+            double lsx, lsy;
+            struct wlr_layer_surface_v1 *layer = woodland_layer_surface_at(
+                server, server->cursor->x, server->cursor->y, &lsurf, &lsx, &lsy);
+            if (layer) {
+                woodland_layer_try_focus(server, layer);
             }
         }
     }

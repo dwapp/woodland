@@ -292,6 +292,19 @@ void woodland_popup_unconstrain(struct wlr_xdg_popup *popup);
 struct woodland_view *woodland_view_at(struct woodland_server *server, double lx, double ly,
                                        struct wlr_surface **surface, double *sx, double *sy);
 
+/**
+ * 查找 (lx, ly) 处应响应指针事件的 SSD 视图。
+ *
+ * surface_view 为同一坐标下客户端 surface 的命中视图（可为 NULL）：
+ * 仅当某个处于活动工作区、已映射且未最小化的视图在 Z 序上严格位于
+ * surface_view 之上，且其 SSD（含向外扩展的 resize 抓取区）命中 (lx, ly)
+ * 时返回该视图；否则返回 NULL。
+ */
+struct woodland_view *woodland_cursor_ssd_at(struct woodland_server *server,
+                                             struct woodland_view *surface_view, double lx,
+                                             double ly, enum woodland_ssd_part *out_part,
+                                             uint32_t *out_edges);
+
 /** 交互式移动/缩放的指针 motion 处理。 */
 void woodland_cursor_process_motion(struct woodland_server *server, uint32_t time);
 
