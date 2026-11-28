@@ -14,9 +14,11 @@
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_output_layout.h>
+#include <wlr/types/wlr_xdg_shell.h>
 #include "scene.h"
 #include <wlr/util/edges.h>
 
+#include "layer.h"
 #include "output.h"
 #include "placement.h"
 #include "ssd.h"
@@ -273,6 +275,170 @@ int main(void) {
     assert(v.scene_tree->node.x == 0);
     assert(v.scene_tree->node.y == 0);
     wlr_scene_node_destroy(&v.scene_tree->node);
+
+    /* ---------- 标题栏约束（纯函数） ---------- */
+    struct wlr_box workarea = { .x = 0, .y = 40, .width = 800, .height = 520 };
+    int tb_h = 33;
+    /* 1. 完全在顶部之上（如顶部新出现 40px 面板）-> 拉回 workarea.y */
+    struct wlr_box tb_box = { .x = 100, .y = 0, .width = 300, .height = 200 };
+    woodland_box_constrain_titlebar(&tb_box, tb_h, &workarea);
+    assert(tb_box.x == 100 && tb_box.y == 40);
+    /* 2. 完全在底部之下（y >= 40 + 520 = 560）-> 拉回 560 - 33 = 527 */
+    tb_box = (struct wlr_box){ .x = 100, .y = 570, .width = 300, .height = 200 };
+    woodland_box_constrain_titlebar(&tb_box, tb_h, &workarea);
+    assert(tb_box.x == 100 && tb_box.y == 527);
+    /* 3. 完全在左侧之外 -> 拉回 workarea.x */
+    tb_box = (struct wlr_box){ .x = -350, .y = 100, .width = 300, .height = 200 };
+    woodland_box_constrain_titlebar(&tb_box, tb_h, &workarea);
+    assert(tb_box.x == 0 && tb_box.y == 100);
+    /* 4. 完全在右侧之外 -> 拉回 workarea.x + width - box.width */
+    tb_box = (struct wlr_box){ .x = 850, .y = 100, .width = 300, .height = 200 };
+    woodland_box_constrain_titlebar(&tb_box, tb_h, &workarea);
+    assert(tb_box.x == 500 && tb_box.y == 100);
+    /* 5. 仅部分超出底边与右边（未完全超出）-> 原地不动 */
+    tb_box = (struct wlr_box){ .x = 700, .y = 545, .width = 300, .height = 200 };
+    woodland_box_constrain_titlebar(&tb_box, tb_h, &workarea);
+    assert(tb_box.x == 700 && tb_box.y == 545);
+
+    /* ---------- 可用区域变化决策纯函数（最大化 / 全屏 / 贴边 / 浮动） ---------- */
+    struct wlr_box small_area = { .x = 0, .y = 40, .width = 800, .height = 520 };
+    struct wlr_box full_800 = { .x = 0, .y = 0, .width = 800, .height = 600 };
+    struct wlr_box target = {0};
+
+    /* 1. 最大化：工作区变小与变大均触发 RESIZE，已匹配则 NONE */
+    struct woodland_view tv = { .server = &server, .maximized = true };
+    struct wlr_box cur = { .x = 0, .y = 0, .width = 800, .height = 600 };
+    assert(woodland_view_workarea_target(&tv, &small_area, &full_800, &cur, &target) ==
+           WOODLAND_WORKAREA_RESIZE);
+    assert(wlr_box_equal(&target, &small_area));
+    assert(woodland_view_workarea_target(&tv, &small_area, &full_800, &small_area, &target) ==
+           WOODLAND_WORKAREA_NONE);
+    /* 面积变大（800x520 -> 800x600） */
+    assert(woodland_view_workarea_target(&tv, &full_800, &full_800, &small_area, &target) ==
+           WOODLAND_WORKAREA_RESIZE);
+    assert(wlr_box_equal(&target, &full_800));
+
+    /* 2. 全屏：有效 full_area 触发 RESIZE，无效全 0 矩形则返回 NONE（不会缩成 1x1） */
+    tv = (struct woodland_view){ .server = &server, .fullscreen = true };
+    cur = (struct wlr_box){ .x = 0, .y = 0, .width = 640, .height = 480 };
+    assert(woodland_view_workarea_target(&tv, &small_area, &full_800, &cur, &target) ==
+           WOODLAND_WORKAREA_RESIZE);
+    assert(wlr_box_equal(&target, &full_800));
+    struct wlr_box zero_box = {0};
+    assert(woodland_view_workarea_target(&tv, &small_area, &zero_box, &cur, &target) ==
+           WOODLAND_WORKAREA_NONE);
+
+    /* 3. 贴边：合法边触发 RESIZE 到对应贴边框；非法边组合直接 NONE（不掉进浮动分支） */
+    tv = (struct woodland_view){ .server = &server, .snapped_edges = WLR_EDGE_LEFT };
+    cur = (struct wlr_box){ .x = 0, .y = 0, .width = 400, .height = 600 };
+    assert(woodland_view_workarea_target(&tv, &small_area, &full_800, &cur, &target) ==
+           WOODLAND_WORKAREA_RESIZE);
+    assert(target.x == 0 && target.y == 40 && target.width == 400 && target.height == 520);
+    tv.snapped_edges = WLR_EDGE_LEFT | WLR_EDGE_RIGHT;
+    assert(woodland_view_workarea_target(&tv, &small_area, &full_800, &cur, &target) ==
+           WOODLAND_WORKAREA_NONE);
+
+    /* 4. 浮动与 grabbed_view 跳过 */
+    tv = (struct woodland_view){ .server = &server };
+    cur = (struct wlr_box){ .x = 100, .y = 0, .width = 300, .height = 200 };
+    assert(woodland_view_workarea_target(&tv, &small_area, &full_800, &cur, &target) ==
+           WOODLAND_WORKAREA_MOVE);
+    assert(target.x == 100 && target.y == 40);
+    server.grabbed_view = &tv;
+    assert(woodland_view_workarea_target(&tv, &small_area, &full_800, &cur, &target) ==
+           WOODLAND_WORKAREA_NONE);
+    server.grabbed_view = NULL;
+
+    /* ---------- 可用区域变化后同步最大化窗口与浮动窗口位置 ---------- */
+    wl_list_init(&server.views);
+    o1->usable_area = (struct wlr_box){ .x = 0, .y = 40, .width = 800, .height = 520 };
+    o1->usable_area_valid = true;
+
+    /* 最大化窗口：同步新工作区尺寸与位置 */
+    struct wlr_xdg_surface max_base = {0};
+    max_base.geometry = (struct wlr_box){ .width = 800, .height = 600 - WOODLAND_SSD_TITLEBAR_H };
+    struct wlr_xdg_toplevel max_tl = { .base = &max_base };
+    struct woodland_view max_v = {0};
+    max_v.server = &server;
+    max_v.xdg_toplevel = &max_tl;
+    max_v.mapped = true;
+    max_v.maximized = true;
+    max_v.scene_tree = wlr_scene_tree_create(&server.scene->tree);
+    wlr_scene_node_set_position(&max_v.scene_tree->node, 0, WOODLAND_SSD_TITLEBAR_H);
+    wl_list_insert(&server.views, &max_v.link);
+
+    /* SSD 浮动窗口：原本在 y=0 处，顶部新增 40px 面板后标题栏完全被盖住 -> 下移至 y=40 */
+    struct wlr_xdg_surface ssd_base = {0};
+    ssd_base.geometry = (struct wlr_box){ .width = 300, .height = 200 };
+    struct wlr_xdg_toplevel ssd_tl = { .base = &ssd_base };
+    struct woodland_view ssd_v = {0};
+    ssd_v.server = &server;
+    ssd_v.xdg_toplevel = &ssd_tl;
+    ssd_v.mapped = true;
+    ssd_v.scene_tree = wlr_scene_tree_create(&server.scene->tree);
+    wlr_scene_node_set_position(&ssd_v.scene_tree->node, 100 + margins.left, 0 + margins.top);
+    wl_list_insert(&server.views, &ssd_v.link);
+
+    /* CSD 浮动窗口：原本在 y=560 处，底部缩窄到 560 后标题栏完全在屏幕外 -> 上移露出近似 SSD 标题栏 */
+    struct wlr_xdg_surface csd_base = {0};
+    csd_base.geometry = (struct wlr_box){ .width = 300, .height = 200 };
+    struct wlr_xdg_toplevel csd_tl = { .base = &csd_base };
+    struct woodland_view csd_v = {0};
+    csd_v.server = &server;
+    csd_v.xdg_toplevel = &csd_tl;
+    csd_v.mapped = true;
+    csd_v.deco_csd = true;
+    csd_v.scene_tree = wlr_scene_tree_create(&server.scene->tree);
+    wlr_scene_node_set_position(&csd_v.scene_tree->node, 100, 560);
+    wl_list_insert(&server.views, &csd_v.link);
+
+    /* 未 mapped 视图：即使标题栏在屏幕外也不应被移动 */
+    struct wlr_xdg_surface unmapped_base = {0};
+    unmapped_base.geometry = (struct wlr_box){ .width = 300, .height = 200 };
+    struct wlr_xdg_toplevel unmapped_tl = { .base = &unmapped_base };
+    struct woodland_view unmapped_v = {0};
+    unmapped_v.server = &server;
+    unmapped_v.xdg_toplevel = &unmapped_tl;
+    unmapped_v.mapped = false;
+    unmapped_v.scene_tree = wlr_scene_tree_create(&server.scene->tree);
+    wlr_scene_node_set_position(&unmapped_v.scene_tree->node, 100, -500);
+    wl_list_insert(&server.views, &unmapped_v.link);
+
+    /* 输出正在销毁时守卫：直接跳过，不动任何视图 */
+    o1->destroying = true;
+    woodland_shell_handle_output_workarea_change(&server, o1);
+    assert(max_v.scene_tree->node.y == WOODLAND_SSD_TITLEBAR_H);
+    o1->destroying = false;
+
+    woodland_shell_handle_output_workarea_change(&server, o1);
+
+    /* 最大化窗口位置已移到 y=40 + titlebar_h */
+    assert(max_v.scene_tree->node.x == 0);
+    assert(max_v.scene_tree->node.y == 40 + WOODLAND_SSD_TITLEBAR_H);
+    /* SSD 浮动窗口外框 y 移到 40，内容 y = 40 + margins.top */
+    assert(ssd_v.scene_tree->node.x == 100 + margins.left);
+    assert(ssd_v.scene_tree->node.y == 40 + margins.top);
+    /* CSD 浮动窗口按 WOODLAND_SSD_TITLEBAR_H 近似标题栏高度拉回到 560 - WOODLAND_SSD_TITLEBAR_H */
+    assert(csd_v.scene_tree->node.x == 100);
+    assert(csd_v.scene_tree->node.y == 40 + 520 - WOODLAND_SSD_TITLEBAR_H);
+    /* 未 mapped 视图保持原位 */
+    assert(unmapped_v.scene_tree->node.y == -500);
+
+    /* 验证 layer.c 接线：woodland_layer_arrange 检测到 usable_area 恢复 800x600 后自动触发重排 */
+    woodland_layer_arrange(&server, o1);
+    assert(o1->usable_area.x == 0 && o1->usable_area.y == 0 &&
+           o1->usable_area.width == 800 && o1->usable_area.height == 600);
+    assert(max_v.scene_tree->node.x == 0);
+    assert(max_v.scene_tree->node.y == WOODLAND_SSD_TITLEBAR_H);
+
+    wl_list_remove(&unmapped_v.link);
+    wl_list_remove(&csd_v.link);
+    wl_list_remove(&ssd_v.link);
+    wl_list_remove(&max_v.link);
+    wlr_scene_node_destroy(&unmapped_v.scene_tree->node);
+    wlr_scene_node_destroy(&csd_v.scene_tree->node);
+    wlr_scene_node_destroy(&ssd_v.scene_tree->node);
+    wlr_scene_node_destroy(&max_v.scene_tree->node);
 
     woodland_output_finish(&server);
     wlr_scene_node_destroy(&server.scene->tree.node);

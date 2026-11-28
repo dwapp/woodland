@@ -119,6 +119,14 @@ void woodland_ssd_create(struct woodland_view *view);
  */
 void woodland_ssd_get_margins(struct woodland_view *view, struct woodland_ssd_margins *margins);
 
+/**
+ * 窗口标题栏的近似高度（用于约束检查）。
+ *
+ * SSD 窗口返回实际顶部装饰高度（margins.top）；CSD 或无标题栏窗口
+ * 按照当前配置的 SSD 标题栏高度近似计算。
+ */
+int woodland_ssd_approx_titlebar_height(struct woodland_view *view);
+
 /** 销毁 SSD（清空 view->ssd）。 */
 void woodland_ssd_destroy(struct woodland_view *view);
 

@@ -101,6 +101,40 @@ void woodland_view_outer_box(const struct woodland_view *view, struct wlr_box *o
 void woodland_box_constrain(struct wlr_box *box, const struct wlr_box *area);
 
 /**
+ * 约束窗口外框，确保标题栏区域不会完全超出 area 之外（纯函数）。
+ *
+ * 仅当标题栏（宽 box->width，高 titlebar_h）完全落在 area 外侧时
+ * 才将其拉回 area 内；部分露出时保持原位不动。
+ */
+void woodland_box_constrain_titlebar(struct wlr_box *box, int titlebar_h,
+                                     const struct wlr_box *area);
+
+enum woodland_workarea_action {
+    WOODLAND_WORKAREA_NONE = 0,
+    WOODLAND_WORKAREA_RESIZE, /* 全屏 / 最大化 / 贴边：应用外框几何并请求新尺寸 */
+    WOODLAND_WORKAREA_MOVE,   /* 浮动窗口：仅调整位置以保持标题栏可抓 */
+};
+
+/**
+ * 计算输出工作区变化后视图的目标外框（纯函数，无场景树/客户端副作用）。
+ *
+ * area 为输出可用工作区（布局坐标），full_area 为输出完整区域（供全屏使用），
+ * outer 为视图当前外框。返回需要执行的动作与目标外框 out。
+ */
+enum woodland_workarea_action
+woodland_view_workarea_target(struct woodland_view *view, const struct wlr_box *area,
+                              const struct wlr_box *full_area, const struct wlr_box *outer,
+                              struct wlr_box *out);
+
+/**
+ * 输出工作区（可用区域、分辨率或布局位置）变化后同步该输出上的窗口：
+ * 1. 更新最大化/全屏/贴边窗口的大小与位置；
+ * 2. 检查普通浮动窗口，确保其标题栏区域不完全超出工作区之外。
+ */
+void woodland_shell_handle_output_workarea_change(struct woodland_server *server,
+                                                  struct woodland_output *output);
+
+/**
  * 把视图拉回所在输出的工作区（拖动/输出变更/布局切换后调用）。
  *
  * 只摆位置不改尺寸：尺寸由客户端决定，硬改会让窗口在拖动中不断

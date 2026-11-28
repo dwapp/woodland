@@ -10,6 +10,7 @@
 #include "effect.h"
 #include "layer.h"
 #include "output.h"
+#include "placement.h"
 #include "protocol.h"
 #include "session_lock.h"
 #include "view.h"
@@ -55,7 +56,7 @@ static void arrange_one_layer(const struct wlr_box *full_area, struct wlr_box *u
 
 void woodland_layer_arrange(struct woodland_server *server, struct woodland_output *output)
 {
-    (void)server;
+    struct woodland_server *srv = server ? server : output->server;
     struct wlr_box full_area = {0};
     wlr_output_effective_resolution(output->wlr_output, &full_area.width, &full_area.height);
     struct wlr_box usable_area = full_area;
@@ -68,6 +69,8 @@ void woodland_layer_arrange(struct woodland_server *server, struct woodland_outp
         arrange_one_layer(&full_area, &usable_area, output->layer_tree[i], false);
     }
 
+    struct wlr_box old_usable = output->usable_area;
+    bool was_valid = output->usable_area_valid;
     output->usable_area = usable_area;
     output->usable_area_valid = true;
 
@@ -79,6 +82,14 @@ void woodland_layer_arrange(struct woodland_server *server, struct woodland_outp
     if (output->layer_popup_tree) {
         wlr_scene_node_set_position(&output->layer_popup_tree->node, output->scene_output->x,
                                     output->scene_output->y);
+    }
+
+    bool area_changed = !was_valid || old_usable.x != usable_area.x ||
+                        old_usable.y != usable_area.y ||
+                        old_usable.width != usable_area.width ||
+                        old_usable.height != usable_area.height;
+    if (area_changed) {
+        woodland_shell_handle_output_workarea_change(srv, output);
     }
 }
 

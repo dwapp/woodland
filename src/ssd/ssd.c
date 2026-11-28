@@ -408,6 +408,20 @@ void woodland_ssd_get_margins(struct woodland_view *view, struct woodland_ssd_ma
     margins->top = th + b;
 }
 
+int woodland_ssd_approx_titlebar_height(struct woodland_view *view)
+{
+    struct woodland_ssd_margins margins;
+    woodland_ssd_get_margins(view, &margins);
+    if (margins.top > 0) {
+        return margins.top;
+    }
+    if (view && view->server && view->server->config &&
+        view->server->config->ssd.titlebar_height > 0) {
+        return view->server->config->ssd.titlebar_height;
+    }
+    return WOODLAND_SSD_TITLEBAR_H;
+}
+
 static struct wlr_scene_rect *make_rect(struct wlr_scene_tree *parent, int x, int y, int w, int h,
                                         const float color[4])
 {

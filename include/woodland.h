@@ -149,6 +149,7 @@ struct woodland_server {
     struct wl_signal view_changed;
     struct wlr_output_layout *output_layout;
     struct wlr_scene_output_layout *scene_layout;
+    struct wl_listener output_layout_change;
 
     /* seat 与输入 */
     struct wlr_seat *seat;
