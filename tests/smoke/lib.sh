@@ -192,7 +192,10 @@ smoke_start_compositor() {
     unset WAYLAND_DISPLAY
     if [ -z "${XDG_CONFIG_HOME:-}" ] && [ -n "${XDG_RUNTIME_DIR:-}" ]; then
         export XDG_CONFIG_HOME="$XDG_RUNTIME_DIR/config"
-        mkdir -p "$XDG_CONFIG_HOME"
+    fi
+    if [ -n "${XDG_CONFIG_HOME:-}" ] && [ ! -e "$XDG_CONFIG_HOME/woodland/config.toml" ]; then
+        mkdir -p "$XDG_CONFIG_HOME/woodland"
+        : >"$XDG_CONFIG_HOME/woodland/config.toml"
     fi
     SMOKE_FLAGS="$*"
     "$BIN" "$@" >"$SMOKE_LOG" 2>&1 &
