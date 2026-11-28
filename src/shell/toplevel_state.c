@@ -242,8 +242,19 @@ static void xdg_toplevel_request_show_window_menu(struct wl_listener *listener, 
 {
     struct woodland_view *view = wl_container_of(listener, view, request_show_window_menu);
     struct wlr_xdg_toplevel_show_window_menu_event *event = data;
-    double lx = (view->scene_tree ? view->scene_tree->node.x : 0) + event->x;
-    double ly = (view->scene_tree ? view->scene_tree->node.y : 0) + event->y;
+    /*
+     * xdg_toplevel.show_window_menu 的 x/y 是相对 wl_surface 原点（含客户端
+     * CSD 阴影边距 geometry.x/y），而 view->scene_tree 位于 window geometry 原点，
+     * surface_tree 在其内部偏移 (-geometry.x, -geometry.y)。不减去边距会把
+     * 窗口菜单向右下多推一个阴影宽度。
+     */
+    int geo_x = 0, geo_y = 0;
+    if (view->xdg_toplevel && view->xdg_toplevel->base) {
+        geo_x = view->xdg_toplevel->base->geometry.x;
+        geo_y = view->xdg_toplevel->base->geometry.y;
+    }
+    double lx = (view->scene_tree ? view->scene_tree->node.x : 0) + event->x - geo_x;
+    double ly = (view->scene_tree ? view->scene_tree->node.y : 0) + event->y - geo_y;
     woodland_window_menu_show(view, lx, ly);
 }
 
