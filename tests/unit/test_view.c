@@ -327,19 +327,29 @@ int main(void)
     };
     struct wlr_box place;
 
-    /* 无层叠：内容原点 = 工作区原点 + (left, top) */
+    /* 无层叠：外框居中于工作区 */
     woodland_view_placement(&max_geo2, 400, 300, &margins, 0, &place);
-    assert(place.x == 10 + margins.left && place.y == 10 + margins.top);
+    int place_outer_w = 400 + margins.left + margins.right;
+    int place_outer_h = 300 + margins.top + margins.bottom;
+    int center_x = 10 + (780 - place_outer_w) / 2 + margins.left;
+    int center_y = 10 + (580 - place_outer_h) / 2 + margins.top;
+    assert(place.x == center_x && place.y == center_y);
     assert(place.width == 400 && place.height == 300);
 
-    /* 层叠偏移 32：整体右移下移 32 */
+    /* 层叠偏移 32：在居中起点基础上右移下移 32 */
     woodland_view_placement(&max_geo2, 400, 300, &margins, 32, &place);
-    assert(place.x == 10 + margins.left + 32 && place.y == 10 + margins.top + 32);
+    assert(place.x == center_x + 32 && place.y == center_y + 32);
 
-    /* 偏移过大：回贴工作区右下，外框右/下边缘正好贴住工作区边界 */
-    woodland_view_placement(&max_geo2, 400, 300, &margins, 1000, &place);
-    assert(place.x + place.width + margins.right == 10 + 780);
-    assert(place.y + place.height + margins.bottom == 10 + 580);
+    /* 右下满了：从工作区左上继续打开，且外框不超出工作区 */
+    int avail_x = 780 - place_outer_w;
+    int avail_y = 580 - place_outer_h;
+    int max_cascade = (avail_x - avail_x / 2) < (avail_y - avail_y / 2)
+                          ? (avail_x - avail_x / 2)
+                          : (avail_y - avail_y / 2);
+    woodland_view_placement(&max_geo2, 400, 300, &margins, max_cascade + 32, &place);
+    assert(place.x == 10 + 32 + margins.left && place.y == 10 + 32 + margins.top);
+    assert(place.x + place.width + margins.right <= 10 + 780);
+    assert(place.y + place.height + margins.bottom <= 10 + 580);
 
     /* 内容比工作区还大：贴回左上，不外溢到负坐标 */
     woodland_view_placement(&max_geo2, 1000, 800, &margins, 0, &place);

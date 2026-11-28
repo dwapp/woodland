@@ -164,12 +164,15 @@ color_count_near() {
         | sed -n 's/^ *\([0-9][0-9]*\):.*#FF00FF.*/\1/p' | head -1
 }
 
-n="$(color_count_near "$WORK/managed.png" "400x32+0+0" "$TITLEBAR" 1%)"
+title_crop="$("$WCTL" -s "$SOCK" get_tree 2>/dev/null \
+    | jq -r 'first(.views[] | select(.ssd.present and .activated) | "\(.outer[2])x32+\(.outer[0])+\(.outer[1])") // empty')"
+[ -n "${title_crop:-}" ] || smoke_fail "wctl did not report outer geometry"
+n="$(color_count_near "$WORK/managed.png" "$title_crop" "$TITLEBAR" 1%)"
 [ -n "${n:-}" ] && [ "$n" -gt 1000 ] || {
     echo "no SSD titlebar pixels at top of the X11 window" \
-         "(got '${n:-0}' of $TITLEBAR, which wctl says this window uses)" >&2
-    echo "--- dominant colors in the top 400x32 strip:" >&2
-    convert "$WORK/managed.png" -crop 400x32+0+0 +repage -format %c histogram:info:- 2>/dev/null \
+         "(got '${n:-0}' of $TITLEBAR in $title_crop, which wctl says this window uses)" >&2
+    echo "--- dominant colors in $title_crop:" >&2
+    convert "$WORK/managed.png" -crop "$title_crop" +repage -format %c histogram:info:- 2>/dev/null \
         | sort -rn | head -5 >&2 || true
     exit 1
 }
