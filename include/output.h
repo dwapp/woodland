@@ -22,15 +22,18 @@ struct woodland_output {
     struct wlr_scene_optimized_blur *optimized_blur; // background 层之上的预模糊缓存节点
     struct wlr_box usable_area;        // 扣除 exclusive zone 后的可用区域
     bool usable_area_valid;            // usable_area 是否已被 arrange 初始化
+    bool destroying;                   // 输出正在销毁，跳过对窗口的副作用同步
     /*
-     * 上一次 commit 时的缩放。
+     * 上一次 commit 时的缩放与逻辑分辨率（mode/transform 均会反映到有效分辨率）。
      *
-     * `wlr_output->scale` 有三条改动路径（backend 的 request_state、
+     * `wlr_output->scale` 与分辨率有三条改动路径（backend 的 request_state、
      * output-management 的 apply、配置重载），只有第一条会发 request_state，
-     * 但三条都会以一次成功的 commit 收尾，所以缩放相关的重刷挂在 commit 上、
-     * 用这个字段当闸门——commit 每帧都发，不比对就等于每帧重排全部 SSD。
+     * 但三条都会以一次成功的 commit 收尾，所以相关重刷挂在 commit 上、
+     * 用这三个字段当闸门——commit 每帧都发，不比对就等于每帧重排全部 SSD 与工作区。
      */
     float last_scale;
+    int last_eff_width;
+    int last_eff_height;
     struct wl_listener frame;
     struct wl_listener request_state;
     struct wl_listener commit;

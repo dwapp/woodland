@@ -265,6 +265,35 @@ void woodland_box_constrain(struct wlr_box *box, const struct wlr_box *area)
     }
 }
 
+void woodland_box_constrain_titlebar(struct wlr_box *box, int titlebar_h,
+                                     const struct wlr_box *area)
+{
+    if (!box || !area || area->width <= 0 || area->height <= 0) {
+        return;
+    }
+    if (titlebar_h < 1) {
+        titlebar_h = 1;
+    }
+    if (box->height > 0 && titlebar_h > box->height) {
+        titlebar_h = box->height;
+    }
+
+    /* 水平方向：仅当标题栏完全超出工作区左右边界时才拉回 */
+    if (box->x + box->width <= area->x) {
+        box->x = area->x;
+    } else if (box->x >= area->x + area->width) {
+        box->x = (box->width <= area->width) ? (area->x + area->width - box->width) : area->x;
+    }
+
+    /* 垂直方向：仅当标题栏完全超出工作区上下边界时才拉回 */
+    if (box->y + titlebar_h <= area->y) {
+        box->y = area->y;
+    } else if (box->y >= area->y + area->height) {
+        int y = area->y + area->height - titlebar_h;
+        box->y = y >= area->y ? y : area->y;
+    }
+}
+
 void woodland_view_constrain(struct woodland_view *view)
 {
     struct woodland_output *wo = woodland_output_for_view(view);
@@ -1057,5 +1086,97 @@ void woodland_view_size_limits(const struct woodland_view *view, int *min_w, int
             }
         }
 #endif
+    }
+}
+
+enum woodland_workarea_action
+woodland_view_workarea_target(struct woodland_view *view, const struct wlr_box *area,
+                              const struct wlr_box *full_area, const struct wlr_box *outer,
+                              struct wlr_box *out)
+{
+    if (!view || !area || !outer || !out || area->width <= 0 || area->height <= 0) {
+        return WOODLAND_WORKAREA_NONE;
+    }
+
+    if (view->fullscreen) {
+        if (!full_area || full_area->width <= 0 || full_area->height <= 0 ||
+            wlr_box_equal(outer, full_area)) {
+            return WOODLAND_WORKAREA_NONE;
+        }
+        *out = *full_area;
+        return WOODLAND_WORKAREA_RESIZE;
+    }
+
+    if (view->maximized) {
+        if (wlr_box_equal(outer, area)) {
+            return WOODLAND_WORKAREA_NONE;
+        }
+        *out = *area;
+        return WOODLAND_WORKAREA_RESIZE;
+    }
+
+    if (view->snapped_edges != 0) {
+        struct wlr_box tile;
+        if (!woodland_snap_tile_box(area, view->snapped_edges, &tile) ||
+            wlr_box_equal(outer, &tile)) {
+            return WOODLAND_WORKAREA_NONE;
+        }
+        *out = tile;
+        return WOODLAND_WORKAREA_RESIZE;
+    }
+
+    if (view->server && view->server->grabbed_view == view) {
+        return WOODLAND_WORKAREA_NONE;
+    }
+
+    struct wlr_box moved = *outer;
+    int titlebar_h = woodland_ssd_approx_titlebar_height(view);
+    woodland_box_constrain_titlebar(&moved, titlebar_h, area);
+    if (moved.x == outer->x && moved.y == outer->y) {
+        return WOODLAND_WORKAREA_NONE;
+    }
+    *out = moved;
+    return WOODLAND_WORKAREA_MOVE;
+}
+
+void woodland_shell_handle_output_workarea_change(struct woodland_server *server,
+                                                  struct woodland_output *output)
+{
+    if (!server || !output || output->destroying || !output->wlr_output ||
+        !output->wlr_output->enabled || !server->views.next) {
+        return;
+    }
+    struct wlr_box area;
+    woodland_output_workarea(output, &area);
+    if (area.width <= 0 || area.height <= 0) {
+        return;
+    }
+    struct wlr_box full_area =
+        woodland_view_fullscreen_geometry(server, output->wlr_output);
+
+    struct woodland_view *view;
+    wl_list_for_each(view, &server->views, link)
+    {
+        if (!view->mapped || !view->scene_tree) {
+            continue;
+        }
+        if (woodland_output_for_view(view) != output) {
+            continue;
+        }
+
+        struct wlr_box outer;
+        woodland_view_outer_box(view, &outer);
+        struct wlr_box target;
+        enum woodland_workarea_action action =
+            woodland_view_workarea_target(view, &area, &full_area, &outer, &target);
+
+        if (action == WOODLAND_WORKAREA_RESIZE) {
+            woodland_view_apply_outer_geometry(view, &target);
+        } else if (action == WOODLAND_WORKAREA_MOVE) {
+            wlr_scene_node_set_position(&view->scene_tree->node,
+                                        view->scene_tree->node.x + (target.x - outer.x),
+                                        view->scene_tree->node.y + (target.y - outer.y));
+            woodland_view_update_outputs(view);
+        }
     }
 }

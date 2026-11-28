@@ -16,6 +16,7 @@
 #include "layer.h"
 #include "output.h"
 #include "output_config.h"
+#include "placement.h"
 #include "session_lock.h"
 #include "trace.h"
 #include "view.h"
@@ -208,11 +209,22 @@ static void handle_frame(struct wl_listener *listener, void *data)
 static void handle_commit(struct wl_listener *listener, void *data)
 {
     struct woodland_output *output = wl_container_of(listener, output, commit);
-    if (!output->wlr_output || output->wlr_output->scale == output->last_scale) {
+    if (!output->wlr_output) {
+        return;
+    }
+    int eff_w = 0, eff_h = 0;
+    wlr_output_effective_resolution(output->wlr_output, &eff_w, &eff_h);
+    if (output->wlr_output->scale == output->last_scale &&
+        eff_w == output->last_eff_width && eff_h == output->last_eff_height) {
         return;
     }
     output->last_scale = output->wlr_output->scale;
+    output->last_eff_width = eff_w;
+    output->last_eff_height = eff_h;
     woodland_output_refresh_all(output->server);
+    if (output->wlr_output->enabled && output->scene_output) {
+        woodland_layer_arrange(output->server, output);
+    }
     (void)data;
 }
 
@@ -220,17 +232,44 @@ static void handle_request_state(struct wl_listener *listener, void *data)
 {
     struct woodland_output *output = wl_container_of(listener, output, request_state);
     const struct wlr_output_event_request_state *event = data;
+    /* wlr_output_commit_state 会同步 emit events.commit，由 handle_commit 统一做闸门比对与刷新 */
     wlr_output_commit_state(output->wlr_output, event->state);
-    /* 缩放可能变了：光标主题/SSD/滤波/所属输出一起按新参数重算 */
-    woodland_output_refresh_all(output->server);
-    /* 刚按当前缩放全量刷过，同步闸门，免得随后的 commit 再刷一遍 */
-    output->last_scale = output->wlr_output->scale;
+}
+
+static void handle_output_layout_change(struct wl_listener *listener, void *data)
+{
+    struct woodland_server *server = wl_container_of(listener, server, output_layout_change);
+    if (!server || !server->outputs.next) {
+        return;
+    }
+    struct woodland_output *output;
+    wl_list_for_each(output, &server->outputs, link)
+    {
+        if (!output->wlr_output || !output->wlr_output->enabled || !output->scene_output ||
+            output->destroying) {
+            continue;
+        }
+        /*
+         * layer tree 挂在 server->scene->tree 下，位置只在 arrange 里按
+         * scene_output->x/y 同步；纯位移（wlr-randr --pos）既不改 usable_area
+         * 也不产生 commit，不在这里补一次 arrange，顶栏/壁纸会留在旧坐标。
+         */
+        woodland_layer_arrange(server, output);
+        /*
+         * 纯位移时 usable_area 不变，arrange 内部的 area_changed 闸门不会放行，
+         * 窗口不会跟着平移，所以这里必须显式再来一次。该函数对每个视图都比对
+         * 目标外框，重复调用是幂等的。
+         */
+        woodland_shell_handle_output_workarea_change(server, output);
+    }
+    (void)data;
 }
 
 static void handle_destroy(struct wl_listener *listener, void *data)
 {
     struct woodland_output *output = wl_container_of(listener, output, destroy);
     struct woodland_server *server = output->server;
+    output->destroying = true;
     /* 先清理预模糊节点、各 layer surface 与 layer tree */
     woodland_effect_output_destroy(output);
     for (int i = 0; i < 4; i++) {
@@ -316,6 +355,8 @@ static void handle_new_output(struct wl_listener *listener, void *data)
     output->wlr_output = wlr_output;
     /* 建的时候就是当前缩放，别让第一次 commit 白刷一遍全量 */
     output->last_scale = wlr_output->scale;
+    wlr_output_effective_resolution(wlr_output, &output->last_eff_width,
+                                    &output->last_eff_height);
     wlr_output->data = output;
     uint64_t used_bits = 0;
     struct woodland_output *it;
@@ -422,6 +463,9 @@ static void handle_new_output(struct wl_listener *listener, void *data)
         wlr_log(WLR_ERROR, "failed to commit output state");
     }
     wlr_output_state_finish(&state);
+    output->last_scale = wlr_output->scale;
+    wlr_output_effective_resolution(wlr_output, &output->last_eff_width,
+                                    &output->last_eff_height);
 
     /* commit 之后还要再广播一次（enabled/mode 这时才是真值），
      * 由 server.c 的 new_output 后置监听器负责：output 层不该反过来
@@ -481,15 +525,25 @@ bool woodland_output_init(struct woodland_server *server)
 
     woodland_listener_connect(&server->new_output, &server->backend->events.new_output,
                               handle_new_output, "output.new_output");
+    woodland_listener_connect(&server->output_layout_change,
+                              &server->output_layout->events.change,
+                              handle_output_layout_change, "output.layout_change");
 
     return true;
 }
 
 void woodland_output_finish(struct woodland_server *server)
 {
-    /* output_layout 非空 ⇔ init 走完全部步骤 ⇔ new_output 已接线 */
-    if (server->output_layout) {
+    /*
+     * 不能拿 output_layout 非空当"init 走完了"的判据：init 在 xdg-output
+     * manager 创建失败时 return false，那时 output_layout 已经建好，但这两个
+     * 监听器还没接线。逐条看 link.prev，未接线的直接跳过（同 server_finish）。
+     */
+    if (server->new_output.link.prev) {
         wl_list_remove(&server->new_output.link);
+    }
+    if (server->output_layout_change.link.prev) {
+        wl_list_remove(&server->output_layout_change.link);
     }
 
     /* 释放所有 woodland_output 并摘除其在 wlr_output 上的监听器。

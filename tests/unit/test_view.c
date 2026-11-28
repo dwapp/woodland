@@ -647,6 +647,14 @@ int main(void)
 #endif
 
 
+    /*
+     * arrange 才是 usable_area 的所有者：上面加第二个输出会触发 layout change，
+     * 现在 layout change 里会重排 layer（顺带重算 usable_area），手工模拟的
+     * 独占区因此被重置回 800x600。贴边预览要按 780 宽的一半算，这里补回来。
+     */
+    wo->usable_area = (struct wlr_box){.x = 10, .y = 10, .width = 780, .height = 580};
+    wo->usable_area_valid = true;
+
     /* ---------- 贴边预览（snap preview）测试 ---------- */
     struct woodland_config cfg = {0};
     cfg.general.snap_preview = true;
