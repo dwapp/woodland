@@ -29,7 +29,8 @@ unset WAYLAND_DISPLAY
 export XDG_RUNTIME_DIR="$(mktemp -d)"
 export XDG_CONFIG_HOME="$XDG_RUNTIME_DIR/config"
 export XDG_DATA_HOME="$XDG_RUNTIME_DIR/data"
-mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME"
+mkdir -p "$XDG_CONFIG_HOME/woodland" "$XDG_DATA_HOME"
+: >"$XDG_CONFIG_HOME/woodland/config.toml"
 
 export WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_HEADLESS_OUTPUTS=1
 SMOKE_FLAGS="--trace"
