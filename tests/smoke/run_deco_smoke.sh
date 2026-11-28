@@ -257,9 +257,9 @@ echo "== 矮标题栏：按钮符号不溢出标题栏、不被压扁 =="
 # y=-20 一直画到 +12，等于压在客户端内容上；按 (bwn, bh) 设 dest 又会把
 # □ / × 压扁。这里读场景树实测，不靠肉眼。
 mkdir -p "$XDG_CONFIG_HOME/woodland"
-cat >"$XDG_CONFIG_HOME/woodland/config.toml" <<'EOF'
-[decorations]
-titlebar_height = 20
+: >"$XDG_CONFIG_HOME/woodland/config.toml"
+cat >"$XDG_CONFIG_HOME/woodland/appearance.json" <<'EOF'
+{"titlebar_height":20}
 EOF
 "$WCTL" -s "$SOCK" reload_config >/dev/null || smoke_fail "reload_config failed (titlebar_height = 20)"
 scenario short_titlebar

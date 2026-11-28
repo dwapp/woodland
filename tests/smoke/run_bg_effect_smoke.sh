@@ -58,7 +58,9 @@ start_compositor() {
 [effects]
 enabled = $1
 blur = true
-corner_radius = 12
+EOF
+    cat >"$XDG_CONFIG_HOME/woodland/appearance.json" <<EOF
+{"corner_radius":12}
 EOF
     SMOKE_LOG="$XDG_RUNTIME_DIR/compositor.$2.log"
     "$BIN" --self-check --trace >"$SMOKE_LOG" 2>&1 &
