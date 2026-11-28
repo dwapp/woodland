@@ -294,37 +294,24 @@ void woodland_view_placement(const struct wlr_box *area, int content_w, int cont
 {
     int outer_w = content_w + margins->left + margins->right;
     int outer_h = content_h + margins->top + margins->bottom;
+    int avail_x = area->width - outer_w;
+    int avail_y = area->height - outer_h;
+    int base_x = avail_x > 0 ? avail_x / 2 : 0;
+    int base_y = avail_y > 0 ? avail_y / 2 : 0;
+    int rem_x = avail_x > base_x ? avail_x - base_x : 0;
+    int rem_y = avail_y > base_y ? avail_y - base_y : 0;
+    int max_cascade = rem_x < rem_y ? rem_x : rem_y;
 
-    int x = area->x + cascade;
-    int y = area->y + cascade;
-    int max_x = area->x + area->width - outer_w;
-    int max_y = area->y + area->height - outer_h;
-    if (x > max_x) {
-        x = max_x;
+    int x, y;
+    if (cascade <= max_cascade) {
+        x = area->x + base_x + cascade;
+        y = area->y + base_y + cascade;
+    } else {
+        int min_avail = avail_x < avail_y ? avail_x : avail_y;
+        int offset = min_avail > 0 ? (cascade - max_cascade) % (min_avail + 1) : 0;
+        x = area->x + offset;
+        y = area->y + offset;
     }
-    if (y > max_y) {
-        y = max_y;
-    }
-    if (x < area->x) {
-        x = area->x;
-    }
-    if (y < area->y) {
-        y = area->y;
-    }
-
-    out->x = x + margins->left;
-    out->y = y + margins->top;
-    out->width = content_w;
-    out->height = content_h;
-}
-
-void woodland_placement_center(const struct wlr_box *area, int content_w, int content_h,
-                               const struct woodland_ssd_margins *margins, struct wlr_box *out)
-{
-    int outer_w = content_w + margins->left + margins->right;
-    int outer_h = content_h + margins->top + margins->bottom;
-    int x = area->x + (area->width - outer_w) / 2;
-    int y = area->y + (area->height - outer_h) / 2;
 
     struct wlr_box outer = {
         .x = x,
@@ -338,6 +325,12 @@ void woodland_placement_center(const struct wlr_box *area, int content_w, int co
     out->y = outer.y + margins->top;
     out->width = content_w;
     out->height = content_h;
+}
+
+void woodland_placement_center(const struct wlr_box *area, int content_w, int content_h,
+                               const struct woodland_ssd_margins *margins, struct wlr_box *out)
+{
+    woodland_view_placement(area, content_w, content_h, margins, 0, out);
 }
 
 void woodland_placement_cursor(const struct wlr_box *area, double cursor_x, double cursor_y,

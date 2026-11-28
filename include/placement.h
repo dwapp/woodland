@@ -113,8 +113,9 @@ void woodland_view_constrain(struct woodland_view *view);
 /**
  * 计算新窗口的内容原点（布局坐标）。
  *
- * area 为可用工作区，content_w/h 为客户端内容尺寸，margins 为 SSD 外扩，
- * cascade 为层叠偏移像素。外框（内容 + margins）整体落在 area 内，
+ * 从工作区居中位置起按 cascade 像素向右下层叠偏移，右下放不下时从工作区
+ * 左上继续层叠；area 为可用工作区，content_w/h 为客户端内容尺寸，margins
+ * 为 SSD 外扩，cascade 为层叠偏移像素。外框（内容 + margins）整体落在 area 内，
  * 这样标题栏不会被输出边缘裁掉。
  */
 void woodland_view_placement(const struct wlr_box *area,
